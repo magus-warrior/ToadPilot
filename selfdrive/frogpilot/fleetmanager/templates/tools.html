@@ -1,0 +1,1140 @@
+{% extends "layout.html" %}
+
+{% block title %}
+Tools
+{% endblock %}
+
+{% block main %}
+<style>
+  button {
+    margin-top: 10px;
+    font-size: 1em;
+    padding: 8px 16px;
+  }
+
+  .toggle_values {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    flex-wrap: wrap;
+  }
+
+  .toggle-values-btn {
+  }
+
+  .textarea-container {
+    width: 80%;
+    margin-top: 20px;
+  }
+
+  textarea {
+    width: 100%;
+    height: 200px;
+  }
+
+  .separator {
+    width: 100%;
+    border-top: 1px solid #ccc;
+    margin: 10px 0;
+  }
+
+  .door-control {
+    width: 80%;
+    text-align: center;
+  }
+
+  .door-indicator {
+    font-size: 2em;
+    font-weight: normal;
+    margin-bottom: 10px;
+  }
+
+  .toggle_values h1 {
+    font-size: 2em;
+    font-weight: normal;
+    margin-bottom: 10px;
+  }
+
+  .door-btn {
+  }
+
+  .toadpilot-panel {
+    width: min(940px, 94%);
+    padding: 20px;
+    border: 1px solid rgba(127, 127, 127, 0.45);
+    border-radius: 14px;
+    background: rgba(127, 127, 127, 0.08);
+    text-align: left;
+  }
+
+  .toadpilot-heading {
+    text-align: center;
+  }
+
+  .toadpilot-heading h1 {
+    margin-bottom: 6px;
+  }
+
+  .toadpilot-description {
+    margin: 0 auto 12px;
+    max-width: 760px;
+  }
+
+  .toadpilot-boundary {
+    margin: 14px 0;
+    padding: 12px 14px;
+    border-left: 4px solid #1e87f0;
+    border-radius: 5px;
+    background: rgba(30, 135, 240, 0.10);
+  }
+
+  .toadpilot-config-grid,
+  .toadpilot-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px;
+  }
+
+  .toadpilot-field,
+  .toadpilot-check {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid rgba(127, 127, 127, 0.32);
+    border-radius: 8px;
+  }
+
+  .toadpilot-field select {
+    min-width: 150px;
+    padding: 6px;
+  }
+
+  .toadpilot-check input {
+    width: 21px;
+    height: 21px;
+    flex: 0 0 auto;
+  }
+
+  .toadpilot-profile-help {
+    min-height: 42px;
+    margin: 12px 2px 4px;
+  }
+
+  .toadpilot-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .toadpilot-message {
+    min-height: 24px;
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  .toadpilot-message.error {
+    color: #d64040;
+  }
+
+  .toadpilot-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, 0.25);
+  }
+
+  .toadpilot-badge.supported {
+    background: rgba(50, 170, 80, 0.22);
+  }
+
+  .toadpilot-badge.unsupported {
+    background: rgba(214, 64, 64, 0.20);
+  }
+
+  .toadpilot-badge.offline {
+    background: rgba(214, 157, 64, 0.22);
+  }
+
+  .toadpilot-status-grid {
+    margin-top: 16px;
+  }
+
+  .toadpilot-status-card {
+    padding: 12px 14px;
+    border: 1px solid rgba(127, 127, 127, 0.32);
+    border-radius: 8px;
+  }
+
+  .toadpilot-status-card h3 {
+    margin: 0 0 10px;
+  }
+
+  .toadpilot-status-card dl {
+    display: grid;
+    grid-template-columns: minmax(100px, 0.8fr) minmax(120px, 1.2fr);
+    gap: 5px 10px;
+    margin: 0;
+  }
+
+  .toadpilot-status-card dt {
+    font-weight: 600;
+  }
+
+  .toadpilot-status-card dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .toadpilot-observe-note,
+  .toadpilot-legacy-notice {
+    margin-top: 10px;
+    font-size: 0.9em;
+    opacity: 0.82;
+  }
+
+  .start-ramp-control {
+    display: grid;
+    grid-template-columns: minmax(210px, 1fr) auto;
+    gap: 10px 18px;
+    align-items: center;
+    margin-top: 16px;
+    padding: 14px;
+    border: 1px solid rgba(127, 127, 127, 0.32);
+    border-radius: 8px;
+  }
+
+  .start-ramp-control input[type="range"] {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .start-ramp-readout {
+    min-width: 128px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .start-ramp-note,
+  .start-ramp-state {
+    margin: 10px 2px 0;
+  }
+
+  @media (max-width: 560px) {
+    .start-ramp-control {
+      grid-template-columns: 1fr;
+    }
+
+    .start-ramp-readout {
+      text-align: left;
+    }
+  }
+</style>
+
+<div class="toggle_values">
+  <div class="door-control">
+    <div class="door-indicator">
+      Lock/Unlock Doors (Toyota/Lexus Only)
+    </div>
+    <button type="button" id="lockButton" class="door-btn">
+      Lock Doors
+    </button>
+    <button type="button" id="unlockButton" class="door-btn">
+      Unlock Doors
+    </button>
+  </div>
+
+  <div class="separator"></div>
+
+  <div class="toadpilot-panel" aria-labelledby="toadpilotTitle">
+    <div class="toadpilot-heading">
+      <h1 id="toadpilotTitle">TOADPILOT</h1>
+      <p class="toadpilot-description">
+        Camry TSS2 torque-control experiments with independent controls for observation, learned tuning,
+        curve assistance, lane centering, and warning behavior.
+      </p>
+      <span id="toadSupportBadge" class="toadpilot-badge">Checking vehicle...</span>
+    </div>
+
+    <div class="toadpilot-boundary">
+      <strong>Existing authority, used better.</strong>
+      Full Existing Authority can request the stock controller's full normalized output, but it never raises
+      Toyota's 1500-unit steering command, rate limits, measured-torque guard, or Panda safety limits.
+    </div>
+
+    <div class="toadpilot-config-grid">
+      <label class="toadpilot-check" for="toadEnabled">
+        <span><strong>Enable TOADPILOT</strong><br><small>Default on; may be configured offline, while unsupported cars remain stock.</small></span>
+        <input type="checkbox" id="toadEnabled" checked>
+      </label>
+
+      <label class="toadpilot-field" for="toadProfile">
+        <span><strong>Profile</strong></span>
+        <select id="toadProfile">
+          <option value="observe">Observe</option>
+          <option value="adaptive" selected>Adaptive</option>
+          <option value="full">Full Existing Authority</option>
+        </select>
+      </label>
+
+      <label class="toadpilot-check" for="toadAutoTune">
+        <span><strong>Auto-tune</strong><br><small>Adaptive/Full linear control only; full NNFF suspends it.</small></span>
+        <input type="checkbox" id="toadAutoTune" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadLaneCentering">
+        <span><strong>Lane centering assist</strong><br><small>Default on; adds a small, confidence-gated path correction in Adaptive/Full.</small></span>
+        <input type="checkbox" id="toadLaneCentering" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadSmoothLaneTransitions">
+        <span><strong>Smooth lane transitions</strong><br><small>Default on; softens lane-centering handoffs while preserving immediate safety gates.</small></span>
+        <input type="checkbox" id="toadSmoothLaneTransitions" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadExperimentalSteeringResponse">
+        <span><strong>Experimental Camry steering response</strong><br><small>Research request only, default off. Requires confirmed offroad save and reboot; stock limits stay active until a matched controller/Panda bundle reports effective.</small></span>
+        <input type="checkbox" id="toadExperimentalSteeringResponse">
+      </label>
+
+      <label class="toadpilot-check" for="toadExperimentalAssist">
+        <span><strong>Curve assist in Experimental</strong><br><small>Off pauses curve feed-forward assistance; confidence-gated lane centering remains independent.</small></span>
+        <input type="checkbox" id="toadExperimentalAssist">
+      </label>
+
+      <label class="toadpilot-check" for="toadSmartWarning">
+        <span><strong>Smart saturation warning</strong><br><small>Debounce brief peaks; sustained saturation still warns.</small></span>
+        <input type="checkbox" id="toadSmartWarning" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadTelemetry">
+        <span><strong>Runtime telemetry</strong><br><small>Publish controller and observer status to shared memory.</small></span>
+        <input type="checkbox" id="toadTelemetry" checked>
+      </label>
+    </div>
+
+    <p id="toadProfileHelp" class="toadpilot-profile-help"></p>
+
+    <div class="toadpilot-actions">
+      <button type="button" id="toadSaveButton">Save TOADPILOT Settings</button>
+      <button type="button" id="toadRefreshButton">Refresh Status</button>
+      <button type="button" id="toadResetTuneButton">Reset Learned Tune</button>
+    </div>
+    <div id="toadMessage" class="toadpilot-message" role="status" aria-live="polite"></div>
+
+    <div class="toadpilot-status-grid">
+      <section class="toadpilot-status-card">
+        <h3>Vehicle &amp; authority</h3>
+        <dl>
+          <dt>Fingerprint</dt><dd id="toadFingerprint">Waiting...</dd>
+          <dt>Effective</dt><dd id="toadEffective">Waiting...</dd>
+          <dt>Lateral control</dt><dd id="toadLateralControl">Waiting...</dd>
+          <dt>Hard limits</dt><dd id="toadHardLimits">Waiting...</dd>
+          <dt>Steering research</dt><dd id="toadSteeringExperiment">Waiting...</dd>
+        </dl>
+      </section>
+
+      <section class="toadpilot-status-card">
+        <h3>Cached auto-tune learner</h3>
+        <dl>
+          <dt>Validity</dt><dd id="toadLearnerValidity">Waiting...</dd>
+          <dt>Factor</dt><dd id="toadLearnerFactor">Waiting...</dd>
+          <dt>Offset</dt><dd id="toadLearnerOffset">Waiting...</dd>
+          <dt>Friction</dt><dd id="toadLearnerFriction">Waiting...</dd>
+          <dt>Stock reference</dt><dd id="toadStockTune">Waiting...</dd>
+          <dt>Points</dt><dd id="toadLearnerPoints">Waiting...</dd>
+        </dl>
+      </section>
+
+      <section class="toadpilot-status-card">
+        <h3>Live controller</h3>
+        <dl>
+          <dt>Requested steer</dt><dd id="toadRequestedSteer">Waiting for controller...</dd>
+          <dt>Residual assist</dt><dd id="toadResidualAssist">Waiting for controller...</dd>
+          <dt>Tracking error</dt><dd id="toadTrackingError">Waiting for controller...</dd>
+          <dt>Saturation</dt><dd id="toadSaturation">Waiting for controller...</dd>
+          <dt>Lane centering</dt><dd id="toadLaneCenteringState">Waiting for controller...</dd>
+          <dt>Feed-forward</dt><dd id="toadFeedforward">Waiting...</dd>
+          <dt>Experimental</dt><dd id="toadExperimentalState">Waiting...</dd>
+        </dl>
+      </section>
+
+      <section class="toadpilot-status-card">
+        <h3>High-authority observer</h3>
+        <div id="toadObserverStatus">Waiting for observe-only samples...</div>
+        <p class="toadpilot-observe-note">
+          Preliminary diagnostics only; never applied to tune. Lane-change/model/steer-limit context is not labeled yet.
+        </p>
+      </section>
+    </div>
+
+    <p id="toadLegacyNotice" class="toadpilot-legacy-notice" hidden>
+      The old ToyotaPerformanceMode prototype key is still set, but it is ignored. TOADPILOT uses only the saved controls above.
+    </p>
+  </div>
+
+  <div class="separator"></div>
+
+  <div class="toadpilot-panel" aria-labelledby="startRampTitle">
+    <div class="toadpilot-heading">
+      <h1 id="startRampTitle">Camry Start Acceleration Ramp</h1>
+      <p class="toadpilot-description">
+        Optional low-speed launch assistance for Camry TSS2 openpilot longitudinal control.
+      </p>
+      <span id="startRampSupportBadge" class="toadpilot-badge">Checking vehicle...</span>
+    </div>
+
+    <div class="toadpilot-boundary">
+      <strong>The stop-release correction is always active.</strong>
+      This slider only adds a ramped acceleration floor after a real stopped-to-go transition, while the planner
+      is already requesting forward acceleration. It cannot bypass a stop, brake input, or cruise standstill.
+    </div>
+
+    <div class="start-ramp-control">
+      <label for="startRampSlider">
+        <strong>Start acceleration floor</strong><br>
+        <small>Fades out by 2.0 m/s (about 4.5 mph).</small>
+      </label>
+      <output id="startRampReadout" class="start-ramp-readout" for="startRampSlider">0.00 m/s² · Off</output>
+      <input type="range" id="startRampSlider" min="0" max="1" step="0.05" value="0">
+    </div>
+
+    <p class="start-ramp-note">
+      Default: <strong>0.00 m/s² (off)</strong>. Changes are locked while the device reports onroad.
+    </p>
+    <p id="startRampState" class="start-ramp-state">Loading saved setting...</p>
+
+    <div class="toadpilot-actions">
+      <button type="button" id="startRampSaveButton">Save Start Ramp</button>
+      <button type="button" id="startRampRefreshButton">Refresh</button>
+    </div>
+    <div id="startRampMessage" class="toadpilot-message" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="separator"></div>
+
+  <h1>Backup/Restore Toggle Values</h1>
+  <div class="textarea-container">
+    <textarea id="toggleValuesBox" placeholder="Retrieve or restore toggle values."></textarea>
+    <button type="button" id="retrieveButton" class="toggle-values-btn">
+      Retrieve Toggle Values
+    </button>
+    <button type="button" id="restoreButton" class="toggle-values-btn">
+      Submit Toggle Values
+    </button>
+  </div>
+
+  <div class="separator"></div>
+
+  <h1>Reset Toggle Values</h1>
+  <div class="textarea-container">
+    <button type="button" id="resetButton" class="toggle-values-btn">
+      Reset Toggle Values
+    </button>
+  </div>
+
+  <div class="separator"></div>
+
+  <h1>Reboot Device</h1>
+  <div class="textarea-container">
+    <button type="button" id="rebootButton" class="toggle-values-btn">
+      Reboot Device
+    </button>
+  </div>
+
+  <div class="separator"></div>
+
+  <h1>Capture Tmux Log</h1>
+  <div class="textarea-container">
+    <button type="button" id="captureTmuxLogButton" class="toggle-values-btn">
+      Capture Console Log
+    </button>
+    <a id="downloadTmuxLogButton" class="toggle-values-btn" style="display: none;" download>
+      <button type="button">Download Log</button>
+    </a>
+  </div>
+</div>
+
+<script>
+  const toggleValuesBox = document.getElementById('toggleValuesBox');
+  const rebootButton = document.getElementById('rebootButton');
+  const retrieveButton = document.getElementById('retrieveButton');
+  const resetButton = document.getElementById('resetButton');
+  const restoreButton = document.getElementById('restoreButton');
+  const lockButton = document.getElementById('lockButton');
+  const unlockButton = document.getElementById('unlockButton');
+  const captureTmuxLogButton = document.getElementById('captureTmuxLogButton');
+  const downloadTmuxLogButton = document.getElementById("downloadTmuxLogButton");
+  const toadEnabled = document.getElementById("toadEnabled");
+  const toadProfile = document.getElementById("toadProfile");
+  const toadAutoTune = document.getElementById("toadAutoTune");
+  const toadLaneCentering = document.getElementById("toadLaneCentering");
+  const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
+  const toadExperimentalSteeringResponse = document.getElementById("toadExperimentalSteeringResponse");
+  const toadExperimentalAssist = document.getElementById("toadExperimentalAssist");
+  const toadSmartWarning = document.getElementById("toadSmartWarning");
+  const toadTelemetry = document.getElementById("toadTelemetry");
+  const toadSaveButton = document.getElementById("toadSaveButton");
+  const toadRefreshButton = document.getElementById("toadRefreshButton");
+  const toadResetTuneButton = document.getElementById("toadResetTuneButton");
+  const toadMessage = document.getElementById("toadMessage");
+  const startRampSlider = document.getElementById("startRampSlider");
+  const startRampReadout = document.getElementById("startRampReadout");
+  const startRampSaveButton = document.getElementById("startRampSaveButton");
+  const startRampRefreshButton = document.getElementById("startRampRefreshButton");
+  const startRampMessage = document.getElementById("startRampMessage");
+  const toadConfigControls = [
+    toadEnabled,
+    toadProfile,
+    toadAutoTune,
+    toadLaneCentering,
+    toadSmoothLaneTransitions,
+    toadExperimentalSteeringResponse,
+    toadExperimentalAssist,
+    toadSmartWarning,
+    toadTelemetry
+  ];
+  let toadDirty = false;
+  let toadLoaded = false;
+  let toadLoading = false;
+  let toadMutating = false;
+  let toadOnroad = true;
+  let toadResetAllowed = false;
+  let toadSteeringRequestAllowed = false;
+  let toadConfigVersion = null;
+  let startRampDirty = false;
+  let startRampLoaded = false;
+  let startRampLoading = false;
+  let startRampMutating = false;
+  let startRampOnroad = true;
+
+  const toadProfileDescriptions = {
+    observe: "Observe keeps stock controller output unchanged while collecting diagnostics.",
+    adaptive: "Adaptive adds modest curve support and, when separately enabled, a gentle confidence-gated lane-centering correction.",
+    full: "Full Existing Authority uses stronger bounded curve and optional lane-centering assistance, while stock Toyota/Panda limits remain unchanged."
+  };
+
+  function setToadText(id, value) {
+    document.getElementById(id).textContent = value;
+  }
+
+  function formatToadNumber(value, digits) {
+    if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value))) {
+      return "Unavailable";
+    }
+    return Number(value).toFixed(digits);
+  }
+
+  function formatToadPair(filtered, raw, digits) {
+    return formatToadNumber(filtered, digits) + " filtered / " + formatToadNumber(raw, digits) + " raw";
+  }
+
+  function updateToadProfileHelp() {
+    setToadText("toadProfileHelp", toadProfileDescriptions[toadProfile.value] || "");
+  }
+
+  function setToadMessage(message, isError) {
+    toadMessage.textContent = message || "";
+    toadMessage.classList.toggle("error", Boolean(isError));
+  }
+
+  function setToadBusy(busy) {
+    toadConfigControls.forEach(control => {
+      control.disabled = busy || toadOnroad;
+    });
+    toadExperimentalSteeringResponse.disabled = busy || toadOnroad || !toadSteeringRequestAllowed;
+    toadSaveButton.disabled = busy || toadOnroad || !toadLoaded;
+    toadRefreshButton.disabled = busy;
+    toadResetTuneButton.disabled = busy || !toadResetAllowed || !toadLoaded;
+  }
+
+  function renderToadObserver(status) {
+    if (!status || Object.keys(status).length === 0) {
+      return "Waiting for observe-only high-authority samples.";
+    }
+    if (status.fresh !== true) {
+      const age = status.age_seconds === null || status.age_seconds === undefined ?
+        "unknown age" : Number(status.age_seconds).toFixed(1) + "s old";
+      return "Stale observer data (" + age + "); waiting for a fresh sample window.";
+    }
+    if (status.schema_version !== 1) {
+      return "Unsupported observer schema " + String(status.schema_version) + ".";
+    }
+    if (status.observe_only !== true || status.applied_to_tune !== false) {
+      return "Observer safety flags are invalid; data hidden.";
+    }
+    if (status.collecting !== true) {
+      return "Observer is not currently collecting.";
+    }
+
+
+    const accepted = status.accepted_samples !== undefined ? status.accepted_samples : 0;
+    const candidates = status.candidate_samples !== undefined ? status.candidate_samples : accepted;
+    const rejected = status.rejected_samples !== undefined ? status.rejected_samples : 0;
+    const directions = status.directions || {};
+    const bins = status.bins || {};
+    const parts = [];
+    parts.push(String(accepted) + " accepted / " + String(candidates) + " candidates");
+    if (rejected) {
+      parts.push(String(rejected) + " rejected");
+    }
+
+    ["left", "right"].forEach(function(direction) {
+      const summary = directions[direction] || {};
+      if (summary.samples && summary.lat_accel_per_steer !== null) {
+        parts.push(direction.charAt(0).toUpperCase() + " " +
+          Number(summary.lat_accel_per_steer).toFixed(3) + " lat-accel/steer (" +
+          String(summary.samples) + ")");
+      }
+    });
+
+    let populatedBins = 0;
+    Object.keys(bins).forEach(function(direction) {
+      Object.keys(bins[direction] || {}).forEach(function(name) {
+        if ((bins[direction][name] || {}).samples > 0) {
+          populatedBins += 1;
+          const bin = bins[direction][name];
+          const slope = bin.lat_accel_per_steer === null ? "n/a" : Number(bin.lat_accel_per_steer).toFixed(3);
+          const spread = bin.sample_ratio_stddev === null ? "n/a" : Number(bin.sample_ratio_stddev).toFixed(3);
+          parts.push(direction.charAt(0).toUpperCase() + " " + name + ": " +
+            slope + " ± " + spread + " (" + String(bin.samples) + ")");
+        }
+      });
+    });
+    if (populatedBins) {
+      parts.push(String(populatedBins) + " populated bins");
+    }
+    parts.push("observe-only; never applied to tune");
+    return parts.join(" · ");
+  }
+
+  function renderToadPilot(data, populateConfig) {
+    const config = data.config || {};
+    const capability = data.capability || {};
+    const stockTune = capability.stock_tune || {};
+    const learner = data.learner || {};
+    const runtime = data.runtime || {};
+    const environment = data.environment || {};
+    const steeringExperiment = data.steering_experiment || {};
+    toadLoaded = true;
+    // Only a positive onroad signal locks writes. A disconnected device with no
+    // road-state signal may still be preconfigured; controller capability gates activation.
+    toadOnroad = environment.onroad === true;
+    toadResetAllowed = environment.offroad_confirmed === true;
+    toadSteeringRequestAllowed = steeringExperiment.request_writable === true && toadResetAllowed;
+
+    if (populateConfig) {
+      toadConfigVersion = config.version;
+      toadEnabled.checked = config.enabled !== false;
+      toadProfile.value = config.profile || "adaptive";
+      toadAutoTune.checked = config.auto_tune !== false;
+      toadLaneCentering.checked = config.lane_centering_assist !== false;
+      toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
+      toadExperimentalSteeringResponse.checked = steeringExperiment.requested === true;
+      toadExperimentalAssist.checked = Boolean(config.curve_assist_in_experimental);
+      toadSmartWarning.checked = config.smart_saturation_warning !== false;
+      toadTelemetry.checked = config.telemetry !== false;
+      updateToadProfileHelp();
+    }
+
+    const supportBadge = document.getElementById("toadSupportBadge");
+    const vehicleKnown = capability.vehicle_known === true;
+    supportBadge.classList.toggle("supported", Boolean(capability.supported));
+    supportBadge.classList.toggle("unsupported", vehicleKnown && !capability.supported);
+    supportBadge.classList.toggle("offline", !vehicleKnown);
+    supportBadge.textContent = capability.supported ? "Supported Camry TSS2 detected" : vehicleKnown ?
+      "Unsupported vehicle · settings saved but inactive" : "No vehicle detected · settings available offline";
+    supportBadge.title = capability.reason || "";
+
+    setToadText("toadFingerprint", capability.fingerprint || "Not detected");
+    let effectiveText = data.effective_enabled ?
+      "Enabled · " + (config.profile || "adaptive") : config.enabled ?
+        (vehicleKnown ? "Configured, but unsupported" : "Configured offline · waiting for a supported vehicle") : "Disabled";
+    if (toadOnroad) {
+      effectiveText += " · settings locked while onroad";
+    } else if (environment.offroad_confirmed !== true) {
+      effectiveText += " · settings editable without a vehicle connection";
+    }
+    setToadText("toadEffective", effectiveText);
+    setToadText("toadLateralControl", capability.lateral_control || "unknown");
+
+    const limits = capability.hard_limits;
+    setToadText("toadHardLimits", limits ?
+      "±" + limits.steer_max +
+      " · rise " + limits.steer_delta_up +
+      " · fall " + limits.steer_delta_down +
+      " · EPS error " + limits.steer_error_max : "Not applicable");
+
+    let steeringExperimentText;
+    if (steeringExperiment.effective === true) {
+      steeringExperimentText = "Effective · " + String(steeringExperiment.profile || "verified profile");
+    } else if (steeringExperiment.pending_reboot === true) {
+      steeringExperimentText = "Requested · pending reboot";
+    } else if (steeringExperiment.requested === true) {
+      steeringExperimentText = "Requested · unavailable in this build · stock limits active";
+    } else {
+      steeringExperimentText = "Off · stock limits active";
+    }
+    if (steeringExperiment.reason) {
+      steeringExperimentText += " · " + steeringExperiment.reason;
+    }
+    setToadText("toadSteeringExperiment", steeringExperimentText);
+
+    let learnerValidity = learner.available ?
+      (learner.live_valid ? "Valid" : "Collecting / not valid") + (learner.use_params ? " · learner eligible" : " · observe only") :
+      "No cached learner yet";
+    const autoTuneRequested = config.enabled && config.profile !== "observe" && config.auto_tune;
+    const autoTuneSuspended = runtime.fresh === true ?
+      runtime.linear_tune_source === "suspended_by_nnff" : Boolean(environment.nnff);
+    if (autoTuneRequested && autoTuneSuspended) {
+      learnerValidity += " · linear Auto-tune suspended by full NNFF";
+    }
+    setToadText("toadLearnerValidity", learnerValidity);
+    setToadText("toadLearnerFactor",
+      formatToadPair(learner.lat_accel_factor_filtered, learner.lat_accel_factor_raw, 4) +
+      " · smaller factor = stronger feed-forward");
+    setToadText("toadLearnerOffset",
+      formatToadPair(learner.lat_accel_offset_filtered, learner.lat_accel_offset_raw, 4));
+    setToadText("toadLearnerFriction",
+      formatToadPair(learner.friction_filtered, learner.friction_raw, 4));
+    setToadText("toadStockTune", "factor " + formatToadNumber(stockTune.lat_accel_factor, 4) +
+      " · offset " + formatToadNumber(stockTune.lat_accel_offset, 4) + " · friction " + formatToadNumber(stockTune.friction, 4));
+    setToadText("toadLearnerPoints",
+      String(learner.total_bucket_points || 0) + " active / " + String(learner.cached_points || 0) + " cached");
+
+    const runtimeFresh = runtime.fresh === true;
+    const runtimeActive = runtimeFresh && runtime.active === true;
+    const runtimeAge = runtime.age_seconds === null || runtime.age_seconds === undefined ?
+      "unknown age" : Number(runtime.age_seconds).toFixed(1) + "s old";
+    const runtimeUnavailable = Object.keys(runtime).length === 0 ?
+      "Waiting for controller..." : "Stale controller data (" + runtimeAge + ")";
+    const runtimeState = runtimeFresh ? "Controller inactive" : runtimeUnavailable;
+    setToadText("toadRequestedSteer", runtimeActive ? formatToadNumber(runtime.requested_steer, 4) : runtimeState);
+    setToadText("toadResidualAssist", runtimeActive ? formatToadNumber(runtime.residual_assist, 4) : runtimeState);
+    setToadText("toadTrackingError", runtimeActive ? formatToadNumber(runtime.tracking_error, 4) + " m/s²" : runtimeState);
+    setToadText("toadSaturation", runtimeActive ?
+      (runtime.controller_saturated ? "Saturated" : "Not saturated") : runtimeState);
+
+    let laneCenteringText = runtimeState;
+    if (runtimeFresh && !config.lane_centering_assist) {
+      laneCenteringText = "Disabled by setting";
+    } else if (runtimeFresh && runtime.lane_centering_active === true) {
+      laneCenteringText = "Active";
+    } else if (runtimeFresh && runtime.lane_centering_gate_reason) {
+      laneCenteringText = "Paused: " + String(runtime.lane_centering_gate_reason).replace(/_/g, " ");
+    } else if (runtimeFresh) {
+      laneCenteringText = "Waiting for lane-centering status";
+    }
+    if (runtimeFresh && runtime.lane_offset_m !== null && runtime.lane_offset_m !== undefined &&
+        Number.isFinite(Number(runtime.lane_offset_m))) {
+      laneCenteringText += " · lane offset " + formatToadNumber(runtime.lane_offset_m, 3) + " m";
+    }
+    if (runtimeFresh && runtime.lane_centering_curvature_delta !== null &&
+        runtime.lane_centering_curvature_delta !== undefined &&
+        Number.isFinite(Number(runtime.lane_centering_curvature_delta))) {
+      laneCenteringText += " · curvature correction " +
+        formatToadNumber(runtime.lane_centering_curvature_delta, 6) + " 1/m";
+    }
+    setToadText("toadLaneCenteringState", laneCenteringText);
+
+    let feedforwardText;
+    if (runtimeFresh) {
+      if (runtime.feedforward_source === "nnff") {
+        feedforwardText = "Full NNFF";
+      } else if (runtime.feedforward_source === "linear_nnff_lite") {
+        feedforwardText = "Linear + NNFF Lite";
+      } else {
+        feedforwardText = "Linear";
+      }
+      if (runtime.linear_tune_source === "live_filtered") {
+        feedforwardText += " · live filtered tune selected";
+      } else if (runtime.linear_tune_source === "stock") {
+        feedforwardText += " · stock tune selected";
+      } else if (runtime.linear_tune_source === "suspended_by_nnff") {
+        feedforwardText += " · linear Auto-tune suspended";
+      }
+    } else if (environment.nnff) {
+      feedforwardText = "Full NNFF · waiting for current controller status";
+    } else if (environment.nnff_lite) {
+      feedforwardText = "Linear + NNFF Lite · waiting for current controller status";
+    } else {
+      feedforwardText = "Linear · waiting for current controller status";
+    }
+    setToadText("toadFeedforward", feedforwardText);
+
+    const experimentalMode = runtimeFresh ? Boolean(runtime.experimental_mode) : Boolean(environment.experimental_mode);
+    let experimentalText = experimentalMode ? "On" : "Off";
+    if (experimentalMode) {
+      experimentalText += config.curve_assist_in_experimental ? " · TOAD assists allowed" : " · TOAD assists paused";
+    }
+    if (!runtimeFresh) {
+      experimentalText += " · runtime status stale";
+    }
+    if (environment.conditional_experimental && environment.conditional_curves) {
+      experimentalText += " · conditional curves enabled";
+    }
+    setToadText("toadExperimentalState", experimentalText);
+    setToadText("toadObserverStatus", renderToadObserver(data.tune_status));
+    document.getElementById("toadLegacyNotice").hidden = !environment.legacy_prototype_enabled;
+  }
+
+  async function toadRequest(path, options) {
+    const requestOptions = options || {};
+    requestOptions.cache = "no-store";
+    const response = await fetch(path, requestOptions);
+    let body = {};
+    try {
+      body = await response.json();
+    } catch (error) {
+      body = {};
+    }
+    if (!response.ok) {
+      throw new Error(body.error || body.details || "HTTP " + response.status);
+    }
+    return body;
+  }
+
+  function renderStartRampReadout() {
+    const value = Number(startRampSlider.value);
+    startRampReadout.textContent = value.toFixed(2) + " m/s²" + (value === 0 ? " · Off" : "");
+  }
+
+  function setStartRampMessage(message, isError) {
+    startRampMessage.textContent = message || "";
+    startRampMessage.classList.toggle("error", Boolean(isError));
+  }
+
+  function setStartRampBusy(busy) {
+    startRampSlider.disabled = busy || startRampOnroad || !startRampLoaded;
+    startRampSaveButton.disabled = busy || startRampOnroad || !startRampLoaded;
+    startRampRefreshButton.disabled = busy;
+  }
+
+  function renderStartAccelRamp(data, populateSetting) {
+    const environment = data.environment || {};
+    const capability = data.capability || {};
+    startRampLoaded = true;
+    startRampOnroad = environment.onroad === true;
+
+    if (Number.isFinite(Number(data.minimum))) {
+      startRampSlider.min = String(data.minimum);
+    }
+    if (Number.isFinite(Number(data.maximum))) {
+      startRampSlider.max = String(data.maximum);
+    }
+    if (Number.isFinite(Number(data.step))) {
+      startRampSlider.step = String(data.step);
+    }
+    if (populateSetting) {
+      startRampSlider.value = String(Number.isFinite(Number(data.value)) ? Number(data.value) : 0);
+      startRampDirty = false;
+      renderStartRampReadout();
+    }
+
+    const badge = document.getElementById("startRampSupportBadge");
+    const vehicleKnown = capability.vehicle_known === true;
+    badge.classList.toggle("supported", capability.supported === true);
+    badge.classList.toggle("unsupported", vehicleKnown && capability.supported !== true);
+    badge.classList.toggle("offline", !vehicleKnown);
+    badge.textContent = capability.supported === true ? "Supported Camry TSS2 detected" : vehicleKnown ?
+      "Unsupported vehicle · saved value remains inactive" : "No vehicle detected · setting available offline";
+    badge.title = capability.reason || "";
+
+    const savedValue = Number.isFinite(Number(data.value)) ? Number(data.value) : 0;
+    let stateText = savedValue === 0 ? "Saved ramp is off." : "Saved ramp: " + savedValue.toFixed(2) + " m/s².";
+    if (capability.supported !== true && savedValue > 0) {
+      stateText += " It will remain inactive unless a supported Camry is detected.";
+    }
+    if (startRampOnroad) {
+      stateText += " Settings are locked while onroad.";
+    }
+    document.getElementById("startRampState").textContent = stateText;
+  }
+
+  async function loadStartAccelRamp(populateSetting, announce) {
+    if (startRampLoading || startRampMutating) {
+      return;
+    }
+    startRampLoading = true;
+    setStartRampBusy(true);
+    try {
+      const state = await toadRequest("/start_accel_ramp");
+      // Polling updates status and write locks, but never overwrites an edited slider.
+      renderStartAccelRamp(state, populateSetting === true);
+      if (announce) {
+        setStartRampMessage("Start acceleration ramp status refreshed.", false);
+      }
+    } catch (error) {
+      startRampLoaded = false;
+      startRampOnroad = true;
+      setStartRampMessage("Start acceleration ramp unavailable: " + error.message, true);
+    } finally {
+      startRampLoading = false;
+      setStartRampBusy(false);
+    }
+  }
+
+  async function loadToadPilot(populateConfig, announce) {
+    if (toadLoading || toadMutating) {
+      return;
+    }
+    toadLoading = true;
+    setToadBusy(true);
+    try {
+      const state = await toadRequest("/toadpilot");
+      // Status polling must never repaint the form. It used to repopulate every
+      // control whenever the form was "clean", allowing a cached/stale GET to
+      // visually roll back settings immediately after a successful save.
+      renderToadPilot(state, populateConfig === true);
+      if (announce) {
+        setToadMessage("TOADPILOT status refreshed.", false);
+      }
+    } catch (error) {
+      toadLoaded = false;
+      toadOnroad = true;
+      toadResetAllowed = false;
+      toadSteeringRequestAllowed = false;
+      setToadMessage("TOADPILOT unavailable: " + error.message, true);
+    } finally {
+      toadLoading = false;
+      setToadBusy(false);
+    }
+  }
+
+  toadConfigControls.forEach(control => {
+    control.addEventListener("change", () => {
+      toadDirty = true;
+      updateToadProfileHelp();
+      setToadMessage("Unsaved TOADPILOT changes.", false);
+    });
+  });
+
+  startRampSlider.addEventListener("input", () => {
+    startRampDirty = true;
+    renderStartRampReadout();
+    setStartRampMessage("Unsaved start acceleration ramp change.", false);
+  });
+
+  startRampSaveButton.addEventListener("click", async () => {
+    if (startRampLoading || startRampMutating || startRampOnroad || !startRampLoaded) {
+      return;
+    }
+    startRampMutating = true;
+    setStartRampBusy(true);
+    const requestedValue = Number(startRampSlider.value);
+    setStartRampMessage("Saving start acceleration ramp...", false);
+    try {
+      const state = await toadRequest("/start_accel_ramp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: requestedValue })
+      });
+      if (!Number.isFinite(Number(state.value)) || Math.abs(Number(state.value) - requestedValue) > 1e-6) {
+        throw new Error("saved value did not match the slider");
+      }
+      startRampDirty = false;
+      renderStartAccelRamp(state, true);
+      setStartRampMessage(requestedValue === 0 ?
+        "Start acceleration ramp saved off; stop-release correction remains active." :
+        "Start acceleration ramp saved.", false);
+    } catch (error) {
+      startRampDirty = true;
+      setStartRampMessage("Could not save start acceleration ramp: " + error.message, true);
+    } finally {
+      startRampMutating = false;
+      setStartRampBusy(false);
+    }
+  });
+
+  startRampRefreshButton.addEventListener("click", () => loadStartAccelRamp(false, true));
+
+  toadSaveButton.addEventListener("click", async () => {
+    if (toadLoading || toadMutating || toadOnroad || !toadLoaded) {
+      return;
+    }
+    toadMutating = true;
+    setToadBusy(true);
+    setToadMessage("Saving TOADPILOT settings...", false);
+    const config = {
+      version: toadConfigVersion,
+      enabled: toadEnabled.checked,
+      profile: toadProfile.value,
+      auto_tune: toadAutoTune.checked,
+      lane_centering_assist: toadLaneCentering.checked,
+      smooth_lane_transitions: toadSmoothLaneTransitions.checked,
+      curve_assist_in_experimental: toadExperimentalAssist.checked,
+      smart_saturation_warning: toadSmartWarning.checked,
+      telemetry: toadTelemetry.checked
+    };
+    const steeringRequest = toadExperimentalSteeringResponse.checked;
+    const requestPayload = {
+      ...config,
+      experimental_steering_response_requested: steeringRequest
+    };
+
+    try {
+      const state = await toadRequest("/toadpilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestPayload)
+      });
+      const savedConfig = state.config || {};
+      const mismatchedSetting = Object.keys(config).find(key => savedConfig[key] !== config[key]);
+      if (mismatchedSetting !== undefined) {
+        throw new Error("saved value did not match for " + mismatchedSetting);
+      }
+      if (!state.steering_experiment || state.steering_experiment.requested !== steeringRequest) {
+        throw new Error("saved value did not match for experimental steering response");
+      }
+      toadDirty = false;
+      renderToadPilot(state, true);
+      setToadMessage("TOADPILOT settings saved.", false);
+    } catch (error) {
+      // Keep the user's selections editable after a transient or validation
+      // error so they can retry without re-entering every checkbox.
+      toadDirty = true;
+      setToadMessage("Could not save TOADPILOT: " + error.message, true);
+    } finally {
+      toadMutating = false;
+      setToadBusy(false);
+    }
+  });
+
+  toadRefreshButton.addEventListener("click", () => loadToadPilot(false, true));
+
+  toadResetTuneButton.addEventListener("click", async () => {
+    if (toadLoading || toadMutating || !toadResetAllowed || !toadLoaded) {
+      return;
+    }
+    if (!confirm("Reset cached and in-memory torque learning? The device must be confirmed offroad.")) {
+      return;
+    }
+    toadMutating = true;
+    setToadBusy(true);
+    try {
+      const result = await toadRequest("/toadpilot/reset_tune", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true })
+      });
+      renderToadPilot(result.state, false);
+      setToadMessage(result.message, false);
+    } catch (error) {
+      setToadMessage("Could not reset the learned tune: " + error.message, true);
+      toadLoaded = false;
+      toadOnroad = true;
+      toadResetAllowed = false;
+    } finally {
+      toadMutating = false;
+      setToadBusy(false);
+    }
+  });
+
+  loadToadPilot(true, false);
+  window.setInterval(() => loadToadPilot(false, false), 5000);
+  loadStartAccelRamp(true, false);
+  window.setInterval(() => loadStartAccelRamp(false, false), 5000);
+
+  rebootButton.addEventListener('click', () => {
+    fetch('/reboot_device', { method: 'POST' })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert(result.body.message);
+        } else {
+          alert('Error rebooting device: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error rebooting device:', error));
+  });
+
+  retrieveButton.addEventListener('click', () => {
+    fetch('/get_toggle_values')
+      .then(response => response.text())
+      .then(data => {
+        toggleValuesBox.value = data.trim();
+      })
+      .catch(error => console.error('Error fetching toggle values:', error));
+  });
+
+  resetButton.addEventListener('click', () => {
+    fetch('/reset_toggle_values', { method: 'POST' })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert(result.body.message);
+        } else {
+          alert('Error resetting toggle values: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error resetting toggle values:', error));
+  });
+
+  restoreButton.addEventListener('click', () => {
+    const inputData = toggleValuesBox.value;
+    fetch('/store_toggle_values', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: inputData.trim() })
+    })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert('Values stored successfully.');
+        } else {
+          alert('Error storing values: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error storing toggle values:', error));
+  });
+
+  lockButton.addEventListener('click', () => {
+    fetch('/lock_doors', { method: 'POST' })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert(result.body.message);
+        } else {
+          alert('Error locking doors: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error locking doors:', error));
+  });
+
+  unlockButton.addEventListener('click', () => {
+    fetch('/unlock_doors', { method: 'POST' })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert(result.body.message);
+        } else {
+          alert('Error unlocking doors: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error unlocking doors:', error));
+  });
+
+  captureTmuxLogButton.addEventListener('click', () => {
+    fetch('/capture_tmux_log', { method: 'POST' })
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(result => {
+        if (result.status === 200) {
+          alert(result.body.message);
+
+          const logFile = result.body.log_file;
+          downloadTmuxLogButton.href = `/download_tmux_log/${logFile}`;
+          downloadTmuxLogButton.style.display = "inline";
+
+        } else {
+          alert('Error capturing console log: ' + result.body.error);
+        }
+      })
+      .catch(error => console.error('Error capturing console log:', error));
+  });
+</script>
+
+{% endblock %}
