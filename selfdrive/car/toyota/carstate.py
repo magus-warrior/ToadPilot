@@ -78,6 +78,8 @@ class CarState(CarStateBase):
     self.needs_angle_offset_zss = True
 
     self.angle_offset_zss = 0
+    self.initial_steer_fault_status = 255
+    self.steer_fault_temporary_previous = False
     self.zorro_steer_value = 0
 
   def update(self, cp, cp_cam, CC, frogpilot_toggles):
@@ -151,13 +153,30 @@ class CarState(CarStateBase):
     # we could use the override bit from dbc, but it's triggered at too high torque values
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD
 
-    # Check EPS LKA/LTA fault status
-    ret.steerFaultTemporary = cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS
-    ret.steerFaultPermanent = cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS
+    # Check EPS LKA/LTA fault status and retain the raw state so a temporary
+    # alert can distinguish a confirmed high-rate state (21/25) from Toyota's
+    # generic recovery/message states (9/11). The boolean remains the control
+    # contract; raw values are diagnostics only.
+    lka_state = int(cp.vl["EPS_STATUS"]["LKA_STATE"])
+    lta_state = int(cp.vl["EPS_STATUS"].get("LTA_STATE", 255))
+    ret.steerFaultStatus = lka_state
+    ret.steerFaultStatusSecondary = lta_state
+    ret.steerFaultTemporary = lka_state in TEMP_STEER_FAULTS
+    ret.steerFaultPermanent = lka_state in PERM_STEER_FAULTS
 
     if self.CP.steerControlType == SteerControlType.angle:
-      ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS
-      ret.steerFaultPermanent = ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS
+      ret.steerFaultTemporary = ret.steerFaultTemporary or lta_state in TEMP_STEER_FAULTS
+      ret.steerFaultPermanent = ret.steerFaultPermanent or lta_state in PERM_STEER_FAULTS
+
+    if ret.steerFaultTemporary and not self.steer_fault_temporary_previous:
+      # Prefer the channel that actually entered Toyota's temporary-fault
+      # state. Torque-control Camrys use LKA; this also keeps angle-control LTA
+      # diagnostics truthful on the other Toyota platforms.
+      self.initial_steer_fault_status = (lka_state if lka_state in TEMP_STEER_FAULTS else lta_state)
+    elif not ret.steerFaultTemporary:
+      self.initial_steer_fault_status = 255
+    ret.steerFaultStatusInitial = self.initial_steer_fault_status
+    self.steer_fault_temporary_previous = bool(ret.steerFaultTemporary)
 
     if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
       # TODO: find the bit likely in DSU_CRUISE that describes an ACC fault. one may also exist in CLUTCH

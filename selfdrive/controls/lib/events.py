@@ -14,6 +14,7 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.locationd.calibrationd import MIN_SPEED_FILTER
 
 from openpilot.selfdrive.frogpilot.frogpilot_variables import params
+from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
 
 AlertSize = log.ControlsState.AlertSize
 AlertStatus = log.ControlsState.AlertStatus
@@ -219,6 +220,48 @@ def soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
       return ImmediateDisableAlert(alert_text_2)
     return SoftDisableAlert(alert_text_2)
   return func
+
+
+def _toadpilot_steer_temp_detail(CP, CS, sm):
+  try:
+    authorized = bool(sm['carOutput'].actuatorsOutput.toadPilotHighTorqueAuthorized)
+    initial_state = int(CS.steerFaultStatusInitial)
+    current_state = int(CS.steerFaultStatus)
+  except (AttributeError, TypeError, ValueError):
+    return ""
+  if CP.carFingerprint != TOADPILOT_FINGERPRINT or not authorized:
+    return ""
+  fault_state = initial_state if initial_state != 255 else current_state
+  if fault_state in (21, 25):
+    return f"Toyota EPS high-rate state {fault_state} · 1700 headroom paused"
+  if fault_state == 11:
+    return "Toyota EPS steering-message state 11 · 1700 headroom paused"
+  if fault_state == 9:
+    return "Toyota EPS recovery state 9 · 1700 headroom paused"
+  if fault_state == 0:
+    return "Toyota EPS initializing · 1700 headroom paused"
+  return f"Toyota EPS state {fault_state} · 1700 headroom paused"
+
+
+def steer_temp_unavailable_alert(CP, CS, sm, metric, soft_disable_time, frogpilot_toggles):
+  detail = _toadpilot_steer_temp_detail(CP, CS, sm)
+  return soft_disable_alert(detail or "Steering Temporarily Unavailable")(
+    CP, CS, sm, metric, soft_disable_time, frogpilot_toggles,
+  )
+
+
+def steer_temp_unavailable_no_entry_alert(CP, CS, sm, metric, soft_disable_time, frogpilot_toggles):
+  detail = _toadpilot_steer_temp_detail(CP, CS, sm)
+  return NoEntryAlert(detail or "Steering Temporarily Unavailable")
+
+
+def steer_temp_unavailable_silent_alert(CP, CS, sm, metric, soft_disable_time, frogpilot_toggles):
+  detail = _toadpilot_steer_temp_detail(CP, CS, sm)
+  return Alert(
+    "Steering Temporarily Unavailable", detail,
+    AlertStatus.userPrompt, AlertSize.mid if detail else AlertSize.small,
+    Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8,
+  )
 
 def user_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
   def func(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, frogpilot_toggles: SimpleNamespace) -> Alert:
@@ -499,11 +542,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ********** events only containing alerts that display while engaged **********
 
   EventName.steerTempUnavailableSilent: {
-    ET.WARNING: Alert(
-      "Steering Temporarily Unavailable",
-      "",
-      AlertStatus.userPrompt, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.8),
+    ET.WARNING: steer_temp_unavailable_silent_alert,
   },
 
   EventName.preDriverDistracted: {
@@ -738,8 +777,8 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.steerTempUnavailable: {
-    ET.SOFT_DISABLE: soft_disable_alert("Steering Temporarily Unavailable"),
-    ET.NO_ENTRY: NoEntryAlert("Steering Temporarily Unavailable"),
+    ET.SOFT_DISABLE: steer_temp_unavailable_alert,
+    ET.NO_ENTRY: steer_temp_unavailable_no_entry_alert,
   },
 
   EventName.steerTimeLimit: {

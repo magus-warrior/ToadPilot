@@ -261,9 +261,8 @@ Tools
     </div>
 
     <div class="toadpilot-boundary">
-      <strong>Existing authority by default.</strong>
-      TOADPILOT profiles retain Toyota's stock 1500-unit envelope. The separate Camry authority experiment below
-      is default off, requires a confirmed offroad save and reboot, and preserves the existing rate and torque-error guards.
+      <strong id="toadAuthoritySummary">Checking steering authority...</strong>
+      <span id="toadAuthorityDetail">Reading the saved request and current boot state.</span>
     </div>
 
     <div class="toadpilot-config-grid">
@@ -294,6 +293,11 @@ Tools
       <label class="toadpilot-check" for="toadSmoothLaneTransitions">
         <span><strong>Smooth lane transitions</strong><br><small>Default on; softens lane-centering handoffs while preserving immediate safety gates.</small></span>
         <input type="checkbox" id="toadSmoothLaneTransitions" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadImprovedStopAndGo">
+        <span><strong>Improved Camry stop-and-go</strong><br><small>Default on. Allows a planner-confirmed launch to proceed through a stale Toyota cruise-standstill signal. Brake input, a renewed stop request, disengagement, and normal acceleration limits still cancel or bound the launch.</small></span>
+        <input type="checkbox" id="toadImprovedStopAndGo" checked>
       </label>
 
       <label class="toadpilot-check" for="toadExperimentalSteeringResponse">
@@ -333,6 +337,7 @@ Tools
           <dt>Fingerprint</dt><dd id="toadFingerprint">Waiting...</dd>
           <dt>Effective</dt><dd id="toadEffective">Waiting...</dd>
           <dt>Lateral control</dt><dd id="toadLateralControl">Waiting...</dd>
+          <dt>Stop-and-go</dt><dd id="toadStopAndGoState">Waiting...</dd>
           <dt>Hard limits</dt><dd id="toadHardLimits">Waiting...</dd>
           <dt>Steering research</dt><dd id="toadSteeringExperiment">Waiting...</dd>
         </dl>
@@ -357,8 +362,12 @@ Tools
           <dt>Residual assist</dt><dd id="toadResidualAssist">Waiting for controller...</dd>
           <dt>Tracking error</dt><dd id="toadTrackingError">Waiting for controller...</dd>
           <dt>Saturation</dt><dd id="toadSaturation">Waiting for controller...</dd>
+          <dt>1700 controller</dt><dd id="toadSteeringLiveState">Waiting for controller...</dd>
+          <dt>Panda safety</dt><dd id="toadPandaSafetyState">Waiting for Panda counters...</dd>
           <dt>Extended torque</dt><dd id="toadExtendedTorque">Waiting for controller command...</dd>
           <dt>Trial safety</dt><dd id="toadTorqueSafety">Waiting for EPS/fault data...</dd>
+          <dt>Stop/go live</dt><dd id="toadStopGoLiveState">Waiting for longitudinal controller...</dd>
+          <dt>Stop/go last event</dt><dd id="toadStopGoLastEvent">Waiting for a launch event...</dd>
           <dt>Lane centering</dt><dd id="toadLaneCenteringState">Waiting for controller...</dd>
           <dt>Feed-forward</dt><dd id="toadFeedforward">Waiting...</dd>
           <dt>Experimental</dt><dd id="toadExperimentalState">Waiting...</dd>
@@ -391,9 +400,11 @@ Tools
     </div>
 
     <div class="toadpilot-boundary">
-      <strong>The stop-release correction is always active.</strong>
-      This slider only adds a ramped acceleration floor after a real stopped-to-go transition, while the planner
-      is already requesting forward acceleration. It cannot bypass a stop, brake input, or cruise standstill.
+      <strong>The toggle above controls the guarded stop-release correction.</strong>
+      This slider only adds a ramped acceleration floor after a real stopped-to-go transition while the planner
+      is requesting forward acceleration. It never bypasses a planner stop, brake input, or disengagement. When
+      Improved Camry stop-and-go is effective, only a stale Toyota cruise-standstill status is filtered during the
+      speed- and time-bounded launch handoff.
     </div>
 
     <div class="start-ramp-control">
@@ -476,6 +487,7 @@ Tools
   const toadAutoTune = document.getElementById("toadAutoTune");
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
+  const toadImprovedStopAndGo = document.getElementById("toadImprovedStopAndGo");
   const toadExperimentalSteeringResponse = document.getElementById("toadExperimentalSteeringResponse");
   const toadExperimentalAssist = document.getElementById("toadExperimentalAssist");
   const toadSmartWarning = document.getElementById("toadSmartWarning");
@@ -495,6 +507,7 @@ Tools
     toadAutoTune,
     toadLaneCentering,
     toadSmoothLaneTransitions,
+    toadImprovedStopAndGo,
     toadExperimentalSteeringResponse,
     toadExperimentalAssist,
     toadSmartWarning,
@@ -620,6 +633,9 @@ Tools
     const stockTune = capability.stock_tune || {};
     const learner = data.learner || {};
     const runtime = data.runtime || {};
+    const steeringStatus = data.steering_status || {};
+    const stopGoStatus = data.stop_go_status || {};
+    const stopGoLastRoute = data.stop_go_last_route || {};
     const torqueStatus = data.torque_status || {};
     const torqueLastRoute = data.torque_last_route || {};
     const environment = data.environment || {};
@@ -638,6 +654,7 @@ Tools
       toadAutoTune.checked = config.auto_tune !== false;
       toadLaneCentering.checked = config.lane_centering_assist !== false;
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
+      toadImprovedStopAndGo.checked = config.improved_stop_and_go !== false;
       toadExperimentalSteeringResponse.checked = steeringExperiment.requested === true;
       toadExperimentalAssist.checked = Boolean(config.curve_assist_in_experimental);
       toadSmartWarning.checked = config.smart_saturation_warning !== false;
@@ -666,12 +683,82 @@ Tools
     setToadText("toadEffective", effectiveText);
     setToadText("toadLateralControl", capability.lateral_control || "unknown");
 
+    let stopAndGoText;
+    if (config.improved_stop_and_go !== true) {
+      stopAndGoText = "Off by setting · Toyota cruise-standstill behavior unchanged";
+    } else if (config.enabled !== true) {
+      stopAndGoText = "Requested, but Enable TOADPILOT is off";
+    } else if (capability.supported !== true) {
+      stopAndGoText = "Requested, but exact Camry TSS2 torque control is not detected";
+    } else if (capability.openpilot_longitudinal !== true) {
+      stopAndGoText = "Requested, but openpilot longitudinal control is inactive";
+    } else {
+      stopAndGoText = "Effective · guarded planner-confirmed launch handoff enabled";
+    }
+    setToadText("toadStopAndGoState", stopAndGoText);
+
+    const liveStopGo = stopGoStatus.fresh === true ? stopGoStatus : null;
+    const historicalStopGo = stopGoLastRoute.provenance_valid === true ? stopGoLastRoute : null;
+    const shownStopGo = liveStopGo || historicalStopGo;
+    if (shownStopGo) {
+      const prefix = liveStopGo ? "LIVE" : "LAST DRIVE";
+      const state = String(shownStopGo.state || "unknown").replace(/_/g, " ").toUpperCase();
+      let liveText = prefix + " · " + state + " · saved ramp " +
+        Number(shownStopGo.configured_accel || 0).toFixed(2) + " m/s²";
+      if (shownStopGo.planner_accel !== null && shownStopGo.planner_accel !== undefined &&
+          Number.isFinite(Number(shownStopGo.planner_accel))) {
+        liveText += " · planner " + Number(shownStopGo.planner_accel).toFixed(2);
+      }
+      if (shownStopGo.longcontrol_output_accel !== null && shownStopGo.longcontrol_output_accel !== undefined &&
+          Number.isFinite(Number(shownStopGo.longcontrol_output_accel))) {
+        liveText += " · LoC " + Number(shownStopGo.longcontrol_output_accel).toFixed(2);
+      }
+      if (shownStopGo.controller_output_accel !== null && shownStopGo.controller_output_accel !== undefined &&
+          Number.isFinite(Number(shownStopGo.controller_output_accel))) {
+        liveText += " · PCM output " + Number(shownStopGo.controller_output_accel).toFixed(2);
+      }
+      if (shownStopGo.brake_release_active === true) {
+        liveText += " · releasing prior brake command";
+      }
+      setToadText("toadStopGoLiveState", liveText);
+      let eventText = String(shownStopGo.last_event || "none").replace(/_/g, " ");
+      if (shownStopGo.last_detail) {
+        eventText += " · " + String(shownStopGo.last_detail).replace(/_/g, " ");
+      }
+      eventText += " · " + String(shownStopGo.event_sequence || 0) + " recorded transitions";
+      setToadText("toadStopGoLastEvent", eventText);
+    } else {
+      setToadText("toadStopGoLiveState", "Waiting for a controller heartbeat");
+      setToadText("toadStopGoLastEvent", "No saved stop/go drive yet");
+    }
+
     const limits = capability.hard_limits;
     setToadText("toadHardLimits", limits ?
       "±" + limits.steer_max +
       " · rise " + limits.steer_delta_up +
       " · fall " + limits.steer_delta_down +
       " · EPS error " + limits.steer_error_max : "Not applicable");
+
+    let authoritySummary;
+    let authorityDetail;
+    if (steeringExperiment.effective === true && steeringExperiment.requested === true) {
+      authoritySummary = "1700 authority is active.";
+      authorityDetail = "The saved request, reboot latch, Camry controller flag, and paired Panda firmware all match for this boot.";
+    } else if (steeringExperiment.effective === true) {
+      authoritySummary = "1700 authority is active until reboot.";
+      authorityDetail = "The checkbox is now off, so the stock 1500-unit envelope will return after reboot.";
+    } else if (steeringExperiment.requested === true && steeringExperiment.pending_reboot === true) {
+      authoritySummary = "1700 authority is saved and awaiting reboot.";
+      authorityDetail = steeringExperiment.reason || "The current boot remains on the stock 1500-unit envelope.";
+    } else if (steeringExperiment.requested === true) {
+      authoritySummary = "1700 authority is requested but not active.";
+      authorityDetail = steeringExperiment.reason || "The current boot remains on the stock 1500-unit envelope.";
+    } else {
+      authoritySummary = "Stock 1500 authority is active.";
+      authorityDetail = steeringExperiment.reason || "Enable and save Experimental Camry 1700 authority while offroad to request the extended envelope.";
+    }
+    setToadText("toadAuthoritySummary", authoritySummary);
+    setToadText("toadAuthorityDetail", authorityDetail);
 
     let steeringExperimentText;
     if (steeringExperiment.effective === true && steeringExperiment.pending_reboot === true &&
@@ -734,6 +821,47 @@ Tools
     setToadText("toadSaturation", runtimeActive ?
       (runtime.controller_saturated ? "Saturated" : "Not saturated") : runtimeState);
 
+    if (steeringStatus.fresh === true) {
+      let steeringLiveText = String(steeringStatus.state || "stock").replace(/_/g, " ").toUpperCase() +
+        " · " + String(steeringStatus.reason || "unknown").replace(/_/g, " ") +
+        " · output " + formatToadNumber(steeringStatus.controller_output_can, 0) +
+        " / target " + formatToadNumber(steeringStatus.target_output_can, 0) +
+        " · request " + (steeringStatus.steer_request === true ? "ON" : "OFF") +
+        " · arm " + Math.round(Number(steeringStatus.arm_progress || 0) * 100) + "%" +
+        " · extra scale " + Math.round(Number(steeringStatus.headroom_scale || 0) * 100) + "%";
+      if (Number(steeringStatus.fault_cooldown_seconds || 0) > 0) {
+        steeringLiveText += " · cooldown " + Number(steeringStatus.fault_cooldown_seconds).toFixed(1) + "s";
+      }
+      if (steeringStatus.steer_fault_temporary === true) {
+        steeringLiveText += " · EPS TEMP state " + String(steeringStatus.eps_initial_fault_state);
+      }
+      setToadText("toadSteeringLiveState", steeringLiveText);
+    } else {
+      setToadText("toadSteeringLiveState", steeringExperiment.effective === true ?
+        "1700 enabled · waiting for live controller reason" : "Stock authority");
+    }
+
+    if (steeringStatus.fresh === true && steeringStatus.panda_state_valid === true) {
+      const routeBlocks = Number(steeringStatus.panda_safety_tx_blocked_route_delta || 0);
+      const safetyParams = steeringStatus.panda_safety_params || [];
+      let pandaText = routeBlocks === 0 ?
+        "No new aggregate Panda TX blocks this drive" :
+        String(routeBlocks) + " aggregate Panda TX block(s) this drive";
+      if (Number(steeringStatus.panda_safety_tx_blocked_last_increment || 0) > 0) {
+        pandaText += " · last +" + String(steeringStatus.panda_safety_tx_blocked_last_increment);
+        if (steeringStatus.panda_safety_tx_blocked_last_state) {
+          pandaText += " near " + String(steeringStatus.panda_safety_tx_blocked_last_state).replace(/_/g, " ");
+        }
+      }
+      if (safetyParams.length) {
+        pandaText += " · safetyParam " + safetyParams.join(", ");
+      }
+      pandaText += " · aggregate counter is not steering-address-specific";
+      setToadText("toadPandaSafetyState", pandaText);
+    } else {
+      setToadText("toadPandaSafetyState", "Waiting for valid Panda safety counters");
+    }
+
     const liveTorqueDiagnostic = torqueStatus.fresh === true && torqueStatus.controller_authorized === true;
     const historicalTorqueDiagnostic = torqueLastRoute.provenance_valid === true;
     const torqueDiagnostic = liveTorqueDiagnostic ? torqueStatus :
@@ -757,7 +885,13 @@ Tools
           "last sampled command was stock-range");
       extendedTorqueText = torqueDiagnosticPrefix + commandState + " · " +
         "latest " + rawOutput + " · sampled route peak " + peakOutput;
-      extendedTorqueText += " · " + String(sampleCount) + " sampled extended outputs";
+      extendedTorqueText += " · " + String(sampleCount) + " 20 Hz diagnostic samples above 1500";
+      if (torqueDiagnostic.controller_state) {
+        extendedTorqueText += " · sampled state " + String(torqueDiagnostic.controller_state).replace(/_/g, " ");
+      }
+      if (torqueDiagnostic.controller_reason) {
+        extendedTorqueText += " (" + String(torqueDiagnostic.controller_reason).replace(/_/g, " ") + ")";
+      }
       if (liveTorqueDiagnostic &&
           (torqueDiagnostic.inputs_valid !== true || torqueDiagnostic.output_valid !== true)) {
         extendedTorqueText += " · input invalid";
@@ -783,6 +917,10 @@ Tools
         " samples · " + String(extendedStateSamples) + " EPS samples · " + extendedFaults;
       if (torqueDiagnostic.temporary_fault_seen === true || torqueDiagnostic.permanent_fault_seen === true) {
         torqueSafetyText += " · whole-route fault also seen";
+      }
+      const rawFaultStates = torqueDiagnostic.extended_window_temporary_fault_statuses || [];
+      if (rawFaultStates.length) {
+        torqueSafetyText += " · raw Toyota EPS state(s) " + rawFaultStates.join(", ");
       }
       if (liveTorqueDiagnostic && torqueDiagnostic.car_state_valid !== true) {
         torqueSafetyText += " · current EPS input stale";
@@ -924,6 +1062,17 @@ Tools
 
     const savedValue = Number.isFinite(Number(data.value)) ? Number(data.value) : 0;
     let stateText = savedValue === 0 ? "Saved ramp is off." : "Saved ramp: " + savedValue.toFixed(2) + " m/s².";
+    const runtime = data.runtime || {};
+    if (runtime.fresh === true) {
+      stateText += " Live: " + String(runtime.state || "unknown").replace(/_/g, " ") + ".";
+      if (runtime.last_event && runtime.last_event !== "idle") {
+        stateText += " Last: " + String(runtime.last_event).replace(/_/g, " ");
+        if (runtime.last_detail) {
+          stateText += " (" + String(runtime.last_detail).replace(/_/g, " ") + ")";
+        }
+        stateText += ".";
+      }
+    }
     if (capability.supported !== true && savedValue > 0) {
       stateText += " It will remain inactive unless a supported Camry is detected.";
     }
@@ -1017,7 +1166,7 @@ Tools
       startRampDirty = false;
       renderStartAccelRamp(state, true);
       setStartRampMessage(requestedValue === 0 ?
-        "Start acceleration ramp saved off; stop-release correction remains active." :
+        "Acceleration floor saved off; guarded stop/go behavior follows its toggle above." :
         "Start acceleration ramp saved.", false);
     } catch (error) {
       startRampDirty = true;
@@ -1044,6 +1193,7 @@ Tools
       auto_tune: toadAutoTune.checked,
       lane_centering_assist: toadLaneCentering.checked,
       smooth_lane_transitions: toadSmoothLaneTransitions.checked,
+      improved_stop_and_go: toadImprovedStopAndGo.checked,
       curve_assist_in_experimental: toadExperimentalAssist.checked,
       smart_saturation_warning: toadSmartWarning.checked,
       telemetry: toadTelemetry.checked

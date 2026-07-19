@@ -1,6 +1,8 @@
 import math
 import numpy as np
 
+from collections import deque
+
 from cereal import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.numpy_fast import clip, interp
@@ -29,6 +31,12 @@ ACCELERATION_DUE_TO_GRAVITY = 9.81  # m/s^2
 ACCEL_WINDUP_LIMIT = 4.0 * DT_CTRL * 3  # m/s^2 / frame
 ACCEL_WINDDOWN_LIMIT = -4.0 * DT_CTRL * 3  # m/s^2 / frame
 ACCEL_PID_UNWIND = 0.03 * DT_CTRL * 3  # m/s^2 / frame
+# During an exact, planner-confirmed Camry stop release, unwind only the stale
+# negative brake request faster. Positive acceleration retains the normal
+# 4 m/s^3 slew above, so this shortens brake release without adding takeoff
+# jerk after the command crosses zero.
+TOADPILOT_STOP_RELEASE_WINDUP_LIMIT = 8.0 * DT_CTRL * 3  # m/s^2 / frame
+TOADPILOT_STOP_RELEASE_MAX_SPEED = 2.0  # m/s
 
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
@@ -52,6 +60,11 @@ TOADPILOT_HIGH_TORQUE_MIN_DESIRED_ACCEL = 1.0
 TOADPILOT_HIGH_TORQUE_ARM_TRACKING_RATIO = 0.80
 TOADPILOT_HIGH_TORQUE_RELEASE_TRACKING_RATIO = 0.95
 TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE = 75.0
+TOADPILOT_HIGH_TORQUE_FULL_HEADROOM_RATE = 55.0
+TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE = 45.0
+TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA = 20.0
+TOADPILOT_HIGH_TORQUE_RATE_HISTORY_FRAMES = 10  # 100 ms at 100 Hz
+TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES = 100  # extra authority only; stock steering remains available
 
 # LTA limits
 # EPS ignores commands above this angle and causes PCS to fault
@@ -104,6 +117,33 @@ def high_torque_tracking_shortfall(desired_curvature, actual_curvature, v_ego, a
           abs(actual_lateral_accel) < actual_ratio * abs(desired_lateral_accel))
 
 
+def high_torque_tracking_reason(desired_curvature, actual_curvature, v_ego, actual_ratio):
+  """Return the first observable reason the response gate is not eligible."""
+  try:
+    v_ego = float(v_ego)
+    desired_lateral_accel = float(desired_curvature) * v_ego ** 2
+    actual_lateral_accel = float(actual_curvature) * v_ego ** 2
+    actual_ratio = float(actual_ratio)
+  except (TypeError, ValueError):
+    return "invalid_tracking_input"
+
+  if not all(math.isfinite(value) for value in (desired_lateral_accel, actual_lateral_accel, actual_ratio, v_ego)):
+    return "invalid_tracking_input"
+  if not 0.0 < actual_ratio <= 1.0:
+    return "invalid_tracking_ratio"
+  if v_ego < TOADPILOT_HIGH_TORQUE_MIN_SPEED:
+    return "below_speed_window"
+  if v_ego > TOADPILOT_HIGH_TORQUE_MAX_SPEED:
+    return "above_speed_window"
+  if abs(desired_lateral_accel) < TOADPILOT_HIGH_TORQUE_MIN_DESIRED_ACCEL:
+    return "curve_demand_low"
+  if desired_lateral_accel * actual_lateral_accel <= 0.0:
+    return "response_direction_mismatch"
+  if abs(actual_lateral_accel) >= actual_ratio * abs(desired_lateral_accel):
+    return "tracking_sufficient"
+  return "eligible"
+
+
 def actual_curvature_from_angular_velocity(angular_velocity, v_ego):
   """Use calibrated yaw rate for a roll/steering-offset-independent response."""
   try:
@@ -137,7 +177,56 @@ def high_torque_runtime_allowed(*, main_enabled, lat_active, steering_pressed, b
           high_torque_tracking_shortfall(desired_curvature, actual_curvature, v_ego, actual_ratio))
 
 
-def steer_torque_target(requested_steer, params, high_torque_armed):
+def high_torque_runtime_reason(*, main_enabled, lat_active, steering_pressed, brake_pressed, stopping,
+                               lane_change_active, steering_rate_deg, requested_steer, desired_curvature,
+                               actual_curvature, v_ego, actual_ratio):
+  """Explain the same gate used by high_torque_runtime_allowed without changing it."""
+  try:
+    steering_rate_deg = float(steering_rate_deg)
+    requested_steer = float(requested_steer)
+    desired_curvature = float(desired_curvature)
+  except (TypeError, ValueError):
+    return "invalid_controller_input"
+  if not all(math.isfinite(value) for value in (steering_rate_deg, requested_steer, desired_curvature)):
+    return "invalid_controller_input"
+  if not main_enabled:
+    return "controls_disabled"
+  if not lat_active:
+    return "lateral_inactive"
+  if steering_pressed:
+    return "driver_override"
+  if brake_pressed:
+    return "brake"
+  if stopping:
+    return "longitudinal_stopping"
+  if lane_change_active:
+    return "lane_change"
+  if abs(steering_rate_deg) >= TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE:
+    return "steering_rate_limit"
+  if requested_steer * desired_curvature >= 0.0:
+    return "torque_direction_mismatch"
+  return high_torque_tracking_reason(desired_curvature, actual_curvature, v_ego, actual_ratio)
+
+
+def high_torque_headroom_scale(steering_rate_deg, steering_rate_rise):
+  """Scale only the extra 200 units near a rapidly rising steering rate."""
+  try:
+    rate = abs(float(steering_rate_deg))
+    rate_rise = float(steering_rate_rise)
+  except (TypeError, ValueError):
+    return 0.0
+  if not math.isfinite(rate) or not math.isfinite(rate_rise):
+    return 0.0
+  rapid_rise = rate >= TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE and \
+               rate_rise >= TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA
+  if rapid_rise:
+    return 0.0
+  return float(interp(rate,
+                      [TOADPILOT_HIGH_TORQUE_FULL_HEADROOM_RATE, TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE],
+                      [1.0, 0.0]))
+
+
+def steer_torque_target(requested_steer, params, high_torque_armed, headroom_scale=1.0):
   """Preserve stock scaling, then add proportional headroom once armed."""
   requested_steer = float(clip(requested_steer, -1.0, 1.0))
   target = int(round(requested_steer * params.STEER_COMMAND_SCALE))
@@ -149,7 +238,10 @@ def steer_torque_target(requested_steer, params, high_torque_armed):
       abs(requested_steer), [TOADPILOT_HIGH_TORQUE_MAPPING_START, 1.0],
       [stock_mapping_start, params.STEER_MAX],
     )
-    target = int(round(direction * target_magnitude))
+    stock_target = requested_steer * params.STEER_COMMAND_SCALE
+    scaled_magnitude = abs(stock_target) + clip(float(headroom_scale), 0.0, 1.0) * \
+      (target_magnitude - abs(stock_target))
+    target = int(round(direction * scaled_magnitude))
   return int(clip(target, -params.STEER_MAX, params.STEER_MAX))
 
 
@@ -213,6 +305,10 @@ class CarController(CarControllerBase):
     self.high_torque_saturation_direction = 0
     self.high_torque_saturation_frames = 0
     self.high_torque_armed = False
+    self.high_torque_rate_history = deque(maxlen=TOADPILOT_HIGH_TORQUE_RATE_HISTORY_FRAMES + 1)
+    self.high_torque_fault_cooldown_frames = 0
+    self.high_torque_status_state = "stock"
+    self.high_torque_status_reason = "initializing"
 
     # *** start long control state ***
     self.long_pid = get_long_tune(self.CP, self.params)
@@ -222,6 +318,8 @@ class CarController(CarControllerBase):
 
     self.accel = 0
     self.prev_accel = 0
+    self.previous_long_control_state = LongCtrlState.off
+    self.toadpilot_stop_go_release_active = False
     # *** end long control state ***
 
     self.packer = CANPacker(dbc_name)
@@ -254,6 +352,25 @@ class CarController(CarControllerBase):
     pcm_cancel_cmd = CC.cruiseControl.cancel
     lat_active = CC.latActive and abs(CS.out.steeringTorque) < MAX_USER_TORQUE
 
+    stop_go_launch_eligible = (
+      getattr(frogpilot_toggles, "toadpilot_improved_stop_and_go", False) is True and
+      self.CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS2 and getattr(self.CP, "autoResumeSng", False) and
+      self.CP.openpilotLongitudinalControl and CC.longActive and not CS.out.brakePressed and
+      math.isfinite(float(actuators.accel)) and actuators.accel > 0.0 and
+      math.isfinite(float(CS.out.vEgo)) and CS.out.vEgo < TOADPILOT_STOP_RELEASE_MAX_SPEED and
+      actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid)
+    )
+    released_from_stop = self.previous_long_control_state == LongCtrlState.stopping and stop_go_launch_eligible
+    if released_from_stop:
+      # A braking-approach integral is stale once the planner has positively
+      # released the stop. Clearing it avoids carrying the old stop command
+      # into an otherwise valid launch.
+      self.long_pid.reset()
+      self.toadpilot_stop_go_release_active = True
+    elif not stop_go_launch_eligible:
+      self.toadpilot_stop_go_release_active = False
+    self.previous_long_control_state = actuators.longControlState
+
     if len(CC.orientationNED) == 3:
       self.pitch.update(CC.orientationNED[1])
 
@@ -275,7 +392,7 @@ class CarController(CarControllerBase):
     actual_curvature = actual_curvature_from_angular_velocity(CC.angularVelocity, CS.out.vEgo)
     tracking_ratio = (TOADPILOT_HIGH_TORQUE_RELEASE_TRACKING_RATIO if self.high_torque_armed else
                       TOADPILOT_HIGH_TORQUE_ARM_TRACKING_RATIO)
-    high_torque_allowed = high_torque_runtime_allowed(
+    runtime_gate_values = dict(
       main_enabled=CC.enabled,
       lat_active=lat_active,
       steering_pressed=CS.out.steeringPressed,
@@ -289,12 +406,51 @@ class CarController(CarControllerBase):
       v_ego=CS.out.vEgo,
       actual_ratio=tracking_ratio,
     )
+    high_torque_reason = high_torque_runtime_reason(**runtime_gate_values)
+    high_torque_allowed = high_torque_runtime_allowed(**runtime_gate_values)
+
+    steering_rate_abs = abs(float(CS.out.steeringRateDeg)) if math.isfinite(float(CS.out.steeringRateDeg)) else math.inf
+    self.high_torque_rate_history.append(steering_rate_abs)
+    steering_rate_rise = (steering_rate_abs - self.high_torque_rate_history[0]
+                          if len(self.high_torque_rate_history) > TOADPILOT_HIGH_TORQUE_RATE_HISTORY_FRAMES else 0.0)
+    headroom_scale = high_torque_headroom_scale(steering_rate_abs, steering_rate_rise)
+
+    cooldown_active = False
+    cooldown_frames_remaining = self.high_torque_fault_cooldown_frames
+    if CS.out.steerFaultTemporary:
+      self.high_torque_fault_cooldown_frames = TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES
+      cooldown_frames_remaining = self.high_torque_fault_cooldown_frames
+      high_torque_reason = "eps_temporary_fault"
+      high_torque_allowed = False
+    elif self.high_torque_fault_cooldown_frames > 0:
+      cooldown_active = True
+      cooldown_frames_remaining = self.high_torque_fault_cooldown_frames
+      self.high_torque_fault_cooldown_frames -= 1
+      high_torque_reason = "eps_fault_cooldown"
+      high_torque_allowed = False
+
     self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed = \
       update_high_torque_authority(
         actuators.steer, high_torque_allowed, self.params.TOADPILOT_HIGH_TORQUE,
         self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed,
       )
-    new_steer = steer_torque_target(actuators.steer, self.params, self.high_torque_armed)
+    if high_torque_allowed and not self.high_torque_armed and \
+        abs(float(actuators.steer)) < TOADPILOT_HIGH_TORQUE_SATURATION_THRESHOLD:
+      high_torque_reason = "waiting_for_saturation"
+    elif high_torque_allowed and self.high_torque_armed and \
+        abs(float(actuators.steer)) <= TOADPILOT_HIGH_TORQUE_MAPPING_START:
+      high_torque_reason = "armed_below_extension_mapping"
+    elif high_torque_allowed and self.high_torque_armed and headroom_scale == 0.0 and \
+        steering_rate_abs >= TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE:
+      high_torque_reason = "extra_paused_rate_rising"
+    elif high_torque_allowed and self.high_torque_armed and headroom_scale < 1.0:
+      high_torque_reason = "extra_tapered_steering_rate"
+    elif high_torque_allowed and self.high_torque_armed:
+      high_torque_reason = "curve_undertracking"
+    elif high_torque_allowed and self.high_torque_saturation_frames > 0:
+      high_torque_reason = "saturation_handshake"
+
+    new_steer = steer_torque_target(actuators.steer, self.params, self.high_torque_armed, headroom_scale)
     # Runtime blockers remove the extended target immediately. The applied CAN
     # command still unwinds through Toyota/Panda's unchanged 25-unit/frame limit;
     # from 1700, returning to the stock 1500 envelope takes up to 0.08 seconds.
@@ -323,6 +479,37 @@ class CarController(CarControllerBase):
           apply_angle = CS.out.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
 
         self.last_angle = clip(apply_angle, -MAX_LTA_ANGLE, MAX_LTA_ANGLE)
+
+    # Derive diagnostics from the final torque payload after all lateral and
+    # request-bit suppression. The target remains available separately.
+    effective_headroom_scale = headroom_scale if self.high_torque_armed and high_torque_allowed else 0.0
+    if not self.params.TOADPILOT_HIGH_TORQUE:
+      high_torque_state = "stock"
+      high_torque_reason = "not_authorized"
+    elif CS.out.steerFaultTemporary:
+      high_torque_state = "eps_temporary_fault"
+    elif cooldown_active:
+      high_torque_state = "eps_cooldown"
+    elif abs(apply_steer) > self.params.STEER_COMMAND_SCALE and not self.high_torque_armed:
+      high_torque_state = "returning_stock"
+    elif abs(apply_steer) > self.params.STEER_COMMAND_SCALE:
+      high_torque_state = "extended"
+    elif self.high_torque_armed:
+      high_torque_state = "armed"
+    elif self.high_torque_saturation_frames > 0:
+      high_torque_state = "arming"
+    else:
+      high_torque_state = "stock"
+    if (high_torque_state, high_torque_reason) != (self.high_torque_status_state, self.high_torque_status_reason):
+      if high_torque_state in ("extended", "returning_stock", "eps_temporary_fault") or \
+          self.high_torque_status_state == "extended":
+        carlog.info(
+          "TOADPILOT steering authority: %s (%s), target=%d output=%d request=%s rate=%.1f rise=%.1f scale=%.2f",
+          high_torque_state, high_torque_reason, new_steer, apply_steer, apply_steer_req,
+          float(CS.out.steeringRateDeg), steering_rate_rise, effective_headroom_scale,
+        )
+      self.high_torque_status_state = high_torque_state
+      self.high_torque_status_reason = high_torque_reason
 
     self.last_steer = apply_steer
 
@@ -420,11 +607,21 @@ class CarController(CarControllerBase):
           else:
             self.distance_button = 0
 
-        # internal PCM gas command can get stuck unwinding from negative accel so we apply a generous rate limit
+        # The regular positive command stays at 4 m/s^3. A confirmed Camry stop
+        # release uses the faster limit only until the stale negative request
+        # reaches zero.
         pcm_accel_cmd = actuators.accel
         if CC.longActive:
-          pcm_accel_cmd = rate_limit(pcm_accel_cmd, self.prev_accel, ACCEL_WINDDOWN_LIMIT, ACCEL_WINDUP_LIMIT)
+          fast_negative_release = self.toadpilot_stop_go_release_active and self.prev_accel < 0.0
+          windup_limit = TOADPILOT_STOP_RELEASE_WINDUP_LIMIT if fast_negative_release else ACCEL_WINDUP_LIMIT
+          pcm_accel_cmd = rate_limit(pcm_accel_cmd, self.prev_accel, ACCEL_WINDDOWN_LIMIT, windup_limit)
+          if fast_negative_release:
+            # The larger step may reach, but never cross, zero. The following
+            # Toyota command uses the normal positive-acceleration slew.
+            pcm_accel_cmd = min(pcm_accel_cmd, 0.0)
         self.prev_accel = pcm_accel_cmd
+        if self.prev_accel >= 0.0:
+          self.toadpilot_stop_go_release_active = False
 
         # calculate amount of acceleration PCM should apply to reach target, given pitch.
         # clipped to only include downhill angles, avoids erroneously unsetting PERMIT_BRAKING when stopping on uphills
@@ -520,6 +717,18 @@ class CarController(CarControllerBase):
     # the exact (possibly extended) command for diagnostics.
     new_actuators.steer = clip(apply_steer / self.params.STEER_COMMAND_SCALE, -1.0, 1.0)
     new_actuators.steerOutputCan = apply_steer
+    new_actuators.toadPilotHighTorqueAuthorized = self.params.TOADPILOT_HIGH_TORQUE
+    new_actuators.toadPilotHighTorqueState = self.high_torque_status_state
+    new_actuators.toadPilotHighTorqueReason = self.high_torque_status_reason
+    new_actuators.toadPilotHighTorqueArmProgress = \
+      self.high_torque_saturation_frames / TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES
+    new_actuators.toadPilotHighTorqueTargetCan = new_steer
+    new_actuators.toadPilotHighTorqueHeadroomScale = effective_headroom_scale
+    new_actuators.toadPilotSteeringRateRise = steering_rate_rise
+    new_actuators.toadPilotFaultCooldown = cooldown_frames_remaining * DT_CTRL
+    new_actuators.toadPilotStopGoReleaseActive = self.toadpilot_stop_go_release_active
+    new_actuators.toadPilotLongAccelTarget = actuators.accel
+    new_actuators.toadPilotSteerRequest = apply_steer_req
     new_actuators.steeringAngleDeg = self.last_angle
     new_actuators.accel = self.accel
 

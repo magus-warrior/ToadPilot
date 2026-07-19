@@ -12,11 +12,18 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.car import apply_meas_steer_torque_limits, gen_empty_fingerprint
 from openpilot.selfdrive.car.toyota.carcontroller import (TOADPILOT_HIGH_TORQUE_MAPPING_START,
                                                          TOADPILOT_HIGH_TORQUE_ARM_TRACKING_RATIO,
+                                                         TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES,
+                                                         TOADPILOT_HIGH_TORQUE_FULL_HEADROOM_RATE,
                                                          TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE,
+                                                         TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA,
+                                                         TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE,
                                                          TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES,
+                                                         TOADPILOT_STOP_RELEASE_WINDUP_LIMIT,
                                                          CarController,
                                                          actual_curvature_from_angular_velocity,
+                                                         high_torque_headroom_scale,
                                                          high_torque_runtime_allowed,
+                                                         high_torque_runtime_reason,
                                                          high_torque_tracking_shortfall,
                                                          steer_torque_target,
                                                          update_high_torque_authority)
@@ -80,6 +87,17 @@ class TestToadPilotHighTorqueController(unittest.TestCase):
     stock = controller_params(flagged=False)
     self.assertEqual(steer_torque_target(1.0, stock, True), 1500)
     self.assertEqual(steer_torque_target(-1.0, stock, True), -1500)
+
+  def test_only_extra_headroom_tapers_near_high_or_rapidly_rising_rate(self):
+    params = controller_params()
+    self.assertEqual(steer_torque_target(1.0, params, True, 1.0), 1700)
+    self.assertEqual(steer_torque_target(1.0, params, True, 0.5), 1600)
+    self.assertEqual(steer_torque_target(1.0, params, True, 0.0), 1500)
+    self.assertEqual(high_torque_headroom_scale(TOADPILOT_HIGH_TORQUE_FULL_HEADROOM_RATE, 0.0), 1.0)
+    self.assertEqual(high_torque_headroom_scale(65.0, 0.0), 0.5)
+    self.assertEqual(high_torque_headroom_scale(TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE, 0.0), 0.0)
+    self.assertEqual(high_torque_headroom_scale(TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE,
+                                                TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA), 0.0)
 
   def test_saturation_arming_is_continuous_with_release_hysteresis(self):
     direction = frames = 0
@@ -149,6 +167,7 @@ class TestToadPilotHighTorqueController(unittest.TestCase):
       with self.subTest(name=name):
         case = {**allowed, **overrides}
         self.assertFalse(high_torque_runtime_allowed(**case))
+        self.assertNotEqual(high_torque_runtime_reason(**case), "eligible")
 
   def test_actual_curvature_uses_calibrated_yaw_rate_and_fails_closed(self):
     self.assertAlmostEqual(actual_curvature_from_angular_velocity([0.0, 0.0, 0.2], 10.0), 0.02)
@@ -218,6 +237,7 @@ class TestToadPilotHighTorqueControllerSequence(unittest.TestCase):
       lock_doors=False,
       unlock_doors=False,
       reverse_cruise_increase=False,
+      toadpilot_improved_stop_and_go=True,
     )
 
   def tearDown(self):
@@ -291,6 +311,102 @@ class TestToadPilotHighTorqueControllerSequence(unittest.TestCase):
         block()
         self.update()
         self.assertFalse(self.controller.high_torque_armed)
+
+  def test_rapid_rate_rise_pauses_only_extra_headroom_without_losing_arm(self):
+    for _ in range(TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES):
+      self.update()
+    self.assertTrue(self.controller.high_torque_armed)
+    for _ in range(10):
+      self.car_state.steeringRateDeg = 40.0
+      self.update()
+
+    self.car_state.steeringRateDeg = 65.0
+    output = self.update()
+    self.assertTrue(self.controller.high_torque_armed)
+    self.assertEqual(output.toadPilotHighTorqueReason, "extra_paused_rate_rising")
+    self.assertLessEqual(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+
+    for _ in range(TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES):
+      self.car_state.steeringRateDeg = 40.0
+      output = self.update()
+    self.assertTrue(self.controller.high_torque_armed)
+    self.assertEqual(output.toadPilotHighTorqueHeadroomScale, 1.0)
+    self.assertGreater(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+
+  def test_temporary_eps_fault_pauses_extra_authority_then_requires_normal_rearm(self):
+    for _ in range(TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES):
+      self.update()
+    self.assertTrue(self.controller.high_torque_armed)
+
+    self.car_state.steerFaultTemporary = True
+    output = self.update()
+    self.assertFalse(self.controller.high_torque_armed)
+    self.assertEqual(output.toadPilotHighTorqueState, "eps_temporary_fault")
+    self.assertLessEqual(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+
+    self.car_state.steerFaultTemporary = False
+    for frame in range(TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES):
+      output = self.update()
+      self.assertFalse(self.controller.high_torque_armed)
+      self.assertLessEqual(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+      self.assertEqual(output.toadPilotHighTorqueState, "eps_cooldown")
+      if frame == TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES - 1:
+        self.assertAlmostEqual(output.toadPilotFaultCooldown, 0.01)
+
+    for _ in range(TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES):
+      output = self.update()
+    self.assertTrue(self.controller.high_torque_armed)
+    self.assertGreater(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+
+  def test_armed_partial_extension_reports_applied_reason_and_effective_scale(self):
+    for _ in range(TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES):
+      self.update()
+    self.CC.actuators.steer = -0.95
+    output = self.update()
+    self.assertEqual(output.toadPilotHighTorqueState, "armed")
+    self.assertEqual(output.toadPilotHighTorqueReason, "curve_undertracking")
+    self.assertGreater(abs(output.toadPilotHighTorqueTargetCan), TOYOTA_STEER_COMMAND_SCALE)
+    self.assertEqual(output.toadPilotHighTorqueHeadroomScale, 1.0)
+
+  def test_final_status_matches_zeroed_lateral_command(self):
+    self.controller.last_steer = -TOADPILOT_HIGH_TORQUE_MAX
+    self.controller.high_torque_saturation_direction = -1
+    self.controller.high_torque_saturation_frames = TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES
+    self.controller.high_torque_armed = True
+    self.CC.latActive = False
+
+    output = self.update()
+    self.assertEqual(output.steerOutputCan, 0)
+    self.assertFalse(output.toadPilotSteerRequest)
+    self.assertEqual(output.toadPilotHighTorqueState, "stock")
+    self.assertEqual(output.toadPilotHighTorqueHeadroomScale, 0.0)
+
+  def test_confirmed_camry_launch_clears_stale_integral_and_unwinds_only_negative_request_faster(self):
+    self.CP.openpilotLongitudinalControl = True
+    self.CC.longActive = True
+    self.CC.actuators.longControlState = car.CarControl.Actuators.LongControlState.pid
+    self.CC.actuators.accel = 0.6
+    self.car_state.vEgo = 0.0
+    self.car_state.vEgoRaw = 0.0
+    self.controller.previous_long_control_state = car.CarControl.Actuators.LongControlState.stopping
+    self.controller.prev_accel = -1.0
+    self.controller.long_pid.i = -0.5
+    self.controller.frame = 0
+
+    output = self.update()
+    self.assertAlmostEqual(self.controller.prev_accel, -1.0 + TOADPILOT_STOP_RELEASE_WINDUP_LIMIT)
+    self.assertTrue(output.toadPilotStopGoReleaseActive)
+    self.assertAlmostEqual(output.toadPilotLongAccelTarget, 0.6)
+    self.assertGreater(output.accel, -1.0)
+
+    # The faster release may reach zero, but it must not carry any part of the
+    # larger step into positive acceleration.
+    self.controller.prev_accel = -0.05
+    self.controller.toadpilot_stop_go_release_active = True
+    self.controller.frame = 3
+    output = self.update()
+    self.assertEqual(self.controller.prev_accel, 0.0)
+    self.assertFalse(output.toadPilotStopGoReleaseActive)
 
 
 if __name__ == "__main__":

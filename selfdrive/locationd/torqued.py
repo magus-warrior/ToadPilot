@@ -126,6 +126,10 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_torque_extension_active = False
     self.toadpilot_torque_current_output_can = None
     self.toadpilot_torque_peak_abs_output_can = 0.0
+    self.toadpilot_controller_state = "unavailable"
+    self.toadpilot_controller_reason = "waiting_for_controller"
+    self.toadpilot_controller_state_samples = {}
+    self.toadpilot_controller_reason_samples = {}
     self.toadpilot_extended_output_samples = 0
     self.toadpilot_last_extended_monotonic = None
     self.toadpilot_extended_window_until = None
@@ -144,6 +148,8 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_extended_window_driver_override_samples = 0
     self.toadpilot_extended_window_temporary_fault_seen = False
     self.toadpilot_extended_window_permanent_fault_seen = False
+    self.toadpilot_temporary_fault_statuses = set()
+    self.toadpilot_extended_window_temporary_fault_statuses = set()
     self.offline_latAccelFactor = 0.0
     self.resets = 0.0
     self.use_params = CP.carName in ALLOWED_CARS and self.is_torque_tuning
@@ -290,11 +296,11 @@ class TorqueEstimator(ParameterEstimator):
       self.filtered_params[param].update(value)
       self.filtered_params[param].update_alpha(self.decay)
 
-  def update_toadpilot_torque_diagnostic(self, t, steer_output_can):
+  def update_toadpilot_torque_diagnostic(self, t, actuators_output):
     if not self.toadpilot_high_torque_authorized:
       return
     try:
-      steer_output_can = float(steer_output_can)
+      steer_output_can = float(actuators_output.steerOutputCan)
       t = float(t)
     except (TypeError, ValueError):
       self.toadpilot_torque_output_valid = False
@@ -314,6 +320,12 @@ class TorqueEstimator(ParameterEstimator):
       self.toadpilot_extended_output_samples += 1
       self.toadpilot_last_extended_monotonic = t
       self.toadpilot_extended_window_until = t + TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS
+    state = str(getattr(actuators_output, "toadPilotHighTorqueState", "") or "unknown")
+    reason = str(getattr(actuators_output, "toadPilotHighTorqueReason", "") or "unknown")
+    self.toadpilot_controller_state = state
+    self.toadpilot_controller_reason = reason
+    self.toadpilot_controller_state_samples[state] = self.toadpilot_controller_state_samples.get(state, 0) + 1
+    self.toadpilot_controller_reason_samples[reason] = self.toadpilot_controller_reason_samples.get(reason, 0) + 1
 
   def toadpilot_torque_snapshot(self, inputs_valid=True, route_id=None):
     inputs_valid = bool(inputs_valid)
@@ -337,6 +349,7 @@ class TorqueEstimator(ParameterEstimator):
       "completed_at_unix": None,
       "summary_source": "torqued_live",
       "command_semantics": "controller_command_before_panda_or_eps",
+      "output_sample_semantics": "torqued_latest_carOutput_at_20hz_not_CAN_frame_count",
       "route_metrics_scope": "whole_authorized_route",
       "extended_metrics_scope": "car_state_samples_during_extension_and_0.5s_post_extension_tail",
       "extended_window_tail_seconds": TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS,
@@ -349,6 +362,10 @@ class TorqueEstimator(ParameterEstimator):
                              if self.toadpilot_torque_output_valid else None),
       "peak_abs_output_can": round(self.toadpilot_torque_peak_abs_output_can, 3),
       "extended_output_samples": int(self.toadpilot_extended_output_samples),
+      "controller_state": self.toadpilot_controller_state,
+      "controller_reason": self.toadpilot_controller_reason,
+      "controller_state_samples": dict(self.toadpilot_controller_state_samples),
+      "controller_reason_samples": dict(self.toadpilot_controller_reason_samples),
       "last_extended_monotonic": (round(self.toadpilot_last_extended_monotonic, 3)
                                   if self.toadpilot_last_extended_monotonic is not None else None),
       "car_state_valid": car_state_valid,
@@ -359,6 +376,7 @@ class TorqueEstimator(ParameterEstimator):
       "driver_override_samples": int(self.toadpilot_driver_override_samples),
       "temporary_fault_seen": bool(self.toadpilot_temporary_fault_seen),
       "permanent_fault_seen": bool(self.toadpilot_permanent_fault_seen),
+      "temporary_fault_statuses": sorted(self.toadpilot_temporary_fault_statuses),
       "extended_window_car_state_samples": int(self.toadpilot_extended_window_car_state_samples),
       "extended_window_peak_abs_eps_torque": round(self.toadpilot_extended_window_peak_abs_eps_torque, 3),
       "extended_window_peak_abs_steering_rate_deg": round(
@@ -367,6 +385,7 @@ class TorqueEstimator(ParameterEstimator):
       "extended_window_driver_override_samples": int(self.toadpilot_extended_window_driver_override_samples),
       "extended_window_temporary_fault_seen": bool(self.toadpilot_extended_window_temporary_fault_seen),
       "extended_window_permanent_fault_seen": bool(self.toadpilot_extended_window_permanent_fault_seen),
+      "extended_window_temporary_fault_statuses": sorted(self.toadpilot_extended_window_temporary_fault_statuses),
     }
 
   def update_toadpilot_car_state_diagnostic(self, t, msg):
@@ -379,6 +398,7 @@ class TorqueEstimator(ParameterEstimator):
       steering_pressed = bool(msg.steeringPressed)
       temporary_fault = bool(msg.steerFaultTemporary)
       permanent_fault = bool(msg.steerFaultPermanent)
+      temporary_fault_status = int(getattr(msg, "steerFaultStatusInitial", 255))
     except (AttributeError, TypeError, ValueError):
       self.toadpilot_car_state_valid = False
       return
@@ -394,6 +414,8 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_driver_override_samples += int(steering_pressed)
     self.toadpilot_temporary_fault_seen |= temporary_fault
     self.toadpilot_permanent_fault_seen |= permanent_fault
+    if temporary_fault:
+      self.toadpilot_temporary_fault_statuses.add(temporary_fault_status)
     in_extended_window = (self.toadpilot_last_extended_monotonic is not None and
                           self.toadpilot_extended_window_until is not None and
                           self.toadpilot_last_extended_monotonic <= t <= self.toadpilot_extended_window_until)
@@ -408,6 +430,8 @@ class TorqueEstimator(ParameterEstimator):
       self.toadpilot_extended_window_driver_override_samples += int(steering_pressed)
       self.toadpilot_extended_window_temporary_fault_seen |= temporary_fault
       self.toadpilot_extended_window_permanent_fault_seen |= permanent_fault
+      if temporary_fault:
+        self.toadpilot_extended_window_temporary_fault_statuses.add(temporary_fault_status)
 
   def handle_log(self, t, which, msg):
     if which == "carControl":
@@ -417,7 +441,7 @@ class TorqueEstimator(ParameterEstimator):
       self.raw_points["carOutput_t"].append(t + self.lag)
       self.raw_points["steer_torque"].append(-msg.actuatorsOutput.steer)
       self.raw_points["steer_output_can"].append(msg.actuatorsOutput.steerOutputCan)
-      self.update_toadpilot_torque_diagnostic(t, msg.actuatorsOutput.steerOutputCan)
+      self.update_toadpilot_torque_diagnostic(t, msg.actuatorsOutput)
     elif which == "carState":
       self.raw_points["carState_t"].append(t + self.lag)
       self.raw_points["vego"].append(msg.vEgo)

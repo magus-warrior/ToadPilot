@@ -1,14 +1,27 @@
+import math
+import time
+
 from cereal import car
 from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, apply_deadzone
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
-from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import StartAccelRamp
+from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_END_SPEED,
+                                                                        START_ACCEL_RAMP_MAX_DURATION,
+                                                                        StartAccelRamp)
+from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
+STOP_GO_PLANNER_STOP_GRACE = 0.10
+STOP_GO_PLANNER_STOP_GRACE_FRAMES = max(1, round(STOP_GO_PLANNER_STOP_GRACE / DT_CTRL))
+
+
+def _finite_number(value):
+  return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def should_stop_for_long_control(planner_should_stop, forcing_stop):
@@ -16,10 +29,30 @@ def should_stop_for_long_control(planner_should_stop, forcing_stop):
   return bool(planner_should_stop or forcing_stop)
 
 
+def cruise_standstill_for_long_control(CP, cruise_standstill, improved_stop_and_go, *, active,
+                                       should_stop, brake_pressed, planner_accel):
+  """Return the Toyota/PCM standstill gate that should hold longitudinal control.
+
+  Auto-resume stop-and-go platforms can report cruise standstill for a few
+  frames after the planner has released a stop. On the supported Camry Hybrid,
+  the Toyota controller already releases standstill directly; treating that
+  stale status as a new hold keeps LongControl in stopping or cancels the
+  optional acceleration ramp. The explicit TOADPILOT setting filters only that
+  status during a bounded handoff. Planner stops and brake input remain
+  separate hard gates.
+  """
+  pcm_standstill = bool(cruise_standstill and not CP.enableGasInterceptor)
+  auto_resume = bool(getattr(CP, "autoResumeSng", False))
+  supported_camry = (getattr(CP, "carName", "") == "toyota" and
+                     getattr(CP, "carFingerprint", "") == TOADPILOT_FINGERPRINT)
+  planner_launch = (active and not should_stop and not brake_pressed and
+                    _finite_number(planner_accel) and planner_accel > 0.0)
+  bypass_stale_status = improved_stop_and_go and auto_resume and supported_camry and planner_launch
+  return pcm_standstill and not bypass_stale_status
+
+
 def long_control_state_trans(CP, active, long_control_state, v_ego,
                              should_stop, brake_pressed, cruise_standstill, frogpilot_toggles):
-  # Ignore cruise standstill if car has a gas interceptor
-  cruise_standstill = cruise_standstill and not CP.enableGasInterceptor
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
@@ -102,21 +135,181 @@ class LongControl:
     self.v_pid = 0.0
     self.last_output_accel = 0.0
     self.start_accel_ramp = StartAccelRamp()
+    self.stop_go_handoff_active = False
+    self.stop_go_handoff_elapsed = 0.0
+    self.stop_go_handoff_last_event = "idle"
+    self.stop_go_handoff_last_detail = None
+    self.stop_go_planner_stop_pending = False
+    self.stop_go_planner_stop_elapsed = 0.0
+    self.stop_go_planner_stop_frames = 0
+    self.stop_go_planner_stop_recovered = False
+    self.stop_go_last_handoff_duration = 0.0
+    self.stop_go_last_planner_stop_duration = 0.0
+    self.stop_go_event_sequence = 0
+    self.stop_go_event_counts = {}
+    self.stop_go_last_event_unix = None
+    self.stop_go_route_started_at_unix = time.time()
 
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits, frogpilot_toggles):
+  def _record_stop_go_event(self, event, CS, planner_accel, detail=None):
+    self.stop_go_handoff_last_event = event
+    self.stop_go_handoff_last_detail = detail
+    self.stop_go_last_event_unix = time.time()
+    self.stop_go_event_sequence += 1
+    counter_key = event if detail is None else f"{event}:{detail}"
+    self.stop_go_event_counts[counter_key] = self.stop_go_event_counts.get(counter_key, 0) + 1
+    cloudlog.event(
+      "toadpilot_stop_and_go",
+      handoff_event=event,
+      detail=detail,
+      elapsed=round(float(self.stop_go_handoff_elapsed), 3),
+      speed=round(float(CS.vEgo), 3) if _finite_number(CS.vEgo) else None,
+      planner_accel=round(float(planner_accel), 3) if _finite_number(planner_accel) else None,
+    )
+
+  def _finish_stop_go_handoff(self, event, CS, planner_accel, detail=None):
+    if self.stop_go_handoff_active or self.stop_go_planner_stop_pending:
+      self.stop_go_last_handoff_duration = self.stop_go_handoff_elapsed
+      self.stop_go_last_planner_stop_duration = self.stop_go_planner_stop_elapsed
+      self._record_stop_go_event(event, CS, planner_accel, detail)
+    self.stop_go_handoff_active = False
+    self.stop_go_handoff_elapsed = 0.0
+    self.stop_go_planner_stop_pending = False
+    self.stop_go_planner_stop_elapsed = 0.0
+    self.stop_go_planner_stop_frames = 0
+
+  def _update_stop_go_handoff(self, previous_long_control_state, active, CS, planner_accel,
+                              should_stop, frogpilot_toggles, *, forcing_stop=False,
+                              inactive_reason="controls_inactive"):
+    self.stop_go_planner_stop_recovered = False
+    setting_enabled = getattr(frogpilot_toggles, "toadpilot_improved_stop_and_go", False) is True
+    supported = (setting_enabled and getattr(self.CP, "autoResumeSng", False) is True and
+                 getattr(self.CP, "carName", "") == "toyota" and
+                 getattr(self.CP, "carFingerprint", "") == TOADPILOT_FINGERPRINT)
+    valid_accel = _finite_number(planner_accel)
+    valid_speed = _finite_number(CS.vEgo)
+
+    finish_reason = None
+    contradictory_planner_stop = (self.stop_go_handoff_active and should_stop and not forcing_stop and
+                                  active and not CS.brakePressed and valid_accel and planner_accel > 0.0 and
+                                  valid_speed and CS.vEgo < START_ACCEL_RAMP_END_SPEED)
+
+    if not supported:
+      finish_reason = "setting_or_vehicle_inactive"
+    elif not active:
+      finish_reason = "controls_inactive"
+    elif forcing_stop:
+      finish_reason = "forced_stop"
+    elif should_stop and not contradictory_planner_stop:
+      finish_reason = "planner_stop"
+    elif CS.brakePressed:
+      finish_reason = "brake"
+    elif not valid_accel or planner_accel <= 0.0:
+      finish_reason = "planner_cancelled"
+    elif not valid_speed:
+      finish_reason = "invalid_speed"
+    elif CS.vEgo >= START_ACCEL_RAMP_END_SPEED:
+      finish_reason = "speed_complete"
+    elif self.stop_go_handoff_elapsed >= START_ACCEL_RAMP_MAX_DURATION:
+      finish_reason = "timeout"
+
+    if finish_reason is not None:
+      detail = inactive_reason if finish_reason == "controls_inactive" else None
+      self._finish_stop_go_handoff(finish_reason, CS, planner_accel, detail)
+    elif contradictory_planner_stop:
+      self.stop_go_handoff_elapsed += DT_CTRL
+      self.stop_go_planner_stop_frames += 1
+      self.stop_go_planner_stop_elapsed = self.stop_go_planner_stop_frames * DT_CTRL
+      if not self.stop_go_planner_stop_pending:
+        self.stop_go_planner_stop_pending = True
+        self._record_stop_go_event("planner_stop_pending", CS, planner_accel)
+      if self.stop_go_planner_stop_frames >= STOP_GO_PLANNER_STOP_GRACE_FRAMES:
+        self._finish_stop_go_handoff("planner_stop_confirmed", CS, planner_accel)
+    elif self.stop_go_planner_stop_pending:
+      self.stop_go_last_planner_stop_duration = self.stop_go_planner_stop_elapsed
+      self.stop_go_planner_stop_pending = False
+      self.stop_go_planner_stop_elapsed = 0.0
+      self.stop_go_planner_stop_frames = 0
+      self.stop_go_planner_stop_recovered = True
+      self.stop_go_handoff_elapsed += DT_CTRL
+      self._record_stop_go_event("planner_stop_cleared", CS, planner_accel)
+    elif self.stop_go_handoff_active:
+      self.stop_go_handoff_elapsed += DT_CTRL
+    elif previous_long_control_state == LongCtrlState.stopping:
+      self.stop_go_handoff_active = True
+      self.stop_go_handoff_elapsed = DT_CTRL
+      self._record_stop_go_event("started", CS, planner_accel)
+
+    return self.stop_go_handoff_active
+
+  def stop_go_snapshot(self, configured_accel, route_id=None, supported=False, improved_stop_go_active=False):
+    ramp_configured = _finite_number(configured_accel) and configured_accel > 0.0
+    if self.stop_go_planner_stop_pending:
+      state = "planner_hold"
+    elif self.start_accel_ramp.started:
+      state = "ramp_active"
+    elif self.stop_go_handoff_active:
+      state = "handoff"
+    elif not supported:
+      state = "unsupported"
+    elif not improved_stop_go_active and not ramp_configured:
+      state = "inactive"
+    else:
+      state = "ready"
+    return {
+      "schema_version": 1,
+      "published_at_unix": round(time.time(), 3),
+      "route_started_at_unix": round(self.stop_go_route_started_at_unix, 3),
+      "route_id": route_id or f"controlsd-session:{int(self.stop_go_route_started_at_unix)}",
+      "route_complete": False,
+      "completed_at_unix": None,
+      "summary_source": "controlsd_live",
+      "state": state,
+      "supported": bool(supported),
+      "improved_stop_go_active": bool(improved_stop_go_active),
+      "ramp_configured": bool(ramp_configured),
+      "configured_accel": round(float(configured_accel), 2) if _finite_number(configured_accel) else 0.0,
+      "handoff_active": bool(self.stop_go_handoff_active),
+      "handoff_elapsed": round(float(self.stop_go_handoff_elapsed), 3),
+      "last_handoff_duration": round(float(self.stop_go_last_handoff_duration), 3),
+      "planner_stop_pending": bool(self.stop_go_planner_stop_pending),
+      "planner_stop_elapsed": round(float(self.stop_go_planner_stop_elapsed), 3),
+      "last_planner_stop_duration": round(float(self.stop_go_last_planner_stop_duration), 3),
+      "planner_stop_grace_seconds": STOP_GO_PLANNER_STOP_GRACE,
+      "ramp_armed": bool(self.start_accel_ramp.armed),
+      "ramp_started": bool(self.start_accel_ramp.started),
+      "ramp_accel": round(float(self.start_accel_ramp.accel), 3),
+      "last_event": self.stop_go_handoff_last_event,
+      "last_detail": self.stop_go_handoff_last_detail,
+      "last_event_at_unix": self.stop_go_last_event_unix,
+      "event_sequence": int(self.stop_go_event_sequence),
+      "event_counts": dict(self.stop_go_event_counts),
+    }
+
+  def update(self, active, CS, a_target, should_stop, accel_limits, frogpilot_toggles, *,
+             forcing_stop=False, inactive_reason="controls_inactive"):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
     previous_long_control_state = self.long_control_state
+    improved_stop_and_go = self._update_stop_go_handoff(
+      previous_long_control_state, active, CS, a_target, should_stop, frogpilot_toggles,
+      forcing_stop=forcing_stop, inactive_reason=inactive_reason,
+    )
+    cruise_standstill = cruise_standstill_for_long_control(
+      self.CP, CS.cruiseState.standstill,
+      improved_stop_and_go,
+      active=active, should_stop=should_stop, brake_pressed=CS.brakePressed, planner_accel=a_target,
+    )
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       CS.cruiseState.standstill, frogpilot_toggles)
+                                                       cruise_standstill, frogpilot_toggles)
     released_from_stop = (previous_long_control_state == LongCtrlState.stopping and
-                          self.long_control_state in (LongCtrlState.starting, LongCtrlState.pid))
+                          self.long_control_state in (LongCtrlState.starting, LongCtrlState.pid) and
+                          not self.stop_go_planner_stop_recovered)
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
@@ -146,7 +339,8 @@ class LongControl:
       active,
       should_stop,
       CS.brakePressed,
-      CS.cruiseState.standstill,
+      cruise_standstill,
+      preserve_on_planner_stop=self.stop_go_planner_stop_pending,
     )
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

@@ -33,6 +33,10 @@ class TestToyotaStandstillRequest(unittest.TestCase):
     self.assertTrue(self.update(True, last_standstill=True, cruise_standstill=False, requested_accel=0.0))
     self.assertFalse(self.update(True, last_standstill=True, cruise_standstill=False, requested_accel=0.01))
 
+  def test_non_hybrid_stale_cruise_status_tracks_positive_request(self):
+    self.assertFalse(self.update(True, last_standstill=True, cruise_standstill=True, requested_accel=0.01))
+    self.assertTrue(self.update(False, last_standstill=True, cruise_standstill=True, requested_accel=0.0))
+
   def test_legacy_pcm_status_behavior_is_preserved(self):
     self.assertTrue(self.update(no_stop_timer=False))
     self.assertFalse(self.update(True, no_stop_timer=False, last_standstill=True, pcm_acc_status=7))

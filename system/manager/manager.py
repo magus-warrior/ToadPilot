@@ -21,6 +21,7 @@ from openpilot.system.version import get_build_metadata, terms_version, training
 from openpilot.selfdrive.frogpilot.frogpilot_functions import convert_params, frogpilot_boot_functions, setup_frogpilot, uninstall_frogpilot
 from openpilot.selfdrive.frogpilot.frogpilot_variables import frogpilot_default_params, get_frogpilot_toggles, params_memory
 from openpilot.selfdrive.frogpilot.toadpilot import (latch_toadpilot_steering_response_request,
+                                                     persist_toadpilot_stop_go_last_route,
                                                      persist_toadpilot_torque_last_route)
 
 
@@ -190,6 +191,10 @@ def manager_thread() -> None:
         persist_toadpilot_torque_last_route(params, params_memory)
       except Exception:
         cloudlog.exception("failed to preserve final ToadPilot torque diagnostic")
+      try:
+        persist_toadpilot_stop_go_last_route(params, params_memory)
+      except Exception:
+        cloudlog.exception("failed to preserve final ToadPilot stop/go diagnostic")
       params.clear_all(ParamKeyType.CLEAR_ON_OFFROAD_TRANSITION)
       params_memory.clear_all(ParamKeyType.CLEAR_ON_OFFROAD_TRANSITION)
 

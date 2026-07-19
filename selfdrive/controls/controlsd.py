@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import math
 import time
@@ -36,6 +37,8 @@ from openpilot.selfdrive.frogpilot.controls.lib.frogpilot_acceleration import ge
 from openpilot.selfdrive.frogpilot.frogpilot_variables import ERROR_LOGS_PATH, get_frogpilot_toggles, params_memory
 from openpilot.selfdrive.frogpilot.toadpilot import (
   TOADPILOT_FINGERPRINT,
+  TOADPILOT_STEERING_STATUS_KEY,
+  TOADPILOT_STOP_GO_STATUS_KEY,
   ToadPilotLaneCentering,
   ToadPilotLaneContext,
   config_from_toggles,
@@ -47,6 +50,7 @@ SOFT_DISABLE_TIME = 3  # seconds
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
 CAMERA_OFFSET = 0.04
+TOADPILOT_STATUS_TRANSITION_MIN_INTERVAL = 0.10
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -74,6 +78,19 @@ ENABLED_STATES = (State.preEnabled, *ACTIVE_STATES)
 def get_lateral_target_curvature(lat_active, measured_curvature, requested_curvature):
   """Keep the rate-limited command aligned with the steering wheel while lateral control is inactive."""
   return requested_curvature if lat_active else measured_curvature
+
+
+def longitudinal_controls_inactive_reason(enabled, longitudinal_override, paused, openpilot_longitudinal,
+                                          gas_pressed=False):
+  if not openpilot_longitudinal:
+    return "openpilot_longitudinal_unavailable"
+  if not enabled:
+    return "openpilot_disabled"
+  if longitudinal_override:
+    return "driver_accelerator_override" if gas_pressed else "longitudinal_override"
+  if paused:
+    return "frogpilot_pause"
+  return "active"
 
 
 def valid_calibrated_angular_velocity(llk, service_valid):
@@ -203,6 +220,32 @@ class Controls:
     self.not_running_prev = None
     self.steer_limited = False
     self.toadpilot_saturation_count = 0.0
+    self.toadpilot_stop_go_event_sequence_seen = 0
+    self.toadpilot_stop_go_publish_pending = False
+    self.toadpilot_stop_go_last_publish_monotonic = -math.inf
+    self.toadpilot_steering_state = "unavailable"
+    self.toadpilot_steering_reason = "waiting_for_controller"
+    self.toadpilot_steering_publish_pending = False
+    self.toadpilot_steering_last_publish_monotonic = -math.inf
+    self.toadpilot_steering_state_counts = {}
+    self.toadpilot_steering_reason_counts = {}
+    self.toadpilot_steering_extended_observations = 0
+    self.toadpilot_steering_peak_output_can = 0.0
+    self.toadpilot_steering_last_transition_unix = None
+    self.toadpilot_diagnostic_route_started_at_unix = time.time()
+    self.toadpilot_diagnostic_route_id = (
+      self.params.get("CurrentRoute", encoding="utf-8") or
+      f"controlsd-session:{int(self.toadpilot_diagnostic_route_started_at_unix)}"
+    )
+    self.toadpilot_panda_state_valid = False
+    self.toadpilot_panda_safety_params = []
+    self.toadpilot_panda_tx_blocked_counts = []
+    self.toadpilot_panda_tx_blocked_previous = None
+    self.toadpilot_panda_tx_blocked_route_delta = 0
+    self.toadpilot_panda_tx_blocked_last_increment = 0
+    self.toadpilot_panda_tx_blocked_last_increment_unix = None
+    self.toadpilot_panda_tx_blocked_last_state = None
+    self.toadpilot_panda_tx_blocked_last_output_can = None
     self.curvature = 0.0
     self.curvature_limited = False
     self.desired_curvature = 0.0
@@ -616,6 +659,157 @@ class Controls:
     if self.active or self.sm['frogpilotCarState'].alwaysOnLateralEnabled:
       self.current_alert_types.append(ET.WARNING)
 
+  def _publish_toadpilot_stop_go_status(self, CS, planner_accel, output_accel, inactive_reason):
+    if getattr(self.frogpilot_toggles, "toadpilot_telemetry", False) is not True:
+      return
+    improved_stop_go_active = getattr(self.frogpilot_toggles, "toadpilot_improved_stop_and_go", False) is True
+    supported = (getattr(self.CP, "autoResumeSng", False) is True and self.CP.carName == "toyota" and
+                 self.CP.carFingerprint == TOADPILOT_FINGERPRINT and self.CP.openpilotLongitudinalControl)
+    sequence_changed = self.LoC.stop_go_event_sequence != self.toadpilot_stop_go_event_sequence_seen
+    self.toadpilot_stop_go_publish_pending |= sequence_changed
+    now_monotonic = time.monotonic()
+    heartbeat = self.sm.frame % int(1.0 / DT_CTRL) == 0
+    transition_due = (self.toadpilot_stop_go_publish_pending and
+                      now_monotonic - self.toadpilot_stop_go_last_publish_monotonic >=
+                      TOADPILOT_STATUS_TRANSITION_MIN_INTERVAL)
+    if not heartbeat and not transition_due:
+      return
+    transition_publish = self.toadpilot_stop_go_publish_pending
+    self.toadpilot_stop_go_event_sequence_seen = self.LoC.stop_go_event_sequence
+    self.toadpilot_stop_go_publish_pending = False
+    self.toadpilot_stop_go_last_publish_monotonic = now_monotonic
+    payload = self.LoC.stop_go_snapshot(
+      getattr(self.frogpilot_toggles, "start_accel_ramp", 0.0),
+      route_id=self.toadpilot_diagnostic_route_id, supported=supported,
+      improved_stop_go_active=improved_stop_go_active,
+    )
+    car_output_valid = bool(self.sm.valid["carOutput"])
+    car_output = self.sm["carOutput"].actuatorsOutput
+    payload.update({
+      "fingerprint": self.CP.carFingerprint,
+      "speed": round(float(CS.vEgo), 3),
+      "measured_accel": round(float(CS.aEgo), 3),
+      "planner_accel": round(float(planner_accel), 3) if math.isfinite(float(planner_accel)) else None,
+      "output_accel": round(float(output_accel), 3) if math.isfinite(float(output_accel)) else None,
+      "longcontrol_output_accel": round(float(output_accel), 3) if math.isfinite(float(output_accel)) else None,
+      "controller_target_accel": (round(float(getattr(car_output, "toadPilotLongAccelTarget", 0.0)), 3)
+                                  if car_output_valid else None),
+      "controller_output_accel": round(float(car_output.accel), 3) if car_output_valid else None,
+      "brake_release_active": (bool(getattr(car_output, "toadPilotStopGoReleaseActive", False))
+                               if car_output_valid else False),
+      "car_output_valid": car_output_valid,
+      "controls_inactive_reason": inactive_reason,
+      "diagnostic_trigger": "transition" if transition_publish else "heartbeat",
+    })
+    params_memory.put_nonblocking(
+      TOADPILOT_STOP_GO_STATUS_KEY, json.dumps(payload, sort_keys=True, separators=(",", ":")),
+    )
+
+  def _update_toadpilot_panda_diagnostic(self, output):
+    if not self.sm.updated["pandaStates"]:
+      return
+    self.toadpilot_panda_state_valid = bool(self.sm.valid["pandaStates"])
+    panda_states = list(self.sm["pandaStates"])
+    self.toadpilot_panda_safety_params = [int(state.safetyParam) for state in panda_states]
+    counts = [int(state.safetyTxBlocked) for state in panda_states]
+    self.toadpilot_panda_tx_blocked_counts = counts
+    if not self.toadpilot_panda_state_valid:
+      return
+    previous = self.toadpilot_panda_tx_blocked_previous
+    if previous is not None and len(previous) == len(counts):
+      # A decreasing counter normally means a Panda reset; do not mislabel it
+      # as a 32-bit wrap or a new safety block.
+      increment = sum(current - prior for current, prior in zip(counts, previous) if current >= prior)
+      if increment > 0:
+        self.toadpilot_panda_tx_blocked_route_delta += increment
+        self.toadpilot_panda_tx_blocked_last_increment = increment
+        self.toadpilot_panda_tx_blocked_last_increment_unix = time.time()
+        self.toadpilot_panda_tx_blocked_last_state = self.toadpilot_steering_state
+        self.toadpilot_panda_tx_blocked_last_output_can = round(float(output.steerOutputCan), 1)
+    self.toadpilot_panda_tx_blocked_previous = counts
+
+  def _publish_toadpilot_steering_status(self, CS):
+    if getattr(self.frogpilot_toggles, "toadpilot_telemetry", False) is not True:
+      return
+    output = self.sm["carOutput"].actuatorsOutput
+    self._update_toadpilot_panda_diagnostic(output)
+    car_output_valid = bool(self.sm.valid["carOutput"])
+    state = (str(getattr(output, "toadPilotHighTorqueState", "") or "stock")
+             if car_output_valid else "unavailable")
+    reason = (str(getattr(output, "toadPilotHighTorqueReason", "") or "not_authorized")
+              if car_output_valid else "car_output_invalid")
+    transition = (state, reason) != (self.toadpilot_steering_state, self.toadpilot_steering_reason)
+
+    if self.sm.updated["carOutput"] and car_output_valid:
+      self.toadpilot_steering_state_counts[state] = self.toadpilot_steering_state_counts.get(state, 0) + 1
+      self.toadpilot_steering_reason_counts[reason] = self.toadpilot_steering_reason_counts.get(reason, 0) + 1
+      output_can = abs(float(output.steerOutputCan))
+      self.toadpilot_steering_peak_output_can = max(self.toadpilot_steering_peak_output_can, output_can)
+      self.toadpilot_steering_extended_observations += int(output_can > 1500.0)
+    if transition:
+      self.toadpilot_steering_state = state
+      self.toadpilot_steering_reason = reason
+      self.toadpilot_steering_last_transition_unix = time.time()
+      self.toadpilot_steering_publish_pending = True
+    now_monotonic = time.monotonic()
+    heartbeat = self.sm.frame % int(1.0 / DT_CTRL) == 0
+    important_transition = transition and state in ("eps_temporary_fault", "eps_cooldown")
+    transition_due = (self.toadpilot_steering_publish_pending and
+                      (important_transition or
+                       now_monotonic - self.toadpilot_steering_last_publish_monotonic >=
+                       TOADPILOT_STATUS_TRANSITION_MIN_INTERVAL))
+    if not heartbeat and not transition_due:
+      return
+    transition_publish = self.toadpilot_steering_publish_pending
+    self.toadpilot_steering_publish_pending = False
+    self.toadpilot_steering_last_publish_monotonic = now_monotonic
+
+    payload = {
+      "schema_version": 1,
+      "published_at_unix": round(time.time(), 3),
+      "route_started_at_unix": round(self.toadpilot_diagnostic_route_started_at_unix, 3),
+      "route_id": self.toadpilot_diagnostic_route_id,
+      "fingerprint": self.CP.carFingerprint,
+      "command_semantics": "controller_output_before_panda_or_eps",
+      "observation_semantics": "controlsd_carOutput_observations_not_CAN_acceptance",
+      "car_output_valid": car_output_valid,
+      "authorized": bool(getattr(output, "toadPilotHighTorqueAuthorized", False)),
+      "state": state,
+      "reason": reason,
+      "last_transition_at_unix": self.toadpilot_steering_last_transition_unix,
+      "requested_steer": round(float(output.steer), 4),
+      "target_output_can": round(float(getattr(output, "toadPilotHighTorqueTargetCan", 0.0)), 1),
+      "controller_output_can": round(float(output.steerOutputCan), 1),
+      "peak_abs_controller_output_can": round(self.toadpilot_steering_peak_output_can, 1),
+      "extended_output_observations": int(self.toadpilot_steering_extended_observations),
+      "arm_progress": round(float(getattr(output, "toadPilotHighTorqueArmProgress", 0.0)), 3),
+      "headroom_scale": round(float(getattr(output, "toadPilotHighTorqueHeadroomScale", 0.0)), 3),
+      "steering_rate_deg": round(float(CS.steeringRateDeg), 1),
+      "steering_rate_rise_100ms": round(float(getattr(output, "toadPilotSteeringRateRise", 0.0)), 1),
+      "fault_cooldown_seconds": round(float(getattr(output, "toadPilotFaultCooldown", 0.0)), 2),
+      "steer_request": bool(getattr(output, "toadPilotSteerRequest", False)),
+      "eps_lka_state": int(getattr(CS, "steerFaultStatus", 255)),
+      "eps_lta_state": int(getattr(CS, "steerFaultStatusSecondary", 255)),
+      "eps_initial_fault_state": int(getattr(CS, "steerFaultStatusInitial", 255)),
+      "steer_fault_temporary": bool(CS.steerFaultTemporary),
+      "steer_fault_permanent": bool(CS.steerFaultPermanent),
+      "state_observations": dict(self.toadpilot_steering_state_counts),
+      "reason_observations": dict(self.toadpilot_steering_reason_counts),
+      "panda_state_valid": self.toadpilot_panda_state_valid,
+      "panda_safety_params": list(self.toadpilot_panda_safety_params),
+      "panda_safety_tx_blocked_counts": list(self.toadpilot_panda_tx_blocked_counts),
+      "panda_safety_tx_blocked_route_delta": int(self.toadpilot_panda_tx_blocked_route_delta),
+      "panda_safety_tx_blocked_last_increment": int(self.toadpilot_panda_tx_blocked_last_increment),
+      "panda_safety_tx_blocked_last_increment_at_unix": self.toadpilot_panda_tx_blocked_last_increment_unix,
+      "panda_safety_tx_blocked_last_state": self.toadpilot_panda_tx_blocked_last_state,
+      "panda_safety_tx_blocked_last_output_can": self.toadpilot_panda_tx_blocked_last_output_can,
+      "panda_block_semantics": "aggregate_all_transmit_addresses_not_steering_specific",
+      "diagnostic_trigger": "transition" if transition_publish else "heartbeat",
+    }
+    params_memory.put_nonblocking(
+      TOADPILOT_STEERING_STATUS_KEY, json.dumps(payload, sort_keys=True, separators=(",", ":")),
+    )
+
   def state_control(self, CS):
     """Given the state, this function returns a CarControl packet"""
 
@@ -645,7 +839,13 @@ class Controls:
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
     CC.latActive = (self.active or self.sm['frogpilotCarState'].alwaysOnLateralEnabled) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode) and self.sm['frogpilotPlan'].lateralCheck and not self.sm['frogpilotCarState'].pauseLateral
-    CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and not self.sm['frogpilotCarState'].pauseLongitudinal and self.CP.openpilotLongitudinalControl
+    longitudinal_override = self.events.contains(ET.OVERRIDE_LONGITUDINAL)
+    longitudinal_paused = bool(self.sm['frogpilotCarState'].pauseLongitudinal)
+    inactive_reason = longitudinal_controls_inactive_reason(
+      self.enabled, longitudinal_override, longitudinal_paused,
+      self.CP.openpilotLongitudinalControl, gas_pressed=CS.gasPressed,
+    )
+    CC.longActive = inactive_reason == "active"
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -679,8 +879,15 @@ class Controls:
         t_since_plan = (self.sm.frame - self.sm.recv_frame['longitudinalPlan']) * DT_CTRL
         actuators.accel = self.LoC.update_old_long(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.frogpilot_toggles)
       else:
-        should_stop = should_stop_for_long_control(long_plan.shouldStop, self.sm['frogpilotPlan'].forcingStop)
-        actuators.accel = self.LoC.update(CC.longActive, CS, long_plan.aTarget, should_stop, pid_accel_limits, self.frogpilot_toggles)
+        forcing_stop = bool(self.sm['frogpilotPlan'].forcingStop)
+        should_stop = should_stop_for_long_control(long_plan.shouldStop, forcing_stop)
+        actuators.accel = self.LoC.update(
+          CC.longActive, CS, long_plan.aTarget, should_stop, pid_accel_limits, self.frogpilot_toggles,
+          forcing_stop=forcing_stop, inactive_reason=inactive_reason,
+        )
+        self._publish_toadpilot_stop_go_status(CS, long_plan.aTarget, actuators.accel, inactive_reason)
+
+      self._publish_toadpilot_steering_status(CS)
 
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]

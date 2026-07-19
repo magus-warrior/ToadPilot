@@ -207,7 +207,13 @@ class CarInterface(CarInterfaceBase):
       events.add(EventName.vehicleSensorsInvalid)
 
     if self.CP.openpilotLongitudinalControl:
-      if ret.cruiseState.standstill and not ret.brakePressed and not self.CP.enableGasInterceptor:
+      guarded_launch_active = (
+        getattr(frogpilot_toggles, "toadpilot_improved_stop_and_go", False) is True and
+        self.CP.carFingerprint == TOADPILOT_FINGERPRINT and getattr(self.CP, "autoResumeSng", False) and
+        c.longActive and c.actuators.accel > 0.0
+      )
+      if (ret.cruiseState.standstill and not ret.brakePressed and not self.CP.enableGasInterceptor and
+          not guarded_launch_active):
         events.add(EventName.resumeRequired)
       if self.CS.low_speed_lockout:
         events.add(EventName.lowSpeedLockout)

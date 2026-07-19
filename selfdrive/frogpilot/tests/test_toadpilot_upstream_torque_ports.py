@@ -64,6 +64,7 @@ def controller_toggles(*, enabled=True, profile="adaptive", steer_kp=1.0):
     toadpilot_auto_tune=False,
     toadpilot_lane_centering_assist=True,
     toadpilot_smooth_lane_transitions=True,
+    toadpilot_improved_stop_and_go=True,
     toadpilot_curve_assist_in_experimental=False,
     toadpilot_smart_saturation_warning=True,
     toadpilot_telemetry=False,
@@ -297,8 +298,11 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
     with patch("openpilot.selfdrive.locationd.torqued.Params", return_value=self.params):
       estimator = TorqueEstimator(CP)
 
-    def car_output(raw):
-      return SimpleNamespace(actuatorsOutput=SimpleNamespace(steer=-1.0, steerOutputCan=raw))
+    def car_output(raw, state="extended", reason="curve_undertracking"):
+      return SimpleNamespace(actuatorsOutput=SimpleNamespace(
+        steer=-1.0, steerOutputCan=raw,
+        toadPilotHighTorqueState=state, toadPilotHighTorqueReason=reason,
+      ))
 
     estimator.handle_log(10.0, "carOutput", car_output(-1600))
     estimator.handle_log(10.0, "carState", SimpleNamespace(
@@ -308,6 +312,7 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
       steeringRateDeg=42.5,
       steerFaultTemporary=True,
       steerFaultPermanent=False,
+      steerFaultStatusInitial=21,
     ))
     active = estimator.toadpilot_torque_snapshot(inputs_valid=True)
     self.assertTrue(active["controller_authorized"])
@@ -315,6 +320,9 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
     self.assertEqual(active["current_output_can"], -1600.0)
     self.assertEqual(active["peak_abs_output_can"], 1600.0)
     self.assertEqual(active["extended_output_samples"], 1)
+    self.assertEqual(active["output_sample_semantics"], "torqued_latest_carOutput_at_20hz_not_CAN_frame_count")
+    self.assertEqual(active["controller_state"], "extended")
+    self.assertEqual(active["controller_reason"], "curve_undertracking")
     self.assertEqual(active["last_extended_monotonic"], 10.0)
     self.assertTrue(active["car_state_valid"])
     self.assertEqual(active["current_eps_torque"], -1550.0)
@@ -328,6 +336,7 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
     self.assertEqual(active["extended_window_peak_abs_steering_rate_deg"], 42.5)
     self.assertEqual(active["extended_window_driver_override_samples"], 1)
     self.assertTrue(active["extended_window_temporary_fault_seen"])
+    self.assertEqual(active["extended_window_temporary_fault_statuses"], [21])
     self.assertFalse(active["extended_window_permanent_fault_seen"])
 
     # The EPS can report a fault after the controller has begun its 0.4-second

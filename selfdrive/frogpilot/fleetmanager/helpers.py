@@ -60,6 +60,8 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES,
                                                      TOADPILOT_RESET_TUNE_KEY,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
+                                                     TOADPILOT_STEERING_STATUS_KEY,
+                                                     TOADPILOT_STOP_GO_LAST_ROUTE_KEY, TOADPILOT_STOP_GO_STATUS_KEY,
                                                      TOADPILOT_TORQUE_CACHE_VERSION, TOADPILOT_TORQUE_CHECKPOINT_KEY,
                                                      TOADPILOT_TORQUE_LAST_ROUTE_KEY,
                                                      TOADPILOT_TORQUE_STATUS_KEY,
@@ -69,6 +71,7 @@ from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOAD
                                                      read_toadpilot_steering_response_profile,
                                                      read_toadpilot_steering_response_request,
                                                      toadpilot_steering_response_panda_matched,
+                                                     valid_toadpilot_stop_go_summary,
                                                      valid_toadpilot_torque_summary,
                                                      write_toadpilot_config, write_toadpilot_steering_response_request)
 
@@ -645,6 +648,18 @@ def _get_toadpilot_last_torque_route():
   status["provenance_valid"] = True
   return status
 
+
+def _get_toadpilot_last_stop_go_route():
+  status = read_json_status(TOADPILOT_STOP_GO_LAST_ROUTE_KEY, params)
+  if not valid_toadpilot_stop_go_summary(status) or status.get("route_complete") is not True:
+    return {}
+  raw_age_seconds = time.time() - float(status["completed_at_unix"])
+  if raw_age_seconds < -1.0:
+    return {}
+  status["age_seconds"] = round(max(raw_age_seconds, 0.0), 2)
+  status["provenance_valid"] = True
+  return status
+
 def _get_toadpilot_road_state():
   persistent_onroad = params.get_bool("IsOnroad")
   persistent_offroad = params.get_bool("IsOffroad")
@@ -716,6 +731,8 @@ def get_start_accel_ramp_state():
     "enabled": capability["supported"] and value > START_ACCEL_RAMP_DEFAULT,
     "capability": capability,
     "environment": road_state,
+    "runtime": _get_toadpilot_status(TOADPILOT_STOP_GO_STATUS_KEY),
+    "last_route": _get_toadpilot_last_stop_go_route(),
   }
 
 
@@ -813,6 +830,9 @@ def get_toadpilot_state():
     "effective_enabled": bool(config.enabled and capability["supported"]),
     "learner": _get_toadpilot_learner(),
     "runtime": _get_toadpilot_status(TOADPILOT_STATUS_KEY),
+    "steering_status": _get_toadpilot_status(TOADPILOT_STEERING_STATUS_KEY),
+    "stop_go_status": _get_toadpilot_status(TOADPILOT_STOP_GO_STATUS_KEY),
+    "stop_go_last_route": _get_toadpilot_last_stop_go_route(),
     "tune_status": _get_toadpilot_status(TOADPILOT_TUNE_STATUS_KEY),
     "torque_status": _get_toadpilot_status(TOADPILOT_TORQUE_STATUS_KEY),
     "torque_last_route": _get_toadpilot_last_torque_route(),
@@ -848,7 +868,7 @@ def set_toadpilot_config(request_data):
 
   required_fields = {
     "version", "enabled", "profile", "auto_tune", "lane_centering_assist", "smooth_lane_transitions",
-    "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
+    "improved_stop_and_go", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
   }
   missing_fields = required_fields - set(request_data)
   if missing_fields:
@@ -863,6 +883,8 @@ def set_toadpilot_config(request_data):
     write_toadpilot_steering_response_request(steering_request, params)
   if not config.enabled or not config.telemetry:
     params_memory.remove(TOADPILOT_STATUS_KEY)
+    params_memory.remove(TOADPILOT_STEERING_STATUS_KEY)
+    params_memory.remove(TOADPILOT_STOP_GO_STATUS_KEY)
     params_memory.remove(TOADPILOT_TUNE_STATUS_KEY)
   update_frogpilot_toggles()
   return get_toadpilot_state()

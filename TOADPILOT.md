@@ -2,7 +2,7 @@
 
 Project notes and safety contract for the TOADPILOT lateral-control fork.
 
-**Status:** local development build, updated 2026-07-18. New configurations default to enabled with the `Adaptive` profile, lane centering, and smooth lane transitions on. Effective controller output remains limited to the exact `TOYOTA_CAMRY_TSS2` torque-control fingerprint. It is not a general Toyota tune.
+**Status:** local development build, updated 2026-07-19. New configurations default to enabled with the `Adaptive` profile, lane centering, smooth lane transitions, and guarded Camry stop-and-go on. Effective controller output remains limited to the exact `TOYOTA_CAMRY_TSS2` torque-control fingerprint. It is not a general Toyota tune.
 
 ## Project identity
 
@@ -14,7 +14,7 @@ The old `ToyotaPerformanceMode` parameter may remain on the device as a legacy a
 
 ## Configuration
 
-The version 3 configuration contains:
+The version 4 configuration contains:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -23,17 +23,18 @@ The version 3 configuration contains:
 | `auto_tune` | `true` | In Adaptive/Full, select filtered live instead of offline torque parameters. |
 | `lane_centering_assist` | `true` | Confidence-gated lane-center tracking in Adaptive/Full. |
 | `smooth_lane_transitions` | `true` | Monotonically fade an existing centering trim during brief soft-evidence gaps. |
+| `improved_stop_and_go` | `true` | Permit a bounded, planner-confirmed Camry launch handoff through stale Toyota cruise-standstill status. |
 | `curve_assist_in_experimental` | `false` | Permit curve feed-forward assistance while Experimental Mode is active; lane centering is independent. |
 | `smart_saturation_warning` | `true` | Debounce transient steering-limit warnings without suppressing a sustained limit. |
 | `telemetry` | `true` | Publish local controller diagnostics. |
 
-The parser is strict: missing or unknown keys, wrong types, unsupported versions, and unknown profiles are rejected. An exact valid version-1 document is upgraded to the requested enabled/Adaptive defaults with lane centering and smooth transitions on; its Auto-tune, Experimental, warning, and telemetry choices are preserved. An exact version-2 document preserves every saved choice and adds only `smooth_lane_transitions=true`. A missing configuration uses the same defaults. A malformed document, corrupt JSON, or unsupported future version uses a separate fail-safe configuration: disabled and Observe, with both lane features off. Once saved as version 3, every explicit choice is preserved.
+The parser is strict: missing or unknown keys, wrong types, unsupported versions, and unknown profiles are rejected. An exact valid version-1 document is upgraded to the requested enabled/Adaptive defaults with lane centering, smooth transitions, and guarded stop-and-go on; its Auto-tune, Experimental, warning, and telemetry choices are preserved. An exact version-2 document preserves every saved choice and adds `smooth_lane_transitions=true` and `improved_stop_and_go=true`. An exact version-3 document preserves every saved choice and adds only `improved_stop_and_go=true`. A missing configuration uses the same defaults. A malformed document, corrupt JSON, or unsupported future version uses a separate fail-safe configuration: disabled and Observe, with both lane features and improved stop-and-go off. Once saved as version 4, every explicit choice is preserved.
 
 Capability and enablement are separate. Even if the stored master switch is on, the effective switch remains off unless the detected vehicle is Toyota `TOYOTA_CAMRY_TSS2` with torque lateral control.
 
 Fleet Manager allows settings to be prepared and saved with no vehicle connected or road-state signal available. A positive onroad signal still locks configuration writes, and learned-tune reset still requires a confirmed offroad state.
 
-Fleet Manager also displays an **Experimental Camry steering response** research request. It defaults off, can only be changed with confirmed offroad state, and is latched for reboot. In this stripped checkout it is intentionally unavailable and never effective: no matched controller/Panda safety source-and-test bundle exists. Saving the request does not change the stock 1500 / 15 / 25 / 350 steering boundary.
+Fleet Manager also displays an **Experimental Camry 1700 authority** research request. It defaults off, can only be changed with confirmed offroad state, and is latched for reboot. It becomes effective only when the exact Camry torque fingerprint, EPS firmware, controller flag, boot latch, and paired debug Panda signature all match. Normal commands retain the stock 1500-unit mapping. The extra envelope requires a 0.4-second full-saturation handshake, a 5–15 m/s speed window, same-direction calibrated-yaw undertracking, meaningful curve demand, no driver/brake/stop/blinker state, and steering rate below 75 deg/s.
 
 ## Profiles
 
@@ -81,15 +82,17 @@ This feature addresses unexplained lane lean when lane geometry is strong and th
 
 ## Safety boundary
 
-The hard electronic steering boundary is intentionally unchanged:
+The ordinary electronic steering path is intentionally unchanged:
 
 - normalized lateral-controller output remains capped at `-1.0 ... +1.0`;
-- Toyota `STEER_MAX` remains 1500 command units;
+- Toyota's normalized command mapping remains 1500 command units;
 - torque-mode rise remains 15 units per 100 Hz command tick;
 - torque-mode reduction remains 25 units per 100 Hz command tick; and
 - maximum commanded-versus-measured EPS torque error remains 350 units.
 
-The Toyota car controller still converts normalized output with `actuators.steer * 1500`, applies the existing measured-torque and rate checks, and reports the applied command back in normalized form. Panda remains an independent downstream safety boundary; TOADPILOT does not modify its policy or limits.
+On a specifically authorized research boot, only the absolute ceiling can extend to 1700 after the handshake above. The 15-unit rise, 25-unit reduction, 350-unit measured-torque error, and 450-unit real-time delta guards remain identical in the Toyota controller and Panda. Stable steering rates through 55 deg/s retain full extra headroom. From 55–75 deg/s only the extra 200 units taper linearly; an increase of at least 20 deg/s within 100 ms while already above 45 deg/s pauses only that extra headroom without disarming it. Stock 1500 authority remains available. A Toyota temporary EPS fault removes the extension immediately and holds only the extra headroom for one second after the fault clears before the normal 0.4-second handshake can run again.
+
+The controller reports `stock`, `arming`, `armed`, `extended`, `returning_stock`, `eps_temporary_fault`, and `eps_cooldown` with exact gate reasons, target/final output commands, request-bit state, arm progress, effective headroom scale, rate rise, cooldown, and raw Toyota EPS state. The live status also records Panda's actual safety parameter and route-relative `safetyTxBlocked` increments. That counter covers every transmit address, so a correlated increment is useful evidence of a Panda safety block but is not, by itself, proof that the steering frame was rejected. EPS acceptance still comes from Toyota's raw fault state and observed response rather than the controller command alone.
 
 This distinction matters: a person turning the wheel can add mechanical torque beyond what the EPS motor supplies. Doing that safely in one drive does not demonstrate that an electronic command above 1500 is accepted by the EPS or safe for Panda to transmit.
 
@@ -117,9 +120,13 @@ The complete status, source links, and architectural blockers are in [TOADPILOT_
 
 The passenger-marked 2026-07-18 launch delay was not an ACC failure. Live status showed FrogPilot's real `forcingStop` flag clear while `forcingStopLength` repeatedly sat near 0.7–1.0 m. Despite its name, that numeric field carries tracked model-trajectory length. `controlsd` was treating every value below 1 m as another stop boolean, so LongControl could remain in `stopping` after the explicit forced-stop state had cleared. The release path now combines only `longitudinalPlan.shouldStop` and `frogpilotPlan.forcingStop`.
 
-The release correction is unconditional and independent of the optional start ramp. The new `StartAccelRamp` setting defaults to `0.00 m/s²`, which preserves the ordinary acceleration command exactly. Its Fleet Manager slider spans 0.00–1.00 m/s² in 0.05 m/s² steps and is effective only on the exact Camry TSS2 fingerprint with openpilot longitudinal control.
+The default-on `improved_stop_and_go` correction is independent of the optional start ramp. It is effective only when the TOADPILOT master switch, exact Camry TSS2 torque fingerprint, openpilot longitudinal control, and auto-resume capability all match. After a real LongControl stopping state, finite positive planner acceleration starts a handoff only while controls are active, no stop is requested, and the brake is not pressed. During that handoff, stale Toyota cruise-standstill status cannot send LongControl back through the launch-cancellation path. A contradictory planner-only stop with a still-positive finite acceleration request may preserve the handoff lifecycle for at most 0.10 seconds, but LongControl remains in `stopping` and commands no positive acceleration for every stop frame. A forced stop, brake, disengagement, non-positive/invalid acceleration, invalid speed, disablement, another vehicle, or a longer planner stop discards the handoff; it also ends by 2.0 m/s or two seconds. Transition events and exact end reasons are logged as `toadpilot_stop_and_go` diagnostics.
 
-When configured above zero, the ramp can arm only on a real `stopping`-to-`pid`/`starting` transition. It still requires active longitudinal control, a positive planner acceleration request, no brake input, no cruise standstill, and no planned or forced stop. The floor rises at 2.0 m/s³, fades to zero by 2.0 m/s (about 4.5 mph), and expires after two seconds. The normal acceleration limits and Toyota controller's downstream command-rate limiting remain unchanged. Any stop, brake, standstill, inactive-control, non-positive post-launch planner request, invalid input, or speed cutoff clears it without a delayed re-trigger.
+On the same exact, enabled Camry release, Toyota's inner acceleration controller clears the braking-approach integral and unwinds only the remaining negative acceleration request at 8 m/s3 until it reaches zero. Positive acceleration still uses the existing 4 m/s3 slew. This targets the observed brake-release dead time without increasing the post-zero positive-command jerk. Live stop/go status exposes the planner request, LongControl output, Toyota controller target/final output, and whether this negative-command release is active.
+
+The `StartAccelRamp` setting defaults to `0.00 m/s²`, which preserves the ordinary planner/PID acceleration command exactly while the stop-release correction still works. Its Fleet Manager slider spans 0.00–1.00 m/s² in 0.05 m/s² steps and is effective only on the exact Camry TSS2 fingerprint with openpilot longitudinal control.
+
+When configured above zero, the ramp can arm only on a real `stopping`-to-`pid`/`starting` transition. It still requires active longitudinal control, a positive planner acceleration request, no brake input, and no planned or forced stop. Toyota cruise standstill also blocks or clears it except while the guarded stop-and-go handoff is actively filtering the known stale status. The bounded breakaway target is applied immediately after a confirmed release, then later increases remain limited to 2.0 m/s³; Toyota's downstream positive command limit remains 4.0 m/s³. The floor fades to zero by 2.0 m/s (about 4.5 mph) and expires after two seconds. The 0.10-second planner consistency hold preserves ramp state but cannot command positive acceleration. Any confirmed stop, brake, unfiltered standstill, inactive-control, non-positive post-launch planner request, invalid input, or speed cutoff clears it without a delayed re-trigger.
 
 This stripped checkout has no native FrogPilot Qt settings source, so the functional slider lives in Fleet Manager's Tools page and uses the normal persistent Params/toggle-refresh path. Writes are blocked while the device reports onroad. A full source fork should register the key natively and add the same control to the native longitudinal settings UI.
 
@@ -156,6 +163,8 @@ Lane centering is independent of Experimental Mode because it adjusts the shared
 Configuration is persistent in `ToadPilotConfig`. Runtime status is local and ephemeral:
 
 - `ToadPilotStatus` contains the effective configuration, curve residual, desired and actual lateral acceleration, tracking error, feed-forward before and after assistance, requested normalized steer, saturation/limit flags, active torque parameters, Experimental Mode state, and a monotonic timestamp. Lane centering is reported separately with its active state, gate reason, measured lane offset, path-to-lane bias, confirmation count/confidence, soft-gate fade count, lane width, and applied curvature delta.
+- `ToadPilotSteeringStatus` contains the live 100 Hz-observed controller state/reason, target and output command, arm progress, extra-headroom scale, steering-rate rise, cooldown, and raw Toyota EPS state. `ToadPilotTorqueStatus` remains the lower-rate route evidence and explicitly labels its extended-output count as 20 Hz diagnostic samples rather than CAN frames.
+- `ToadPilotStopGoStatus` contains the live handoff/ramp state, planner/output/measured acceleration, exact transition reason, and reason counters. Manager preserves one compact `ToadPilotStopGoLastRoute` summary at the offroad transition.
 - The linear Adaptive/Full status also reports whether the upstream-response adaptation is active, its delay-aligned lateral-acceleration setpoint, and its filtered desired lateral jerk. These are fixed-size live diagnostics, not a route recorder.
 - `ToadPilotTuneStatus` is the separate slot for versioned, observe-only high-authority summaries. It reports accepted/candidate/rejected counts, left/right response estimates, and separate 0.50–0.65, 0.65–0.80, and 0.80–1.00 normalized-steer bins.
 
@@ -163,7 +172,7 @@ The observer accepts only samples above 15 m/s after a two-second active/no-driv
 
 This observer is preliminary diagnostics, not a production-quality dataset. It does not yet label or reject lane-change state, poor model/lane context, or steering-limit context. Interpret its bins only as leads for later review; use replay or separately labeled logs before drawing tuning conclusions.
 
-Controller status is rate-limited to approximately 1 Hz in shared-memory Params. Consumers must inspect the timestamp because disabling telemetry can leave an older payload visible. This JSON status path is appropriate for this stripped prototype; a production source fork should publish typed messaging outside the real-time controller instead.
+Controller status has a 1 Hz heartbeat and transition publishing capped at 10 Hz in shared-memory Params. The route identifier is cached before the control loop so transition reporting does not add persistent Params reads to the 100 Hz path. Consumers must inspect the timestamp because disabling telemetry can leave an older payload visible. This JSON status path is appropriate for this stripped prototype; a production source fork should publish typed messaging outside the real-time controller instead.
 
 Fleet Manager may read configuration and status while the car is onroad, but configuration writes and tune reset are accepted only while offroad. Reset also requires an explicit confirmation payload. A confirmed reset removes the saved torque cache immediately, posts a durable reset request for the live learner to consume, restores its in-memory factor/friction/offset state to the offline baseline, and clears stale TOADPILOT status. This remains a destructive tune-data operation; normal rollback only requires disabling TOADPILOT.
 
@@ -196,7 +205,7 @@ Do not jump from unit tests directly to Full on public roads. Validate in stages
 
 - Run the focused TOADPILOT unit tests and Python compilation checks.
 - Confirm invalid configuration falls back to disabled/Observe.
-- Confirm exact version-1 configuration adopts enabled/Adaptive with both lane features on while preserving its other toggles, and exact version 2 preserves every saved choice while adding smooth transitions on.
+- Confirm exact version-1 configuration adopts enabled/Adaptive with both lane features and improved stop-and-go on while preserving its other toggles, exact version 2 preserves every saved choice while adding smooth transitions and improved stop-and-go on, and exact version 3 adds only improved stop-and-go on.
 - Confirm unsupported fingerprints cannot become effectively enabled.
 - Confirm the Toyota and Panda safety constants are unchanged in the final diff.
 - Exercise enable, disable, profile changes, auto-tune selection, and process restart.
@@ -207,7 +216,7 @@ Do not jump from unit tests directly to Full on public roads. Validate in stages
 - Confirm invalid response inputs clear the fixed history and retain the established controller until delay history is warm again.
 - Confirm disabled, Observe, NNFF, and NNFF Lite outputs do not consume the adapted delayed-response path.
 - Confirm a short model trajectory cannot hold LongControl in `stopping` unless a real planner/forced-stop boolean remains true.
-- First validate stop/go with `StartAccelRamp=0.00` to isolate the release correction. If a nonzero ramp is later tested, change one 0.05 m/s² step at a time in a controlled setting and verify every brake/stop/standstill cancellation gate.
+- First validate stop/go with `StartAccelRamp=0.00` to isolate the default-on guarded release correction. If a nonzero ramp is later tested, change one 0.05 m/s² step at a time in a controlled setting and verify every brake/stop/disengagement/unfiltered-standstill cancellation gate.
 
 ### 2. Observe baseline
 
@@ -250,7 +259,7 @@ This checkout is a compiled FrogPilot release with important native UI, Params r
 Migration work:
 
 1. Keep an unstripped source branch and reproduce the exact device build from source.
-2. Register `ToadPilotConfig`, `ToadPilotStatus`, `ToadPilotTuneStatus`, and `StartAccelRamp` in the native Params key registry, then remove the temporary Python allowlist.
+2. Register `ToadPilotConfig`, `ToadPilotStatus`, `ToadPilotSteeringStatus`, `ToadPilotStopGoStatus`, `ToadPilotStopGoLastRoute`, `ToadPilotTuneStatus`, and `StartAccelRamp` in the native Params key registry, then remove the temporary Python allowlist.
 3. Add the versioned profile controls to the native FrogPilot lateral-tuning UI and the zero-default start-ramp slider to the native longitudinal UI, including dependencies, translations, safe defaults, and clear “smaller factor is stronger” wording. Fleet Manager can remain a diagnostic/remote surface.
 4. Restore Panda safety source and tests. Prove that Toyota max torque, rate limits, measured-torque checks, request-bit behavior, and violation rejection are unchanged.
 5. Replace real-time JSON Params writes with a typed message or a non-real-time collector, including schema version and freshness.

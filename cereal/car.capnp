@@ -188,6 +188,11 @@ struct CarState {
   canValid @26 :Bool;       # invalid counter/checksums
   canTimeout @40 :Bool;     # CAN bus dropped out
   canErrorCounter @48 :UInt32;
+  # Manufacturer-specific raw steering-fault states retained for diagnostics.
+  # Toyota uses these for EPS_STATUS.LKA_STATE/LTA_STATE; other ports leave 255.
+  steerFaultStatus @51 :UInt8 = 255;
+  steerFaultStatusSecondary @52 :UInt8 = 255;
+  steerFaultStatusInitial @53 :UInt8 = 255;
 
   # car speed
   vEgo @1 :Float32;          # best estimate of speed
@@ -381,6 +386,19 @@ struct CarControl {
     steer @2: Float32;
     # value sent over can to the car
     steerOutputCan @8: Float32;
+    # TOADPILOT controller diagnostics. These describe the command before
+    # Panda/EPS and must not be interpreted as proof of downstream acceptance.
+    toadPilotHighTorqueAuthorized @9: Bool;
+    toadPilotHighTorqueState @10: Text;
+    toadPilotHighTorqueReason @11: Text;
+    toadPilotHighTorqueArmProgress @12: Float32;
+    toadPilotHighTorqueTargetCan @13: Float32;
+    toadPilotHighTorqueHeadroomScale @14: Float32;
+    toadPilotSteeringRateRise @15: Float32;
+    toadPilotFaultCooldown @16: Float32;
+    toadPilotStopGoReleaseActive @17: Bool;
+    toadPilotLongAccelTarget @18: Float32;
+    toadPilotSteerRequest @19: Bool;
     steeringAngleDeg @3: Float32;
 
     curvature @7: Float32;

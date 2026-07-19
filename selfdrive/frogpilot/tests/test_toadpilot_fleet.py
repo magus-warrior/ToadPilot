@@ -10,6 +10,10 @@ from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_CONFIG_KEY, TOADP
                                                      TOADPILOT_STEERING_RESPONSE_BUILD,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
+                                                     TOADPILOT_STEERING_STATUS_KEY,
+                                                     TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION,
+                                                     TOADPILOT_STOP_GO_LAST_ROUTE_KEY,
+                                                     TOADPILOT_STOP_GO_STATUS_KEY,
                                                      TOADPILOT_TORQUE_CHECKPOINT_KEY,
                                                      TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
                                                      TOADPILOT_TORQUE_LAST_ROUTE_KEY, TOADPILOT_TORQUE_STATUS_KEY,
@@ -23,6 +27,7 @@ VALID_CONFIG = {
   "auto_tune": True,
   "lane_centering_assist": True,
   "smooth_lane_transitions": True,
+  "improved_stop_and_go": True,
   "curve_assist_in_experimental": False,
   "smart_saturation_warning": True,
   "telemetry": True,
@@ -251,6 +256,28 @@ class TestToadPilotFleetStatus(unittest.TestCase):
     self.assertTrue(result["route_complete"])
     self.assertEqual(result["completed_at_unix"], 1_011.0)
 
+  def test_last_stop_go_route_requires_valid_completed_provenance(self):
+    summary = {
+      "schema_version": TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": 1_010.0,
+      "route_started_at_unix": 1_000.0,
+      "route_id": "route",
+      "route_complete": True,
+      "completed_at_unix": 1_011.0,
+      "summary_source": "manager_offroad_transition",
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "event_sequence": 4,
+      "last_event": "controls_inactive",
+    }
+    with patch.object(helpers, "read_json_status", return_value=summary), \
+         patch.object(helpers.time, "time", return_value=1_020.0):
+      result = helpers._get_toadpilot_last_stop_go_route()
+    self.assertTrue(result["provenance_valid"])
+    self.assertEqual(result["age_seconds"], 9.0)
+
+    with patch.object(helpers, "read_json_status", return_value={**summary, "summary_source": "controlsd_live"}):
+      self.assertEqual(helpers._get_toadpilot_last_stop_go_route(), {})
+
 
 class TestToadPilotFleetMutations(unittest.TestCase):
   def test_steering_experiment_request_is_default_off_and_can_only_change_offroad(self):
@@ -321,6 +348,7 @@ class TestToadPilotFleetMutations(unittest.TestCase):
       "auto_tune": False,
       "lane_centering_assist": False,
       "smooth_lane_transitions": False,
+      "improved_stop_and_go": False,
       "curve_assist_in_experimental": False,
       "smart_saturation_warning": False,
       "telemetry": False,
@@ -346,6 +374,21 @@ class TestToadPilotFleetMutations(unittest.TestCase):
          patch.object(helpers, "params_memory", memory), \
          patch.object(helpers, "update_frogpilot_toggles") as toggles_updated:
       with self.assertRaisesRegex(ValueError, "smooth_lane_transitions"):
+        helpers.set_toadpilot_config(requested)
+
+    self.assertEqual(persistent.put_calls, [])
+    toggles_updated.assert_not_called()
+
+  def test_config_requires_stop_and_go_choice_before_write(self):
+    requested = dict(VALID_CONFIG)
+    requested.pop("improved_stop_and_go")
+    persistent = MemoryParams({"IsOffroad": True})
+    memory = MemoryParams()
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles") as toggles_updated:
+      with self.assertRaisesRegex(ValueError, "improved_stop_and_go"):
         helpers.set_toadpilot_config(requested)
 
     self.assertEqual(persistent.put_calls, [])
@@ -469,6 +512,8 @@ class TestToadPilotFleetMutations(unittest.TestCase):
         memory = MemoryParams({
           "IsOnroad": False,
           TOADPILOT_STATUS_KEY: b"runtime",
+          TOADPILOT_STEERING_STATUS_KEY: b"steering",
+          TOADPILOT_STOP_GO_STATUS_KEY: b"stop_go",
           TOADPILOT_TUNE_STATUS_KEY: b"tune",
         })
 
@@ -480,6 +525,8 @@ class TestToadPilotFleetMutations(unittest.TestCase):
 
         self.assertIn(TOADPILOT_CONFIG_KEY, persistent.values)
         self.assertNotIn(TOADPILOT_STATUS_KEY, memory.values)
+        self.assertNotIn(TOADPILOT_STEERING_STATUS_KEY, memory.values)
+        self.assertNotIn(TOADPILOT_STOP_GO_STATUS_KEY, memory.values)
         self.assertNotIn(TOADPILOT_TUNE_STATUS_KEY, memory.values)
 
   def test_enabled_telemetry_preserves_current_status(self):
@@ -544,7 +591,21 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'value="adaptive" selected', response.data)
     self.assertIn(b'id="toadLaneCentering" checked', response.data)
     self.assertIn(b'id="toadSmoothLaneTransitions" checked', response.data)
+    self.assertIn(b'Improved Camry stop-and-go', response.data)
+    self.assertIn(b'id="toadImprovedStopAndGo" checked', response.data)
+    self.assertIn(b'improved_stop_and_go: toadImprovedStopAndGo.checked', response.data)
+    self.assertIn(b'id="toadStopAndGoState"', response.data)
+    self.assertIn(b'id="toadStopGoLiveState"', response.data)
+    self.assertIn(b'id="toadStopGoLastEvent"', response.data)
+    self.assertIn(b'id="toadSteeringLiveState"', response.data)
+    self.assertIn(b'id="toadPandaSafetyState"', response.data)
+    self.assertIn(b'20 Hz diagnostic samples above 1500', response.data)
+    self.assertIn(b'guarded planner-confirmed launch handoff enabled', response.data)
     self.assertIn(b'Experimental Camry 1700 authority', response.data)
+    self.assertIn(b'id="toadAuthoritySummary"', response.data)
+    self.assertIn(b'id="toadAuthorityDetail"', response.data)
+    self.assertIn(b'1700 authority is active.', response.data)
+    self.assertNotIn(b'Existing authority by default.', response.data)
     self.assertIn(b'id="toadExperimentalSteeringResponse"', response.data)
     self.assertNotIn(b'id="toadExperimentalSteeringResponse" checked', response.data)
     self.assertIn(b'requestPayload.experimental_steering_response_requested = steeringRequest', response.data)
@@ -557,7 +618,7 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'Camry Start Acceleration Ramp', response.data)
     self.assertIn(b'id="startRampSlider"', response.data)
     self.assertIn(b'min="0" max="1" step="0.05" value="0"', response.data)
-    self.assertIn(b'The stop-release correction is always active.', response.data)
+    self.assertIn(b'The toggle above controls the guarded stop-release correction.', response.data)
 
   def test_config_route_disables_caching_and_returns_saved_state(self):
     state = {"config": VALID_CONFIG, "effective_enabled": True}

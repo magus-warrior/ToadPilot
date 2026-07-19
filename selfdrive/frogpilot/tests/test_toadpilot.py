@@ -12,6 +12,9 @@ from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, T
                                                      TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES,
                                                      TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
+                                                     TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION,
+                                                     TOADPILOT_STOP_GO_LAST_ROUTE_KEY,
+                                                     TOADPILOT_STOP_GO_STATUS_KEY,
                                                      TOADPILOT_TORQUE_CHECKPOINT_KEY,
                                                      TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
                                                      TOADPILOT_TORQUE_LAST_ROUTE_KEY,
@@ -26,7 +29,9 @@ from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, T
                                                      read_toadpilot_steering_response_request, write_toadpilot_config,
                                                      write_toadpilot_steering_response_request,
                                                      persist_toadpilot_torque_last_route,
+                                                     persist_toadpilot_stop_go_last_route,
                                                      toadpilot_steering_response_panda_matched,
+                                                     valid_toadpilot_stop_go_summary,
                                                      valid_toadpilot_torque_summary)
 
 
@@ -52,6 +57,7 @@ class TestToadPilotConfig(unittest.TestCase):
       auto_tune=True,
       lane_centering_assist=True,
       smooth_lane_transitions=True,
+      improved_stop_and_go=True,
       curve_assist_in_experimental=False,
       smart_saturation_warning=True,
       telemetry=True,
@@ -59,12 +65,13 @@ class TestToadPilotConfig(unittest.TestCase):
 
   def test_normalizes_valid_config(self):
     config = normalize_toadpilot_config({
-      "version": 3,
+      "version": 4,
       "enabled": True,
       "profile": "full",
       "auto_tune": False,
       "lane_centering_assist": True,
       "smooth_lane_transitions": False,
+      "improved_stop_and_go": False,
       "curve_assist_in_experimental": True,
       "smart_saturation_warning": False,
       "telemetry": False,
@@ -76,6 +83,7 @@ class TestToadPilotConfig(unittest.TestCase):
       auto_tune=False,
       lane_centering_assist=True,
       smooth_lane_transitions=False,
+      improved_stop_and_go=False,
       curve_assist_in_experimental=True,
       smart_saturation_warning=False,
       telemetry=False,
@@ -96,7 +104,8 @@ class TestToadPilotConfig(unittest.TestCase):
       {"enabled": 1},
       {"auto_tune": "true"},
       {"smooth_lane_transitions": 1},
-      {"version": 4},
+      {"improved_stop_and_go": 1},
+      {"version": 5},
     )
 
     for config in invalid_configs:
@@ -124,11 +133,12 @@ class TestToadPilotConfig(unittest.TestCase):
 
     config = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(config.version, 3)
+    self.assertEqual(config.version, 4)
     self.assertTrue(config.enabled)
     self.assertEqual(config.profile, "adaptive")
     self.assertTrue(config.lane_centering_assist)
     self.assertTrue(config.smooth_lane_transitions)
+    self.assertTrue(config.improved_stop_and_go)
     for field in ("auto_tune", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
       self.assertEqual(getattr(config, field), legacy[field])
 
@@ -146,12 +156,13 @@ class TestToadPilotConfig(unittest.TestCase):
 
     expected = {
       **explicit,
-      "version": 3,
+      "version": 4,
       "smooth_lane_transitions": True,
+      "improved_stop_and_go": True,
     }
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
-  def test_explicit_v3_config_is_preserved_exactly(self):
+  def test_explicit_v3_config_migrates_with_stop_and_go_enabled(self):
     explicit = {
       "version": 3,
       "enabled": False,
@@ -159,6 +170,23 @@ class TestToadPilotConfig(unittest.TestCase):
       "auto_tune": False,
       "lane_centering_assist": False,
       "smooth_lane_transitions": False,
+      "curve_assist_in_experimental": True,
+      "smart_saturation_warning": False,
+      "telemetry": False,
+    }
+
+    expected = {**explicit, "version": 4, "improved_stop_and_go": True}
+    self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
+
+  def test_explicit_v4_config_is_preserved_exactly(self):
+    explicit = {
+      "version": 4,
+      "enabled": False,
+      "profile": "full",
+      "auto_tune": False,
+      "lane_centering_assist": False,
+      "smooth_lane_transitions": False,
+      "improved_stop_and_go": False,
       "curve_assist_in_experimental": True,
       "smart_saturation_warning": False,
       "telemetry": False,
@@ -190,6 +218,7 @@ class TestToadPilotConfig(unittest.TestCase):
         self.assertEqual(config.profile, "observe")
         self.assertFalse(config.lane_centering_assist)
         self.assertFalse(config.smooth_lane_transitions)
+        self.assertFalse(config.improved_stop_and_go)
 
   def test_malformed_shared_toggles_fall_back_safely(self):
     toggles = SimpleNamespace(
@@ -204,6 +233,7 @@ class TestToadPilotConfig(unittest.TestCase):
     self.assertTrue(config.auto_tune)
     self.assertFalse(config.lane_centering_assist)
     self.assertFalse(config.smooth_lane_transitions)
+    self.assertFalse(config.improved_stop_and_go)
     self.assertFalse(config.curve_assist_in_experimental)
 
   def test_incomplete_shared_toggle_snapshot_fails_closed_atomically(self):
@@ -216,6 +246,7 @@ class TestToadPilotConfig(unittest.TestCase):
     self.assertEqual(config.profile, "observe")
     self.assertFalse(config.lane_centering_assist)
     self.assertFalse(config.smooth_lane_transitions)
+    self.assertFalse(config.improved_stop_and_go)
 
   def test_params_roundtrip(self):
     expected = ToadPilotConfig(enabled=True, profile="adaptive", auto_tune=False, telemetry=False)
@@ -374,6 +405,39 @@ class TestToadPilotConfig(unittest.TestCase):
       self.assertFalse(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=111.0))
       self.assertIsNone(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
       self.assertIsNone(params.get(TOADPILOT_TORQUE_CHECKPOINT_KEY))
+
+  def test_stop_go_summary_is_validated_and_preserved_once_offroad(self):
+    summary = {
+      "schema_version": TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": 110.0,
+      "route_started_at_unix": 100.0,
+      "route_id": "route",
+      "route_complete": False,
+      "completed_at_unix": None,
+      "summary_source": "controlsd_live",
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "event_sequence": 3,
+      "state": "ready",
+      "last_event": "controls_inactive",
+      "last_detail": "driver_accelerator_override",
+    }
+    self.assertTrue(valid_toadpilot_stop_go_summary(summary))
+    with TemporaryDirectory() as params_path, TemporaryDirectory() as status_path:
+      params = Params(params_path)
+      status_params = Params(status_path)
+      status_params.put(TOADPILOT_STOP_GO_STATUS_KEY, json.dumps(summary))
+      self.assertTrue(persist_toadpilot_stop_go_last_route(params, status_params, completed_at_unix=111.0))
+      saved = json.loads(params.get(TOADPILOT_STOP_GO_LAST_ROUTE_KEY))
+      self.assertTrue(saved["route_complete"])
+      self.assertEqual(saved["summary_source"], "manager_offroad_transition")
+      self.assertEqual(saved["last_detail"], "driver_accelerator_override")
+      self.assertTrue(valid_toadpilot_stop_go_summary(saved))
+
+      empty = {**summary, "event_sequence": 0}
+      status_params.put(TOADPILOT_STOP_GO_STATUS_KEY, json.dumps(empty))
+      params.remove(TOADPILOT_STOP_GO_LAST_ROUTE_KEY)
+      self.assertFalse(persist_toadpilot_stop_go_last_route(params, status_params, completed_at_unix=112.0))
+      self.assertIsNone(params.get(TOADPILOT_STOP_GO_LAST_ROUTE_KEY))
 
 
 class TestToadPilotLateralAssist(unittest.TestCase):

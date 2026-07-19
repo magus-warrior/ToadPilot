@@ -10,6 +10,7 @@ from unittest.mock import patch
 import cereal.messaging as messaging
 import numpy as np
 
+from cereal import car
 from openpilot.common.params import Params
 from openpilot.selfdrive.car import gen_empty_fingerprint
 from openpilot.selfdrive.car.interfaces import CarInterfaceBase
@@ -17,7 +18,7 @@ from openpilot.selfdrive.car.hyundai.interface import CarInterface as HyundaiCar
 from openpilot.selfdrive.car.hyundai.values import CAR as HYUNDAI_CAR
 from openpilot.selfdrive.car.toyota.interface import CarInterface
 from openpilot.selfdrive.car.toyota.values import CAR
-from openpilot.selfdrive.controls.lib.events import forcing_stop_alert
+from openpilot.selfdrive.controls.lib.events import forcing_stop_alert, steer_temp_unavailable_silent_alert
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, TOADPILOT_CONFIG_VERSION,
                                                      TOADPILOT_LANE_CENTER_CONFIRM_SAMPLES,
@@ -44,6 +45,32 @@ class LinearTorqueInterface:
     return CarInterfaceBase.torque_from_lateral_accel_linear
 
 
+class TestToadPilotSteeringFaultMessage(unittest.TestCase):
+  def test_confirmed_toyota_high_rate_fault_explains_1700_pause(self):
+    CP = SimpleNamespace(carFingerprint=CAR.TOYOTA_CAMRY_TSS2)
+    CS = car.CarState.new_message()
+    CS.steerFaultStatus = 9
+    CS.steerFaultStatusInitial = 21
+    output = car.CarOutput.new_message()
+    output.actuatorsOutput.toadPilotHighTorqueAuthorized = True
+    alert = steer_temp_unavailable_silent_alert(
+      CP, CS, {"carOutput": output}, False, 0, SimpleNamespace(),
+    )
+    self.assertEqual(alert.alert_text_1, "Steering Temporarily Unavailable")
+    self.assertIn("high-rate state 21", alert.alert_text_2)
+    self.assertIn("1700 headroom paused", alert.alert_text_2)
+
+  def test_stock_authority_keeps_generic_temporary_fault_message(self):
+    CP = SimpleNamespace(carFingerprint=CAR.TOYOTA_CAMRY_TSS2)
+    CS = car.CarState.new_message()
+    CS.steerFaultStatusInitial = 21
+    output = car.CarOutput.new_message()
+    alert = steer_temp_unavailable_silent_alert(
+      CP, CS, {"carOutput": output}, False, 0, SimpleNamespace(),
+    )
+    self.assertEqual(alert.alert_text_2, "")
+
+
 def toad_toggles(*, enabled=True, profile="adaptive", auto_tune=True):
   return SimpleNamespace(
     toadpilot_enabled=enabled,
@@ -51,6 +78,7 @@ def toad_toggles(*, enabled=True, profile="adaptive", auto_tune=True):
     toadpilot_auto_tune=auto_tune,
     toadpilot_lane_centering_assist=True,
     toadpilot_smooth_lane_transitions=True,
+    toadpilot_improved_stop_and_go=True,
     toadpilot_curve_assist_in_experimental=False,
     toadpilot_smart_saturation_warning=True,
     toadpilot_telemetry=False,
@@ -89,7 +117,7 @@ def centering_config(*, profile="adaptive", experimental_opt_in=False):
   )
 
 
-class TestToadPilotConfigV3(unittest.TestCase):
+class TestToadPilotConfigV4(unittest.TestCase):
   def test_route_logger_stays_disabled_after_low_memory_failure(self):
     self.assertNotIn("loggerd", managed_processes)
 
@@ -106,12 +134,13 @@ class TestToadPilotConfigV3(unittest.TestCase):
 
     migrated = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(TOADPILOT_CONFIG_VERSION, 3)
+    self.assertEqual(TOADPILOT_CONFIG_VERSION, 4)
     self.assertEqual(migrated.version, TOADPILOT_CONFIG_VERSION)
     self.assertTrue(migrated.enabled)
     self.assertEqual(migrated.profile, "adaptive")
     self.assertTrue(migrated.lane_centering_assist)
     self.assertTrue(migrated.smooth_lane_transitions)
+    self.assertTrue(migrated.improved_stop_and_go)
     for field in ("auto_tune", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
       self.assertEqual(getattr(migrated, field), legacy[field])
 
@@ -128,7 +157,7 @@ class TestToadPilotConfigV3(unittest.TestCase):
     malformed_cases = (
       {key: value for key, value in valid_v1.items() if key != "telemetry"},
       {**valid_v1, "unexpected": True},
-      {**valid_v1, "version": 4},
+      {**valid_v1, "version": 5},
       {**valid_v1, "version": True},
       {**valid_v1, "version": 1.0},
     )
@@ -140,6 +169,7 @@ class TestToadPilotConfigV3(unittest.TestCase):
         self.assertEqual(config.profile, "observe")
         self.assertFalse(config.lane_centering_assist)
         self.assertFalse(config.smooth_lane_transitions)
+        self.assertFalse(config.improved_stop_and_go)
 
   def test_lane_centering_default_is_on_but_runtime_toggle_is_strict_bool(self):
     base = toad_toggles()

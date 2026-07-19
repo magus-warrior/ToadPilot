@@ -6,7 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState, should_stop_for_long_control
+from openpilot.selfdrive.controls.lib.longcontrol import (LongControl, LongCtrlState,
+                                                          STOP_GO_PLANNER_STOP_GRACE_FRAMES,
+                                                          cruise_standstill_for_long_control,
+                                                          should_stop_for_long_control)
+from openpilot.selfdrive.controls.controlsd import longitudinal_controls_inactive_reason
 from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_DEFAULT,
                                                                         START_ACCEL_BREAKAWAY_DURATION,
                                                                         START_ACCEL_BREAKAWAY_END_SPEED,
@@ -31,7 +35,46 @@ class TestLongControlStopRequest(unittest.TestCase):
   def test_model_distance_is_not_used_as_a_boolean_stop_hold(self):
     source = (OPENPILOT_ROOT / "selfdrive/controls/controlsd.py").read_text()
     self.assertNotIn("forcingStopLength < 1", source)
-    self.assertIn("should_stop_for_long_control(long_plan.shouldStop, self.sm['frogpilotPlan'].forcingStop)", source)
+    self.assertIn("should_stop_for_long_control(long_plan.shouldStop, forcing_stop)", source)
+
+  def test_improved_stop_and_go_ignores_only_auto_resume_pcm_standstill(self):
+    launch = {"active": True, "should_stop": False, "brake_pressed": False, "planner_accel": 0.3}
+    auto_resume = SimpleNamespace(enableGasInterceptor=False, autoResumeSng=True,
+                                  carName="toyota", carFingerprint="TOYOTA_CAMRY_TSS2")
+    legacy = SimpleNamespace(enableGasInterceptor=False, autoResumeSng=False,
+                             carName="toyota", carFingerprint="TOYOTA_CAMRY_TSS2")
+    wrong_car = SimpleNamespace(enableGasInterceptor=False, autoResumeSng=True,
+                                carName="toyota", carFingerprint="TOYOTA_RAV4_TSS2")
+    interceptor = SimpleNamespace(enableGasInterceptor=True, autoResumeSng=False,
+                                  carName="toyota", carFingerprint="TOYOTA_CAMRY_TSS2")
+
+    self.assertFalse(cruise_standstill_for_long_control(auto_resume, True, True, **launch))
+    self.assertTrue(cruise_standstill_for_long_control(auto_resume, True, False, **launch))
+    self.assertTrue(cruise_standstill_for_long_control(legacy, True, True, **launch))
+    self.assertTrue(cruise_standstill_for_long_control(wrong_car, True, True, **launch))
+    self.assertFalse(cruise_standstill_for_long_control(interceptor, True, False, **launch))
+
+    for gates in (
+      {**launch, "active": False},
+      {**launch, "should_stop": True},
+      {**launch, "brake_pressed": True},
+      {**launch, "planner_accel": 0.0},
+      {**launch, "planner_accel": math.nan},
+      {**launch, "planner_accel": None},
+    ):
+      with self.subTest(gates=gates):
+        self.assertTrue(cruise_standstill_for_long_control(auto_resume, True, True, **gates))
+
+  def test_longitudinal_inactive_reason_is_specific(self):
+    self.assertEqual(longitudinal_controls_inactive_reason(False, False, False, True), "openpilot_disabled")
+    self.assertEqual(longitudinal_controls_inactive_reason(True, True, False, True, True),
+                     "driver_accelerator_override")
+    self.assertEqual(longitudinal_controls_inactive_reason(True, True, False, True, False),
+                     "longitudinal_override")
+    self.assertEqual(longitudinal_controls_inactive_reason(True, False, True, True), "frogpilot_pause")
+    self.assertEqual(longitudinal_controls_inactive_reason(True, False, False, False),
+                     "openpilot_longitudinal_unavailable")
+    self.assertEqual(longitudinal_controls_inactive_reason(True, False, False, True), "active")
 
 
 class TestStartAccelRampSettings(unittest.TestCase):
@@ -165,6 +208,282 @@ class TestStartAccelRampControl(unittest.TestCase):
     output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
     self.assertEqual(control.long_control_state, LongCtrlState.pid)
     self.assertGreater(output, 0.0)
+
+  def test_improved_stop_and_go_breaks_stale_camry_standstill_loop(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      autoResumeSng=True,
+      carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2",
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=0.5,
+      toadpilot_improved_stop_and_go=True,
+    )
+    CS = SimpleNamespace(
+      vEgo=0.0,
+      aEgo=0.0,
+      brakePressed=False,
+      cruiseState=SimpleNamespace(standstill=True),
+    )
+    control = LongControl(CP)
+
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    self.assertEqual(control.long_control_state, LongCtrlState.stopping)
+
+    CS.cruiseState.standstill = False
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    self.assertEqual(control.long_control_state, LongCtrlState.pid)
+    self.assertGreater(output, 0.0)
+    self.assertTrue(control.start_accel_ramp.started)
+
+    CS.cruiseState.standstill = True
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    self.assertEqual(control.long_control_state, LongCtrlState.pid)
+    self.assertGreater(output, 0.0)
+    self.assertTrue(control.start_accel_ramp.started)
+    self.assertTrue(control.stop_go_handoff_active)
+
+  def test_stop_and_go_release_is_independent_of_optional_accel_floor(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      autoResumeSng=True,
+      carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2",
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=1.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=0.0,
+      toadpilot_improved_stop_and_go=True,
+    )
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+
+    self.assertEqual(control.long_control_state, LongCtrlState.pid)
+    self.assertAlmostEqual(output, 0.3)
+    self.assertTrue(control.stop_go_handoff_active)
+    self.assertFalse(control.start_accel_ramp.armed)
+
+  def test_stop_and_go_handoff_is_time_bounded(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      autoResumeSng=True,
+      carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2",
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=0.5,
+      toadpilot_improved_stop_and_go=True,
+    )
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    for _ in range(math.ceil(START_ACCEL_RAMP_MAX_DURATION / DT_CTRL) + 1):
+      output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+
+    self.assertFalse(control.stop_go_handoff_active)
+    self.assertEqual(control.stop_go_handoff_last_event, "timeout")
+    self.assertFalse(control.start_accel_ramp.armed)
+    self.assertEqual(output, 0.0)
+
+  def test_improved_stop_and_go_does_not_override_safety_gates(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      autoResumeSng=True,
+      carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2",
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=0.5,
+      toadpilot_improved_stop_and_go=True,
+    )
+
+    for active, should_stop, brake_pressed, expected_event in (
+      (True, True, False, "planner_stop_confirmed"),
+      (True, False, True, "brake"),
+      (False, False, False, "controls_inactive"),
+    ):
+      with self.subTest(active=active, should_stop=should_stop, brake_pressed=brake_pressed):
+        CS = SimpleNamespace(
+          vEgo=0.0,
+          aEgo=0.0,
+          brakePressed=False,
+          cruiseState=SimpleNamespace(standstill=True),
+        )
+        control = LongControl(CP)
+        control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+        self.assertGreater(control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles), 0.0)
+        self.assertTrue(control.start_accel_ramp.started)
+
+        CS.brakePressed = brake_pressed
+        output = control.update(active, CS, 0.3, should_stop, (-3.0, 2.0), toggles)
+        if should_stop:
+          for _ in range(math.ceil(0.10 / DT_CTRL) + 1):
+            output = control.update(active, CS, 0.3, should_stop, (-3.0, 2.0), toggles)
+        self.assertLessEqual(output, 0.0)
+        self.assertFalse(control.stop_go_handoff_active)
+        self.assertEqual(control.stop_go_handoff_last_event, expected_event)
+        self.assertFalse(control.start_accel_ramp.armed)
+        self.assertFalse(control.start_accel_ramp.started)
+
+        if expected_event != "planner_stop_confirmed":
+          CS.brakePressed = False
+          output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+          self.assertFalse(control.start_accel_ramp.started)
+          self.assertLessEqual(output, 0.0)
+
+  def test_brief_contradictory_planner_stop_pauses_without_accelerating_or_rearming(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False, autoResumeSng=True, carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2", startingState=False, stopAccel=-2.0, startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(vEgoStarting=0.25, stoppingDecelRate=0.3, human_acceleration=False,
+                              start_accel_ramp=0.4, toadpilot_improved_stop_and_go=True)
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    self.assertEqual(control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles),
+                     START_ACCEL_BREAKAWAY_FLOOR)
+    started_count = control.stop_go_event_counts["started"]
+
+    for _ in range(5):
+      output = control.update(True, CS, 0.3, True, (-3.0, 2.0), toggles)
+      self.assertLessEqual(output, 0.0)
+      self.assertEqual(control.long_control_state, LongCtrlState.stopping)
+      self.assertTrue(control.stop_go_handoff_active)
+      self.assertTrue(control.start_accel_ramp.armed)
+    self.assertTrue(control.stop_go_planner_stop_pending)
+
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    self.assertGreater(output, 0.0)
+    self.assertFalse(control.stop_go_planner_stop_pending)
+    self.assertEqual(control.stop_go_event_counts["started"], started_count)
+    self.assertEqual(control.stop_go_handoff_last_event, "planner_stop_cleared")
+
+  def test_contradictory_planner_stop_confirms_on_exact_100ms_boundary(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False, autoResumeSng=True, carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2", startingState=False, stopAccel=-2.0, startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(vEgoStarting=0.25, stoppingDecelRate=0.3, human_acceleration=False,
+                              start_accel_ramp=0.4, toadpilot_improved_stop_and_go=True)
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+
+    for _ in range(STOP_GO_PLANNER_STOP_GRACE_FRAMES - 1):
+      output = control.update(True, CS, 0.3, True, (-3.0, 2.0), toggles)
+      self.assertLessEqual(output, 0.0)
+      self.assertTrue(control.stop_go_handoff_active)
+      self.assertTrue(control.stop_go_planner_stop_pending)
+
+    output = control.update(True, CS, 0.3, True, (-3.0, 2.0), toggles)
+    self.assertLessEqual(output, 0.0)
+    self.assertFalse(control.stop_go_handoff_active)
+    self.assertFalse(control.stop_go_planner_stop_pending)
+    self.assertEqual(control.stop_go_handoff_last_event, "planner_stop_confirmed")
+    self.assertAlmostEqual(control.stop_go_last_planner_stop_duration, 0.10)
+    self.assertGreater(control.stop_go_last_handoff_duration, 0.10)
+
+  def test_forced_stop_bypasses_planner_pulse_grace_and_records_inactive_detail(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False, autoResumeSng=True, carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2", startingState=False, stopAccel=-2.0, startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(vEgoStarting=0.25, stoppingDecelRate=0.3, human_acceleration=False,
+                              start_accel_ramp=0.4, toadpilot_improved_stop_and_go=True)
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    output = control.update(True, CS, 0.3, True, (-3.0, 2.0), toggles, forcing_stop=True)
+    self.assertLessEqual(output, 0.0)
+    self.assertFalse(control.stop_go_handoff_active)
+    self.assertEqual(control.stop_go_handoff_last_event, "forced_stop")
+
+    control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    control.update(False, CS, 0.3, False, (-3.0, 2.0), toggles,
+                   inactive_reason="driver_accelerator_override")
+    self.assertEqual(control.stop_go_handoff_last_event, "controls_inactive")
+    self.assertEqual(control.stop_go_handoff_last_detail, "driver_accelerator_override")
+    self.assertIn("controls_inactive:driver_accelerator_override", control.stop_go_event_counts)
+
+  def test_disabled_improved_stop_and_go_preserves_pcm_standstill_hold(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      autoResumeSng=True,
+      carName="toyota",
+      carFingerprint="TOYOTA_CAMRY_TSS2",
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=0.5,
+      toadpilot_improved_stop_and_go=False,
+    )
+    CS = SimpleNamespace(vEgo=0.0, aEgo=0.0, brakePressed=False,
+                         cruiseState=SimpleNamespace(standstill=True))
+    control = LongControl(CP)
+
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+
+    self.assertEqual(control.long_control_state, LongCtrlState.stopping)
+    self.assertLessEqual(output, 0.0)
+    self.assertFalse(control.start_accel_ramp.started)
+
+    del toggles.toadpilot_improved_stop_and_go
+    control = LongControl(CP)
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles)
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles)
+    self.assertEqual(control.long_control_state, LongCtrlState.stopping)
+    self.assertLessEqual(output, 0.0)
 
   def test_logs_release_start_and_brake_intervention(self):
     ramp = StartAccelRamp()

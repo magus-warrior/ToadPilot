@@ -80,9 +80,19 @@ class StartAccelRamp:
     self.reset()
 
   def update(self, output_accel, configured_accel, v_ego, planner_accel, released_from_stop,
-             control_active, should_stop, brake_pressed, cruise_standstill):
+             control_active, should_stop, brake_pressed, cruise_standstill, *,
+             preserve_on_planner_stop=False):
     configured_accel = parse_start_accel_ramp(configured_accel)
     valid_motion = math.isfinite(v_ego) and math.isfinite(planner_accel)
+    if (preserve_on_planner_stop and self.armed and should_stop and control_active and valid_motion and
+        planner_accel > 0.0 and not brake_pressed):
+      # Preserve lifecycle only. LongControl remains in stopping and this path
+      # can never command positive acceleration while the raw stop is present.
+      self.elapsed += DT_CTRL
+      if self.elapsed > START_ACCEL_RAMP_MAX_DURATION:
+        self._reset_with_log("planner_hold_expired", output_accel, v_ego, planner_accel)
+      return min(output_accel, 0.0)
+
     launch_permitted = (control_active and configured_accel > 0.0 and valid_motion and
                         not should_stop and not brake_pressed and not cruise_standstill and
                         v_ego < START_ACCEL_RAMP_END_SPEED)
@@ -132,10 +142,10 @@ class StartAccelRamp:
       if self.started:
         self._reset_with_log("planner_cancelled", output_accel, v_ego, planner_accel)
       return output_accel
-    if not self.started:
+    starting_now = not self.started
+    if starting_now:
       self._log("started", configured_accel=configured_accel, speed=round(float(v_ego), 3),
                 planner_accel=round(float(planner_accel), 3), output_accel=round(float(output_accel), 3))
-    self.started = True
 
     speed_scale = clip(1.0 - v_ego / START_ACCEL_RAMP_END_SPEED, 0.0, 1.0)
     target_accel = configured_accel * speed_scale
@@ -145,5 +155,13 @@ class StartAccelRamp:
       # Briefly overcome brake-hold/drivetrain deadband, then hand back to the
       # configured speed-fading ramp before meaningful vehicle speed develops.
       target_accel = max(target_accel, START_ACCEL_BREAKAWAY_FLOOR)
-    self.accel = min(target_accel, self.accel + START_ACCEL_RAMP_UP_RATE * DT_CTRL)
+    if starting_now:
+      # The previous gradual rise consumed most of the short breakaway window,
+      # which made slider changes nearly invisible at the first movement. The
+      # same bounded breakaway floor now applies immediately after a confirmed
+      # positive planner release; all stop/brake/inactive gates still precede it.
+      self.accel = target_accel
+    else:
+      self.accel = min(target_accel, self.accel + START_ACCEL_RAMP_UP_RATE * DT_CTRL)
+    self.started = True
     return max(output_accel, self.accel)

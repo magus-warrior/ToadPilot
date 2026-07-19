@@ -853,6 +853,7 @@ class FrogPilotVariables:
     toggle.toadpilot_auto_tune = toadpilot_config.auto_tune
     toggle.toadpilot_lane_centering_assist = toadpilot_config.lane_centering_assist
     toggle.toadpilot_smooth_lane_transitions = toadpilot_config.smooth_lane_transitions
+    toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.improved_stop_and_go
     toggle.toadpilot_curve_assist_in_experimental = toadpilot_config.curve_assist_in_experimental
     toggle.toadpilot_smart_saturation_warning = toadpilot_config.smart_saturation_warning
     toggle.toadpilot_telemetry = toadpilot_config.telemetry

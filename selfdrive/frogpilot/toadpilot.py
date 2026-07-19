@@ -12,6 +12,9 @@ from openpilot.common.params import Params
 
 TOADPILOT_CONFIG_KEY = "ToadPilotConfig"
 TOADPILOT_STATUS_KEY = "ToadPilotStatus"
+TOADPILOT_STEERING_STATUS_KEY = "ToadPilotSteeringStatus"
+TOADPILOT_STOP_GO_STATUS_KEY = "ToadPilotStopGoStatus"
+TOADPILOT_STOP_GO_LAST_ROUTE_KEY = "ToadPilotStopGoLastRoute"
 TOADPILOT_TUNE_STATUS_KEY = "ToadPilotTuneStatus"
 TOADPILOT_TORQUE_STATUS_KEY = "ToadPilotTorqueStatus"
 TOADPILOT_TORQUE_CHECKPOINT_KEY = "ToadPilotTorqueCheckpoint"
@@ -47,6 +50,7 @@ TOADPILOT_FRICTION_MAX_RATIO = 1.5
 TOADPILOT_TUNE_SCHEMA_VERSION = 1
 TOADPILOT_TORQUE_CACHE_VERSION = 2
 TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION = 2
+TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION = 1
 TOADPILOT_LANE_PROB_MIN = 0.65
 TOADPILOT_LANE_STD_MAX = 0.35
 TOADPILOT_LANE_WIDTH_MIN = 2.6
@@ -68,7 +72,7 @@ TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 3
+TOADPILOT_CONFIG_VERSION = 4
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -96,6 +100,7 @@ class ToadPilotConfig:
   auto_tune: bool = True
   lane_centering_assist: bool = True
   smooth_lane_transitions: bool = True
+  improved_stop_and_go: bool = True
   curve_assist_in_experimental: bool = False
   smart_saturation_warning: bool = True
   telemetry: bool = True
@@ -103,7 +108,7 @@ class ToadPilotConfig:
 
 DEFAULT_TOADPILOT_CONFIG = ToadPilotConfig()
 FAILSAFE_TOADPILOT_CONFIG = ToadPilotConfig(enabled=False, profile="observe", lane_centering_assist=False,
-                                            smooth_lane_transitions=False)
+                                            smooth_lane_transitions=False, improved_stop_and_go=False)
 DEFAULT_TOADPILOT_CONFIG_JSON = json.dumps(asdict(DEFAULT_TOADPILOT_CONFIG), sort_keys=True, separators=(",", ":"))
 _CONFIG_FIELDS = set(asdict(DEFAULT_TOADPILOT_CONFIG))
 _V1_CONFIG_FIELDS = {
@@ -111,6 +116,7 @@ _V1_CONFIG_FIELDS = {
   "smart_saturation_warning", "telemetry",
 }
 _V2_CONFIG_FIELDS = _V1_CONFIG_FIELDS | {"lane_centering_assist"}
+_V3_CONFIG_FIELDS = _V2_CONFIG_FIELDS | {"smooth_lane_transitions"}
 
 
 def normalize_toadpilot_config(data, base=None, partial=False):
@@ -131,7 +137,7 @@ def normalize_toadpilot_config(data, base=None, partial=False):
   if type(normalized["profile"]) is not str or normalized["profile"] not in TOADPILOT_PROFILES:
     raise ValueError(f"Unknown TOADPILOT profile: {normalized['profile']}")
 
-  for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions",
+  for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "improved_stop_and_go",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
     if type(normalized[field]) is not bool:
       raise ValueError(f"TOADPILOT setting '{field}' must be a boolean.")
@@ -157,6 +163,7 @@ def decode_toadpilot_config(raw):
           "profile": "adaptive",
           "lane_centering_assist": True,
           "smooth_lane_transitions": True,
+          "improved_stop_and_go": True,
         }
       elif data["version"] == 2:
         if set(data) != _V2_CONFIG_FIELDS:
@@ -165,6 +172,15 @@ def decode_toadpilot_config(raw):
           **data,
           "version": TOADPILOT_CONFIG_VERSION,
           "smooth_lane_transitions": True,
+          "improved_stop_and_go": True,
+        }
+      elif data["version"] == 3:
+        if set(data) != _V3_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 3 configuration.")
+        data = {
+          **data,
+          "version": TOADPILOT_CONFIG_VERSION,
+          "improved_stop_and_go": True,
         }
     if not isinstance(data, dict) or set(data) != _CONFIG_FIELDS:
       raise ValueError("Malformed TOADPILOT configuration.")
@@ -263,6 +279,7 @@ def config_from_toggles(toggles):
       "auto_tune": getattr(toggles, "toadpilot_auto_tune"),
       "lane_centering_assist": getattr(toggles, "toadpilot_lane_centering_assist"),
       "smooth_lane_transitions": getattr(toggles, "toadpilot_smooth_lane_transitions"),
+      "improved_stop_and_go": getattr(toggles, "toadpilot_improved_stop_and_go"),
       "curve_assist_in_experimental": getattr(toggles, "toadpilot_curve_assist_in_experimental"),
       "smart_saturation_warning": getattr(toggles, "toadpilot_smart_saturation_warning"),
       "telemetry": getattr(toggles, "toadpilot_telemetry"),
@@ -345,6 +362,54 @@ def persist_toadpilot_torque_last_route(params=None, status_params=None, complet
   if not valid_toadpilot_torque_summary(final_summary):
     return False
   params.put(TOADPILOT_TORQUE_LAST_ROUTE_KEY,
+             json.dumps(final_summary, sort_keys=True, separators=(",", ":")))
+  return True
+
+
+def valid_toadpilot_stop_go_summary(summary):
+  if not isinstance(summary, dict):
+    return False
+  published_at = summary.get("published_at_unix")
+  route_started_at = summary.get("route_started_at_unix")
+  route_complete = summary.get("route_complete")
+  event_sequence = summary.get("event_sequence")
+  if (summary.get("schema_version") != TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION or
+      summary.get("fingerprint") != TOADPILOT_FINGERPRINT or
+      not isinstance(summary.get("route_id"), str) or not summary["route_id"].strip() or
+      type(route_complete) is not bool or type(event_sequence) is not int or event_sequence < 0 or
+      isinstance(published_at, bool) or not isinstance(published_at, (int, float)) or
+      isinstance(route_started_at, bool) or not isinstance(route_started_at, (int, float)) or
+      not math.isfinite(float(published_at)) or not math.isfinite(float(route_started_at)) or
+      float(route_started_at) > float(published_at)):
+    return False
+  completed_at = summary.get("completed_at_unix")
+  if route_complete:
+    return (not isinstance(completed_at, bool) and isinstance(completed_at, (int, float)) and
+            math.isfinite(float(completed_at)) and float(completed_at) >= float(published_at) and
+            summary.get("summary_source") == "manager_offroad_transition")
+  return completed_at is None and summary.get("summary_source") == "controlsd_live"
+
+
+def persist_toadpilot_stop_go_last_route(params=None, status_params=None, completed_at_unix=None):
+  """Preserve one compact stop/go summary when the device goes offroad."""
+  params = params or Params()
+  status_params = status_params or Params("/dev/shm/params")
+  summary = read_json_status(TOADPILOT_STOP_GO_STATUS_KEY, status_params)
+  if not valid_toadpilot_stop_go_summary(summary) or summary["event_sequence"] == 0:
+    return False
+  completed_at = time.time() if completed_at_unix is None else completed_at_unix
+  if (isinstance(completed_at, bool) or not isinstance(completed_at, (int, float)) or
+      not math.isfinite(float(completed_at)) or float(completed_at) < float(summary["published_at_unix"])):
+    return False
+  final_summary = dict(summary)
+  final_summary.update({
+    "route_complete": True,
+    "completed_at_unix": round(float(completed_at), 3),
+    "summary_source": "manager_offroad_transition",
+  })
+  if not valid_toadpilot_stop_go_summary(final_summary):
+    return False
+  params.put(TOADPILOT_STOP_GO_LAST_ROUTE_KEY,
              json.dumps(final_summary, sort_keys=True, separators=(",", ":")))
   return True
 
