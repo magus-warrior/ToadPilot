@@ -8,6 +8,9 @@ from openpilot.selfdrive.car.disable_ecu import disable_ecu
 from openpilot.selfdrive.car.interfaces import CarInterfaceBase
 
 from openpilot.selfdrive.frogpilot.frogpilot_variables import params
+from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_EPS_FIRMWARE, TOADPILOT_FINGERPRINT,
+                                                     read_toadpilot_steering_response_latch,
+                                                     toadpilot_steering_response_panda_matched)
 
 ButtonType = car.CarState.ButtonEvent.Type
 FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
@@ -45,6 +48,25 @@ class CarInterface(CarInterfaceBase):
 
       ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
       ret.steerLimitTimer = 0.4
+
+    # This research envelope is immutable for the manager lifetime and is
+    # deliberately narrower than the general TOADPILOT capability check. Panda
+    # cannot identify a fingerprint itself, so enforce the exact Camry platform
+    # here before passing the matching safety parameter bit downstream.
+    exact_toadpilot_eps = any(
+      fw.ecu == Ecu.eps and bytes(fw.fwVersion) == TOADPILOT_EPS_FIRMWARE
+      for fw in car_fw
+    )
+    toadpilot_high_torque = (
+      not docs and read_toadpilot_steering_response_latch() and toadpilot_steering_response_panda_matched(params) and
+      candidate == TOADPILOT_FINGERPRINT and candidate == CAR.TOYOTA_CAMRY_TSS2 and
+      exact_toadpilot_eps and
+      ret.steerControlType == SteerControlType.torque and ret.lateralTuning.which() == "torque" and
+      candidate not in ANGLE_CONTROL_CAR and not (ret.flags & ToyotaFlags.SECOC.value) and
+      not (ret.safetyConfigs[0].safetyParam & (Panda.FLAG_TOYOTA_LTA | Panda.FLAG_TOYOTA_SECOC))
+    )
+    if toadpilot_high_torque:
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
 
     ret.stoppingControl = False  # Toyota starts braking more when it thinks you want to stop
 

@@ -38,6 +38,21 @@ MAX_STEER_RATE_FRAMES = 18  # tx control frames needed before torque can be cut
 # EPS allows user torque above threshold for 50 frames before permanently faulting
 MAX_USER_TORQUE = 500
 
+# The research envelope is deliberately an extension of stock saturation, not
+# a gain change. Normal requests retain Toyota's 1500-unit scale. A full-scale
+# request must persist for this long before the target can extend toward the
+# separately authorized hard ceiling.
+TOADPILOT_HIGH_TORQUE_SATURATION_THRESHOLD = 0.999
+TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES = 40  # 0.4 seconds at 100 Hz
+TOADPILOT_HIGH_TORQUE_MAPPING_START = 0.90
+TOADPILOT_HIGH_TORQUE_RELEASE_THRESHOLD = 0.85
+TOADPILOT_HIGH_TORQUE_MIN_SPEED = 5.0
+TOADPILOT_HIGH_TORQUE_MAX_SPEED = 15.0
+TOADPILOT_HIGH_TORQUE_MIN_DESIRED_ACCEL = 1.0
+TOADPILOT_HIGH_TORQUE_ARM_TRACKING_RATIO = 0.80
+TOADPILOT_HIGH_TORQUE_RELEASE_TRACKING_RATIO = 0.95
+TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE = 75.0
+
 # LTA limits
 # EPS ignores commands above this angle and causes PCS to fault
 MAX_LTA_ANGLE = 94.9461  # deg
@@ -48,6 +63,94 @@ LOCK_CMD = b"\x40\x05\x30\x11\x00\x80\x00\x00"
 UNLOCK_CMD = b"\x40\x05\x30\x11\x00\x40\x00\x00"
 
 PARK = car.CarState.GearShifter.park
+
+
+def update_high_torque_authority(requested_steer, lat_active, enabled, direction, frames, armed):
+  """Arm on sustained saturation and release with conservative hysteresis."""
+  if not lat_active or not enabled:
+    return 0, 0, False
+
+  requested_direction = 1 if requested_steer > 0.0 else -1 if requested_steer < 0.0 else 0
+  requested_magnitude = abs(requested_steer)
+
+  if armed:
+    keep_armed = requested_direction == direction and requested_magnitude >= TOADPILOT_HIGH_TORQUE_RELEASE_THRESHOLD
+    return (direction, frames, True) if keep_armed else (0, 0, False)
+
+  saturated = requested_direction != 0 and requested_magnitude >= TOADPILOT_HIGH_TORQUE_SATURATION_THRESHOLD
+  if not saturated:
+    return 0, 0, False
+
+  frames = frames + 1 if requested_direction == direction else 1
+  frames = min(frames, TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES)
+  return requested_direction, frames, frames >= TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES
+
+
+def high_torque_tracking_shortfall(desired_curvature, actual_curvature, v_ego, actual_ratio):
+  """Require meaningful, same-direction lateral undertracking in a test-speed window."""
+  try:
+    v_ego = float(v_ego)
+    desired_lateral_accel = float(desired_curvature) * v_ego ** 2
+    actual_lateral_accel = float(actual_curvature) * v_ego ** 2
+    actual_ratio = float(actual_ratio)
+  except (TypeError, ValueError):
+    return False
+
+  finite = all(math.isfinite(value) for value in (desired_lateral_accel, actual_lateral_accel, actual_ratio, v_ego))
+  return (finite and 0.0 < actual_ratio <= 1.0 and
+          TOADPILOT_HIGH_TORQUE_MIN_SPEED <= v_ego <= TOADPILOT_HIGH_TORQUE_MAX_SPEED and
+          abs(desired_lateral_accel) >= TOADPILOT_HIGH_TORQUE_MIN_DESIRED_ACCEL and
+          desired_lateral_accel * actual_lateral_accel > 0.0 and
+          abs(actual_lateral_accel) < actual_ratio * abs(desired_lateral_accel))
+
+
+def actual_curvature_from_angular_velocity(angular_velocity, v_ego):
+  """Use calibrated yaw rate for a roll/steering-offset-independent response."""
+  try:
+    if len(angular_velocity) != 3:
+      return math.nan
+    v_ego = float(v_ego)
+    yaw_rate = float(angular_velocity[2])
+  except (TypeError, ValueError):
+    return math.nan
+  if not math.isfinite(v_ego) or not math.isfinite(yaw_rate) or v_ego <= 0.0:
+    return math.nan
+  return yaw_rate / v_ego
+
+
+def high_torque_runtime_allowed(*, main_enabled, lat_active, steering_pressed, brake_pressed, stopping,
+                                lane_change_active, steering_rate_deg, requested_steer, desired_curvature,
+                                actual_curvature, v_ego, actual_ratio):
+  """Fail-closed runtime gate for entering or retaining extended authority."""
+  try:
+    steering_rate_deg = float(steering_rate_deg)
+    requested_steer = float(requested_steer)
+    desired_curvature = float(desired_curvature)
+  except (TypeError, ValueError):
+    return False
+
+  finite = all(math.isfinite(value) for value in (steering_rate_deg, requested_steer, desired_curvature))
+  direction_matches = requested_steer * desired_curvature < 0.0
+  return (finite and main_enabled and lat_active and not steering_pressed and not brake_pressed and not stopping and
+          not lane_change_active and abs(steering_rate_deg) < TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE and
+          direction_matches and
+          high_torque_tracking_shortfall(desired_curvature, actual_curvature, v_ego, actual_ratio))
+
+
+def steer_torque_target(requested_steer, params, high_torque_armed):
+  """Preserve stock scaling, then add proportional headroom once armed."""
+  requested_steer = float(clip(requested_steer, -1.0, 1.0))
+  target = int(round(requested_steer * params.STEER_COMMAND_SCALE))
+  if params.TOADPILOT_HIGH_TORQUE and high_torque_armed and \
+      abs(requested_steer) > TOADPILOT_HIGH_TORQUE_MAPPING_START:
+    direction = 1 if requested_steer > 0.0 else -1
+    stock_mapping_start = TOADPILOT_HIGH_TORQUE_MAPPING_START * params.STEER_COMMAND_SCALE
+    target_magnitude = interp(
+      abs(requested_steer), [TOADPILOT_HIGH_TORQUE_MAPPING_START, 1.0],
+      [stock_mapping_start, params.STEER_MAX],
+    )
+    target = int(round(direction * target_magnitude))
+  return int(clip(target, -params.STEER_MAX, params.STEER_MAX))
 
 
 def update_standstill_request(standstill_req, *, no_stop_timer, hybrid, gas_interceptor, sng_hack,
@@ -107,6 +210,9 @@ class CarController(CarControllerBase):
     self.permit_braking = True
     self.steer_rate_counter = 0
     self.distance_button = 0
+    self.high_torque_saturation_direction = 0
+    self.high_torque_saturation_frames = 0
+    self.high_torque_armed = False
 
     # *** start long control state ***
     self.long_pid = get_long_tune(self.CP, self.params)
@@ -166,7 +272,32 @@ class CarController(CarControllerBase):
           carlog.error("SecOC synchronization MAC mismatch, wrong key?")
 
     # *** steer torque ***
-    new_steer = int(round(actuators.steer * self.params.STEER_MAX))
+    actual_curvature = actual_curvature_from_angular_velocity(CC.angularVelocity, CS.out.vEgo)
+    tracking_ratio = (TOADPILOT_HIGH_TORQUE_RELEASE_TRACKING_RATIO if self.high_torque_armed else
+                      TOADPILOT_HIGH_TORQUE_ARM_TRACKING_RATIO)
+    high_torque_allowed = high_torque_runtime_allowed(
+      main_enabled=CC.enabled,
+      lat_active=lat_active,
+      steering_pressed=CS.out.steeringPressed,
+      brake_pressed=CS.out.brakePressed,
+      stopping=stopping,
+      lane_change_active=CC.leftBlinker or CC.rightBlinker,
+      steering_rate_deg=CS.out.steeringRateDeg,
+      requested_steer=actuators.steer,
+      desired_curvature=actuators.curvature,
+      actual_curvature=actual_curvature,
+      v_ego=CS.out.vEgo,
+      actual_ratio=tracking_ratio,
+    )
+    self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed = \
+      update_high_torque_authority(
+        actuators.steer, high_torque_allowed, self.params.TOADPILOT_HIGH_TORQUE,
+        self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed,
+      )
+    new_steer = steer_torque_target(actuators.steer, self.params, self.high_torque_armed)
+    # Runtime blockers remove the extended target immediately. The applied CAN
+    # command still unwinds through Toyota/Panda's unchanged 25-unit/frame limit;
+    # from 1700, returning to the stock 1500 envelope takes up to 0.08 seconds.
     apply_steer = apply_meas_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.params)
 
     # >100 degree/sec steering fault prevention
@@ -384,7 +515,10 @@ class CarController(CarControllerBase):
       can_sends.append([0x750, 0, b"\x0F\x02\x3E\x00\x00\x00\x00\x00", 0])
 
     new_actuators = actuators.as_builder()
-    new_actuators.steer = apply_steer / self.params.STEER_MAX
+    # Keep cereal's normalized steering contract and the torque learner's
+    # established calibration on the stock 1500-unit scale. steerOutputCan is
+    # the exact (possibly extended) command for diagnostics.
+    new_actuators.steer = clip(apply_steer / self.params.STEER_COMMAND_SCALE, -1.0, 1.0)
     new_actuators.steerOutputCan = apply_steer
     new_actuators.steeringAngleDeg = self.last_angle
     new_actuators.accel = self.accel

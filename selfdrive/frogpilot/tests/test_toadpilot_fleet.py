@@ -7,8 +7,13 @@ from unittest.mock import Mock, patch
 from openpilot.selfdrive.frogpilot.fleetmanager import helpers
 from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import START_ACCEL_RAMP_PARAM
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_CONFIG_KEY, TOADPILOT_CONFIG_VERSION, TOADPILOT_RESET_TUNE_KEY,
+                                                     TOADPILOT_STEERING_RESPONSE_BUILD,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
-                                                     TOADPILOT_STEERING_RESPONSE_REQUEST_KEY, TOADPILOT_TUNE_STATUS_KEY)
+                                                     TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
+                                                     TOADPILOT_TORQUE_CHECKPOINT_KEY,
+                                                     TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+                                                     TOADPILOT_TORQUE_LAST_ROUTE_KEY, TOADPILOT_TORQUE_STATUS_KEY,
+                                                     TOADPILOT_TUNE_STATUS_KEY)
 
 
 VALID_CONFIG = {
@@ -56,22 +61,88 @@ class MemoryParams:
 
 
 class TestToadPilotFleetStatus(unittest.TestCase):
-  def test_steering_experiment_never_claims_effective_without_handshake(self):
+  def test_steering_experiment_reports_pending_until_boot_latch_and_controller_flag_match(self):
     persistent = MemoryParams({TOADPILOT_STEERING_RESPONSE_REQUEST_KEY: TOADPILOT_STEERING_RESPONSE_PROFILE})
     road_state = {"offroad_confirmed": True}
 
-    with patch.object(helpers, "params", persistent):
-      result = helpers._get_toadpilot_steering_experiment({"supported": True}, road_state)
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "read_toadpilot_steering_response_latch", return_value=False):
+      result = helpers._get_toadpilot_steering_experiment(
+        {"supported": True, "steering_authority_flag": False, "panda_firmware_matched": False}, road_state,
+      )
 
     self.assertEqual(result["profile"], TOADPILOT_STEERING_RESPONSE_PROFILE)
     self.assertTrue(result["requested"])
-    self.assertFalse(result["available"])
+    self.assertFalse(result["boot_latched"])
+    self.assertTrue(result["available"])
     self.assertFalse(result["effective"])
-    self.assertFalse(result["pending_reboot"])
+    self.assertTrue(result["pending_reboot"])
     self.assertTrue(result["requires_reboot"])
     self.assertTrue(result["request_writable"])
-    self.assertEqual(result["state"], "requested_unavailable")
-    self.assertIn("Stock steering limits remain effective", result["reason"])
+    self.assertEqual(result["state"], "pending_enable")
+
+  def test_steering_experiment_effective_requires_supported_vehicle_latch_and_controller_flag(self):
+    persistent = MemoryParams({TOADPILOT_STEERING_RESPONSE_REQUEST_KEY: TOADPILOT_STEERING_RESPONSE_PROFILE})
+    road_state = {"offroad_confirmed": False}
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "read_toadpilot_steering_response_latch", return_value=True):
+      result = helpers._get_toadpilot_steering_experiment(
+        {"supported": True, "steering_authority_flag": True, "panda_firmware_matched": True}, road_state,
+      )
+
+    self.assertTrue(result["boot_latched"])
+    self.assertTrue(result["controller_flag_present"])
+    self.assertTrue(result["effective"])
+    self.assertFalse(result["pending_reboot"])
+    self.assertEqual(result["state"], "effective")
+
+  def test_boot_latch_with_old_panda_firmware_fails_closed(self):
+    persistent = MemoryParams({TOADPILOT_STEERING_RESPONSE_REQUEST_KEY: TOADPILOT_STEERING_RESPONSE_PROFILE})
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "read_toadpilot_steering_response_latch", return_value=True):
+      result = helpers._get_toadpilot_steering_experiment(
+        {"supported": True, "steering_authority_flag": False, "panda_firmware_matched": False},
+        {"offroad_confirmed": True},
+      )
+
+    self.assertFalse(result["effective"])
+    self.assertEqual(result["state"], "armed_waiting_for_firmware")
+    self.assertIn("exact paired firmware", result["reason"])
+
+  def test_disabling_request_does_not_change_effective_boot_latch(self):
+    persistent = MemoryParams()
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "read_toadpilot_steering_response_latch", return_value=True):
+        result = helpers._get_toadpilot_steering_experiment(
+          {"supported": True, "steering_authority_flag": True, "panda_firmware_matched": True},
+          {"offroad_confirmed": True},
+        )
+
+    self.assertFalse(result["requested"])
+    self.assertTrue(result["boot_latched"])
+    self.assertTrue(result["effective"])
+    self.assertTrue(result["pending_reboot"])
+    self.assertEqual(result["state"], "pending_disable")
+
+  def test_old_steering_profile_is_stale_and_never_requested(self):
+    old_profile = "camry_tss2_response_research_v1"
+    persistent = MemoryParams({TOADPILOT_STEERING_RESPONSE_REQUEST_KEY: old_profile})
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "read_toadpilot_steering_response_latch", return_value=False):
+      result = helpers._get_toadpilot_steering_experiment(
+        {"supported": True, "steering_authority_flag": False, "panda_firmware_matched": False}, {"offroad_confirmed": True},
+      )
+
+    self.assertFalse(result["requested"])
+    self.assertEqual(result["stored_profile"], old_profile)
+    self.assertEqual(result["stale_profile"], old_profile)
+    self.assertTrue(result["legacy_profile"])
+    self.assertFalse(result["effective"])
+    self.assertEqual(result["state"], "stale_profile")
 
   def test_status_freshness_uses_server_time(self):
     now = 1_000.0
@@ -120,6 +191,66 @@ class TestToadPilotFleetStatus(unittest.TestCase):
 
     self.assertIs(result["fresh"], False)
 
+  def test_last_torque_route_requires_exact_provenance_and_reports_age(self):
+    summary = {
+      "schema_version": TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": 1_010.0,
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "steering_response_profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+      "steering_response_build": TOADPILOT_STEERING_RESPONSE_BUILD,
+      "route_id": "route",
+      "route_started_at_unix": 1_000.0,
+      "route_complete": True,
+      "completed_at_unix": 1_011.0,
+      "summary_source": "manager_offroad_transition",
+      "command_semantics": "controller_command_before_panda_or_eps",
+      "controller_authorized": True,
+      "extended_output_samples": 5,
+    }
+    with patch.object(helpers, "read_json_status", side_effect=lambda key, _: (
+           summary if key == TOADPILOT_TORQUE_LAST_ROUTE_KEY else {})), \
+         patch.object(helpers.time, "time", return_value=1_020.0):
+      result = helpers._get_toadpilot_last_torque_route()
+
+    self.assertTrue(result["provenance_valid"])
+    self.assertEqual(result["age_seconds"], 9.0)
+
+    with patch.object(helpers, "read_json_status", return_value={**summary, "steering_response_build": "old"}):
+      self.assertEqual(helpers._get_toadpilot_last_torque_route(), {})
+
+    future = {**summary, "completed_at_unix": 1_030.0}
+    with patch.object(helpers, "read_json_status", side_effect=lambda key, _: (
+           future if key == TOADPILOT_TORQUE_LAST_ROUTE_KEY else {})), \
+         patch.object(helpers.time, "time", return_value=1_020.0):
+      self.assertEqual(helpers._get_toadpilot_last_torque_route(), {})
+
+  def test_newer_interrupted_checkpoint_does_not_downgrade_same_completed_route(self):
+    common = {
+      "schema_version": TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "steering_response_profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+      "steering_response_build": TOADPILOT_STEERING_RESPONSE_BUILD,
+      "route_id": "route",
+      "route_started_at_unix": 1_000.0,
+      "command_semantics": "controller_command_before_panda_or_eps",
+      "controller_authorized": True,
+      "extended_output_samples": 5,
+    }
+    completed = {**common, "published_at_unix": 1_010.0, "route_complete": True,
+                 "completed_at_unix": 1_011.0, "summary_source": "manager_offroad_transition"}
+    late_checkpoint = {**common, "published_at_unix": 1_012.0, "route_complete": False,
+                       "completed_at_unix": None, "summary_source": "torqued_live"}
+
+    def status_for_key(key, _):
+      return completed if key == TOADPILOT_TORQUE_LAST_ROUTE_KEY else late_checkpoint
+
+    with patch.object(helpers, "read_json_status", side_effect=status_for_key), \
+         patch.object(helpers.time, "time", return_value=1_020.0):
+      result = helpers._get_toadpilot_last_torque_route()
+
+    self.assertTrue(result["route_complete"])
+    self.assertEqual(result["completed_at_unix"], 1_011.0)
+
 
 class TestToadPilotFleetMutations(unittest.TestCase):
   def test_steering_experiment_request_is_default_off_and_can_only_change_offroad(self):
@@ -151,6 +282,21 @@ class TestToadPilotFleetMutations(unittest.TestCase):
     self.assertNotIn("experimental_steering_response_requested",
                      json.loads(persistent.values[TOADPILOT_CONFIG_KEY]))
     self.assertEqual(result, {"state": "saved"})
+    toggles_updated.assert_called_once_with()
+
+  def test_explicit_off_request_clears_stale_profile_only_when_confirmed_offroad(self):
+    requested = {**VALID_CONFIG, "experimental_steering_response_requested": False}
+    old_profile = "camry_tss2_response_research_v1"
+    persistent = MemoryParams({"IsOffroad": True, TOADPILOT_STEERING_RESPONSE_REQUEST_KEY: old_profile})
+    memory = MemoryParams()
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles") as toggles_updated, \
+         patch.object(helpers, "get_toadpilot_state", return_value={"state": "saved"}):
+      helpers.set_toadpilot_config(requested)
+
+    self.assertNotIn(TOADPILOT_STEERING_RESPONSE_REQUEST_KEY, persistent.values)
     toggles_updated.assert_called_once_with()
 
   def test_steering_experiment_request_rejects_non_boolean_before_writes(self):
@@ -258,6 +404,7 @@ class TestToadPilotFleetMutations(unittest.TestCase):
     memory = MemoryParams({
       "IsOnroad": True,
       TOADPILOT_STATUS_KEY: b"runtime",
+      TOADPILOT_TORQUE_STATUS_KEY: b"torque",
       TOADPILOT_TUNE_STATUS_KEY: b"tune",
     })
 
@@ -286,10 +433,13 @@ class TestToadPilotFleetMutations(unittest.TestCase):
     self.assertEqual(memory.remove_calls, [])
 
   def test_offroad_reset_clears_cache_and_status_and_queues_reset(self):
-    persistent = MemoryParams({"IsOffroad": True, "LiveTorqueParameters": b"cached"})
+    persistent = MemoryParams({"IsOffroad": True, "LiveTorqueParameters": b"cached",
+                               TOADPILOT_TORQUE_CHECKPOINT_KEY: b"checkpoint",
+                               TOADPILOT_TORQUE_LAST_ROUTE_KEY: b"summary"})
     memory = MemoryParams({
       "IsOnroad": False,
       TOADPILOT_STATUS_KEY: b"runtime",
+      TOADPILOT_TORQUE_STATUS_KEY: b"torque",
       TOADPILOT_TUNE_STATUS_KEY: b"tune",
     })
 
@@ -299,8 +449,11 @@ class TestToadPilotFleetMutations(unittest.TestCase):
       result = helpers.reset_toadpilot_tune()
 
     self.assertNotIn("LiveTorqueParameters", persistent.values)
+    self.assertNotIn(TOADPILOT_TORQUE_CHECKPOINT_KEY, persistent.values)
+    self.assertNotIn(TOADPILOT_TORQUE_LAST_ROUTE_KEY, persistent.values)
     self.assertIs(persistent.values[TOADPILOT_RESET_TUNE_KEY], True)
     self.assertNotIn(TOADPILOT_STATUS_KEY, memory.values)
+    self.assertNotIn(TOADPILOT_TORQUE_STATUS_KEY, memory.values)
     self.assertNotIn(TOADPILOT_TUNE_STATUS_KEY, memory.values)
     self.assertEqual(result["state"], {"state": "fresh"})
 
@@ -391,10 +544,10 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'value="adaptive" selected', response.data)
     self.assertIn(b'id="toadLaneCentering" checked', response.data)
     self.assertIn(b'id="toadSmoothLaneTransitions" checked', response.data)
-    self.assertIn(b'Experimental Camry steering response', response.data)
+    self.assertIn(b'Experimental Camry 1700 authority', response.data)
     self.assertIn(b'id="toadExperimentalSteeringResponse"', response.data)
     self.assertNotIn(b'id="toadExperimentalSteeringResponse" checked', response.data)
-    self.assertIn(b'experimental_steering_response_requested: steeringRequest', response.data)
+    self.assertIn(b'requestPayload.experimental_steering_response_requested = steeringRequest', response.data)
     self.assertIn(b'toadExperimentalSteeringResponse.disabled = busy || toadOnroad || !toadSteeringRequestAllowed', response.data)
     self.assertIn(b'toadSteeringRequestAllowed = false', response.data)
     self.assertEqual(response.headers["Cache-Control"], "no-store")

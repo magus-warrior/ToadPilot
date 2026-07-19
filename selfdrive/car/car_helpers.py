@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable
 
 from cereal import car
+from panda import Panda
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.interfaces import get_interface_attr
 from openpilot.selfdrive.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
@@ -62,6 +63,34 @@ def _get_interface_names() -> dict[str, list[str]]:
 # imports from directory selfdrive/car/<name>/
 interface_names = _get_interface_names()
 interfaces = load_interfaces(interface_names)
+
+
+def enforce_toadpilot_natural_fingerprint(CP, source, exact_match, force_fingerprint):
+  """Strip ToadPilot's Camry authority from forced or fuzzy fingerprints.
+
+  Toyota's EPS firmware alone is not unique to the TSS2 Camry. This check runs
+  after the fingerprint source is known, before CarController or Panda consumes
+  the safety configuration.
+  """
+  if CP.carFingerprint != "TOYOTA_CAMRY_TSS2":
+    return False
+
+  safety_configs = list(CP.safetyConfigs)
+  authority_requested = any(
+    int(config.safetyParam) & Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
+    for config in safety_configs
+  )
+  if not authority_requested:
+    return False
+
+  naturally_verified = (
+    not force_fingerprint and exact_match and
+    source in (car.CarParams.FingerprintSource.can, car.CarParams.FingerprintSource.fw)
+  )
+  if not naturally_verified:
+    for config in safety_configs:
+      config.safetyParam = int(config.safetyParam) & ~Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
+  return naturally_verified
 
 
 def can_fingerprint(next_can: Callable) -> tuple[str | None, dict[int, dict]]:
@@ -207,6 +236,7 @@ def get_car(logcan, sendcan, disable_openpilot_long, experimental_long_allowed, 
   CP.carFw = car_fw
   CP.fingerprintSource = source
   CP.fuzzyFingerprint = not exact_match
+  enforce_toadpilot_natural_fingerprint(CP, source, exact_match, frogpilot_toggles.force_fingerprint)
 
   return get_car_interface(CP), CP
 

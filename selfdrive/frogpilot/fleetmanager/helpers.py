@@ -57,11 +57,19 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
                                                                         START_ACCEL_RAMP_STEP,
                                                                         parse_start_accel_ramp,
                                                                         validate_start_accel_ramp)
-from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_RESET_TUNE_KEY,
+from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES,
+                                                     TOADPILOT_RESET_TUNE_KEY,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
-                                                     TOADPILOT_TORQUE_CACHE_VERSION, TOADPILOT_TUNE_STATUS_KEY,
+                                                     TOADPILOT_TORQUE_CACHE_VERSION, TOADPILOT_TORQUE_CHECKPOINT_KEY,
+                                                     TOADPILOT_TORQUE_LAST_ROUTE_KEY,
+                                                     TOADPILOT_TORQUE_STATUS_KEY,
+                                                     TOADPILOT_TUNE_STATUS_KEY,
                                                      normalize_toadpilot_config, read_json_status,
-                                                     read_toadpilot_config, read_toadpilot_steering_response_request,
+                                                     read_toadpilot_config, read_toadpilot_steering_response_latch,
+                                                     read_toadpilot_steering_response_profile,
+                                                     read_toadpilot_steering_response_request,
+                                                     toadpilot_steering_response_panda_matched,
+                                                     valid_toadpilot_torque_summary,
                                                      write_toadpilot_config, write_toadpilot_steering_response_request)
 
 XOR_KEY = "s8#pL3*Xj!aZ@dWq"
@@ -492,6 +500,8 @@ def _get_toadpilot_capability():
     "car_name": "Not detected",
     "lateral_control": "unknown",
     "openpilot_longitudinal": False,
+    "steering_authority_flag": False,
+    "panda_firmware_matched": toadpilot_steering_response_panda_matched(params),
     "stock_tune": {
       "lat_accel_factor": None,
       "lat_accel_offset": None,
@@ -513,6 +523,10 @@ def _get_toadpilot_capability():
       capability["car_name"] = CP.carName
       capability["lateral_control"] = CP.lateralTuning.which()
       capability["openpilot_longitudinal"] = bool(CP.openpilotLongitudinalControl)
+      capability["steering_authority_flag"] = any(
+        int(config.safetyParam) & Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
+        for config in CP.safetyConfigs
+      )
       capability["supported"] = (CP.carName == "toyota" and CP.carFingerprint == TOADPILOT_FINGERPRINT and
                                  CP.lateralTuning.which() == "torque")
       if capability["supported"]:
@@ -602,6 +616,33 @@ def _get_toadpilot_status(key, max_age_seconds=5.0):
   raw_age_seconds = time.time() - float(published_at)
   status["age_seconds"] = round(max(raw_age_seconds, 0.0), 2)
   status["fresh"] = -1.0 <= raw_age_seconds <= max_age_seconds
+  return status
+
+
+def _get_toadpilot_last_torque_route():
+  completed = read_json_status(TOADPILOT_TORQUE_LAST_ROUTE_KEY, params)
+  checkpoint = read_json_status(TOADPILOT_TORQUE_CHECKPOINT_KEY, params)
+  completed = completed if valid_toadpilot_torque_summary(completed) and completed["route_complete"] else {}
+  checkpoint = checkpoint if valid_toadpilot_torque_summary(checkpoint) and not checkpoint["route_complete"] else {}
+
+  # A late checkpoint from the same process can never downgrade its completed
+  # route. Otherwise show whichever route has the newest trustworthy evidence.
+  if completed and checkpoint and completed["route_id"] == checkpoint["route_id"]:
+    status = completed
+  else:
+    candidates = (candidate for candidate in (completed, checkpoint) if candidate)
+    status = max(candidates, key=lambda candidate: float(
+      candidate["completed_at_unix"] if candidate["route_complete"] else candidate["published_at_unix"]
+    ), default={})
+  if not status:
+    return {}
+
+  age_timestamp = status.get("completed_at_unix") if status["route_complete"] else status.get("published_at_unix")
+  raw_age_seconds = time.time() - float(age_timestamp)
+  if raw_age_seconds < -1.0:
+    return {}
+  status["age_seconds"] = round(max(raw_age_seconds, 0.0), 2)
+  status["provenance_valid"] = True
   return status
 
 def _get_toadpilot_road_state():
@@ -700,28 +741,60 @@ def set_start_accel_ramp(request_data):
 
 
 def _get_toadpilot_steering_experiment(capability, road_state):
+  stored_profile = read_toadpilot_steering_response_profile(params)
   requested = read_toadpilot_steering_response_request(params)
+  boot_latched = read_toadpilot_steering_response_latch()
   supported_vehicle = capability.get("supported") is True
+  controller_flag_present = capability.get("steering_authority_flag") is True
+  panda_firmware_matched = capability.get("panda_firmware_matched") is True
+  stale_profile = stored_profile if stored_profile not in (None, TOADPILOT_STEERING_RESPONSE_PROFILE) else None
+  legacy_profile = stale_profile in TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES
+  pending_reboot = requested != boot_latched
+  effective = bool(boot_latched and supported_vehicle and controller_flag_present and panda_firmware_matched)
 
-  if requested:
-    reason = ("Request saved, but this build has no matched controller/Panda experimental envelope. "
-              "Stock steering limits remain effective.")
-    state = "requested_unavailable"
+  if stale_profile is not None:
+    state = "stale_profile"
+    reason = ("A saved request targets an older steering profile and cannot activate this envelope. "
+              "Confirm the new profile offroad, then reboot.")
+  elif effective and pending_reboot:
+    state = "pending_disable"
+    reason = "The experimental envelope remains effective for this boot; stock limits return after reboot."
+  elif effective:
+    state = "effective"
+    reason = "The exact Camry controller/Panda authority flag is active for this boot."
+  elif pending_reboot and requested:
+    state = "pending_enable"
+    reason = "The new profile is saved but cannot become active until reboot."
+  elif pending_reboot:
+    state = "pending_disable"
+    reason = "The boot latch remains set; the saved request is off and takes effect after reboot."
+  elif requested and boot_latched and not panda_firmware_matched:
+    state = "armed_waiting_for_firmware"
+    reason = ("The profile is boot-latched, but the connected Panda does not report the exact paired firmware "
+              "signature. Stock limits remain effective.")
+  elif requested and boot_latched:
+    state = "armed_waiting_for_controller"
+    reason = ("The profile is boot-latched, but the saved/current CarParams do not report the matching "
+              "controller/Panda flag. Stock limits remain effective.")
   else:
-    reason = "Not requested; the stock controller/Panda steering envelope remains effective."
     state = "off"
+    reason = "Not requested; the stock controller/Panda steering envelope remains effective."
 
-  if requested and not supported_vehicle:
+  if (requested or boot_latched) and not supported_vehicle:
     reason += " A supported Camry TSS2 torque-control fingerprint has not been confirmed."
 
   return {
     "profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+    "stored_profile": stored_profile,
+    "stale_profile": stale_profile,
+    "legacy_profile": legacy_profile,
     "requested": requested,
-    # Do not claim pending/effective until a boot-time controller/Panda
-    # handshake exists and reports the same immutable profile identifier.
-    "available": False,
-    "effective": False,
-    "pending_reboot": False,
+    "boot_latched": boot_latched,
+    "controller_flag_present": controller_flag_present,
+    "panda_firmware_matched": panda_firmware_matched,
+    "available": True,
+    "effective": effective,
+    "pending_reboot": pending_reboot,
     "requires_reboot": True,
     "request_writable": road_state["offroad_confirmed"],
     "state": state,
@@ -741,6 +814,8 @@ def get_toadpilot_state():
     "learner": _get_toadpilot_learner(),
     "runtime": _get_toadpilot_status(TOADPILOT_STATUS_KEY),
     "tune_status": _get_toadpilot_status(TOADPILOT_TUNE_STATUS_KEY),
+    "torque_status": _get_toadpilot_status(TOADPILOT_TORQUE_STATUS_KEY),
+    "torque_last_route": _get_toadpilot_last_torque_route(),
     "steering_experiment": _get_toadpilot_steering_experiment(capability, road_state),
     "environment": {
       "experimental_mode": params.get_bool("ExperimentalMode"),
@@ -763,8 +838,11 @@ def set_toadpilot_config(request_data):
   if steering_request_present and type(steering_request) is not bool:
     raise ValueError("Experimental Camry steering response request must be a boolean.")
 
-  current_steering_request = read_toadpilot_steering_response_request(params)
-  steering_request_changed = steering_request_present and steering_request != current_steering_request
+  stored_steering_profile = read_toadpilot_steering_response_profile(params)
+  steering_request_changed = steering_request_present and (
+    (steering_request and stored_steering_profile != TOADPILOT_STEERING_RESPONSE_PROFILE) or
+    (not steering_request and stored_steering_profile is not None)
+  )
   if steering_request_changed:
     _require_toadpilot_offroad()
 
@@ -794,9 +872,12 @@ def reset_toadpilot_tune():
   _require_toadpilot_offroad()
 
   params.remove("LiveTorqueParameters")
+  params.remove(TOADPILOT_TORQUE_CHECKPOINT_KEY)
+  params.remove(TOADPILOT_TORQUE_LAST_ROUTE_KEY)
   params.put_bool(TOADPILOT_RESET_TUNE_KEY, True)
   params_memory.remove(TOADPILOT_STATUS_KEY)
   params_memory.remove(TOADPILOT_TUNE_STATUS_KEY)
+  params_memory.remove(TOADPILOT_TORQUE_STATUS_KEY)
   return {
     "message": "Cached learning data was cleared and an in-memory reset was queued for torqued.",
     "state": get_toadpilot_state(),

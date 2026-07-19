@@ -10,11 +10,15 @@ class TestInternalParamsPersistence(unittest.TestCase):
       params = Params(params_path)
       params.put("ToadPilotConfig", '{"profile":"full"}')
       params.put("StartAccelRamp", "0.50")
+      params.put("ToadPilotTorqueCheckpoint", '{"peak":1650}')
+      params.put("ToadPilotTorqueLastRoute", '{"peak":1700}')
 
       params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
 
       self.assertEqual(params.get("ToadPilotConfig"), b'{"profile":"full"}')
       self.assertEqual(params.get("StartAccelRamp"), b"0.50")
+      self.assertEqual(params.get("ToadPilotTorqueCheckpoint"), b'{"peak":1650}')
+      self.assertEqual(params.get("ToadPilotTorqueLastRoute"), b'{"peak":1700}')
 
   def test_explicit_full_clear_still_removes_user_settings(self):
     with tempfile.TemporaryDirectory() as params_path:
@@ -28,11 +32,13 @@ class TestInternalParamsPersistence(unittest.TestCase):
   def test_runtime_status_is_not_preserved(self):
     with tempfile.TemporaryDirectory() as params_path:
       params = Params(params_path)
-      params.put("ToadPilotStatus", "runtime")
+      for key in ("ToadPilotStatus", "ToadPilotTuneStatus", "ToadPilotTorqueStatus"):
+        params.put(key, "runtime")
 
       params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
 
-      self.assertIsNone(params.get("ToadPilotStatus"))
+      for key in ("ToadPilotStatus", "ToadPilotTuneStatus", "ToadPilotTorqueStatus"):
+        self.assertIsNone(params.get(key))
 
 
 if __name__ == "__main__":

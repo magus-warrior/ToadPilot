@@ -1,8 +1,10 @@
+import math
 import unittest
 from types import SimpleNamespace
 
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.controls.controlsd import curvature_cap_alert_required, get_lateral_target_curvature
+from openpilot.selfdrive.controls.controlsd import (curvature_cap_alert_required, get_lateral_target_curvature,
+                                                    valid_calibrated_angular_velocity)
 from openpilot.selfdrive.controls.lib.drive_helpers import (
   MAX_CURVATURE,
   MAX_LATERAL_ACCEL_NO_ROLL,
@@ -59,6 +61,37 @@ class TestControlsCurvatureReset(unittest.TestCase):
     self.assertAlmostEqual(engaged_curvature, measured_curvature - max_step)
     self.assertGreater(engaged_curvature, requested_curvature)
     self.assertFalse(curvature_limited)
+
+
+class TestCalibratedAngularVelocityValidity(unittest.TestCase):
+  @staticmethod
+  def sample(*, measurement_valid=True, inputs_ok=True, sensors_ok=True, posenet_ok=True, values=None):
+    return SimpleNamespace(
+      angularVelocityCalibrated=SimpleNamespace(
+        valid=measurement_valid,
+        value=[0.0, 0.0, 0.2] if values is None else values,
+      ),
+      inputsOK=inputs_ok,
+      sensorsOK=sensors_ok,
+      posenetOK=posenet_ok,
+    )
+
+  def test_healthy_sample_is_forwarded(self):
+    self.assertEqual(valid_calibrated_angular_velocity(self.sample(), True), [0.0, 0.0, 0.2])
+
+  def test_stale_invalid_or_nonfinite_sample_is_removed(self):
+    cases = (
+      (self.sample(), False),
+      (self.sample(measurement_valid=False), True),
+      (self.sample(inputs_ok=False), True),
+      (self.sample(sensors_ok=False), True),
+      (self.sample(posenet_ok=False), True),
+      (self.sample(values=[0.0, 0.2]), True),
+      (self.sample(values=[0.0, 0.0, math.nan]), True),
+    )
+    for sample, service_valid in cases:
+      with self.subTest(sample=sample, service_valid=service_valid):
+        self.assertEqual(valid_calibrated_angular_velocity(sample, service_valid), [])
 
 
 class TestCurvatureAccelerationLimits(unittest.TestCase):

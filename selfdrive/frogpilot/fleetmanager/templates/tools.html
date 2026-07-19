@@ -261,9 +261,9 @@ Tools
     </div>
 
     <div class="toadpilot-boundary">
-      <strong>Existing authority, used better.</strong>
-      Full Existing Authority can request the stock controller's full normalized output, but it never raises
-      Toyota's 1500-unit steering command, rate limits, measured-torque guard, or Panda safety limits.
+      <strong>Existing authority by default.</strong>
+      TOADPILOT profiles retain Toyota's stock 1500-unit envelope. The separate Camry authority experiment below
+      is default off, requires a confirmed offroad save and reboot, and preserves the existing rate and torque-error guards.
     </div>
 
     <div class="toadpilot-config-grid">
@@ -297,7 +297,7 @@ Tools
       </label>
 
       <label class="toadpilot-check" for="toadExperimentalSteeringResponse">
-        <span><strong>Experimental Camry steering response</strong><br><small>Research request only, default off. Requires confirmed offroad save and reboot; stock limits stay active until a matched controller/Panda bundle reports effective.</small></span>
+        <span><strong>Experimental Camry 1700 authority</strong><br><small>Closed-course research only, default off. The EPS may accept 1700 or fault; this is not a benign rejection test. Exact, non-forced Camry TSS2 identification and reboot are required. Extension is limited to main engagement, 5-15 m/s, sustained saturation with calibrated-yaw undertracking, and no lane change, braking, driver input, or steering rate at/above 75°/s. Rise 15, fall 25, EPS error 350, and RT delta 450 remain unchanged; a command at 1700 takes up to 0.08 s to unwind to 1500.</small></span>
         <input type="checkbox" id="toadExperimentalSteeringResponse">
       </label>
 
@@ -357,6 +357,8 @@ Tools
           <dt>Residual assist</dt><dd id="toadResidualAssist">Waiting for controller...</dd>
           <dt>Tracking error</dt><dd id="toadTrackingError">Waiting for controller...</dd>
           <dt>Saturation</dt><dd id="toadSaturation">Waiting for controller...</dd>
+          <dt>Extended torque</dt><dd id="toadExtendedTorque">Waiting for controller command...</dd>
+          <dt>Trial safety</dt><dd id="toadTorqueSafety">Waiting for EPS/fault data...</dd>
           <dt>Lane centering</dt><dd id="toadLaneCenteringState">Waiting for controller...</dd>
           <dt>Feed-forward</dt><dd id="toadFeedforward">Waiting...</dd>
           <dt>Experimental</dt><dd id="toadExperimentalState">Waiting...</dd>
@@ -618,6 +620,8 @@ Tools
     const stockTune = capability.stock_tune || {};
     const learner = data.learner || {};
     const runtime = data.runtime || {};
+    const torqueStatus = data.torque_status || {};
+    const torqueLastRoute = data.torque_last_route || {};
     const environment = data.environment || {};
     const steeringExperiment = data.steering_experiment || {};
     toadLoaded = true;
@@ -670,12 +674,23 @@ Tools
       " · EPS error " + limits.steer_error_max : "Not applicable");
 
     let steeringExperimentText;
-    if (steeringExperiment.effective === true) {
+    if (steeringExperiment.effective === true && steeringExperiment.pending_reboot === true &&
+        steeringExperiment.requested !== true) {
+      steeringExperimentText = "Effective now · disable pending reboot";
+    } else if (steeringExperiment.effective === true) {
       steeringExperimentText = "Effective · " + String(steeringExperiment.profile || "verified profile");
+    } else if (steeringExperiment.state === "stale_profile") {
+      steeringExperimentText = "Old request ignored · new confirmation required";
+    } else if (steeringExperiment.pending_reboot === true && steeringExperiment.requested === true) {
+      steeringExperimentText = "Requested · enable pending reboot";
     } else if (steeringExperiment.pending_reboot === true) {
-      steeringExperimentText = "Requested · pending reboot";
+      steeringExperimentText = "Disable pending reboot";
+    } else if (steeringExperiment.boot_latched === true) {
+      steeringExperimentText = steeringExperiment.panda_firmware_matched === true ?
+        "Boot-latched · waiting for matched controller flag" :
+        "Boot-latched · paired Panda firmware not installed";
     } else if (steeringExperiment.requested === true) {
-      steeringExperimentText = "Requested · unavailable in this build · stock limits active";
+      steeringExperimentText = "Requested · waiting for reboot";
     } else {
       steeringExperimentText = "Off · stock limits active";
     }
@@ -718,6 +733,69 @@ Tools
     setToadText("toadTrackingError", runtimeActive ? formatToadNumber(runtime.tracking_error, 4) + " m/s²" : runtimeState);
     setToadText("toadSaturation", runtimeActive ?
       (runtime.controller_saturated ? "Saturated" : "Not saturated") : runtimeState);
+
+    const liveTorqueDiagnostic = torqueStatus.fresh === true && torqueStatus.controller_authorized === true;
+    const historicalTorqueDiagnostic = torqueLastRoute.provenance_valid === true;
+    const torqueDiagnostic = liveTorqueDiagnostic ? torqueStatus :
+      (historicalTorqueDiagnostic ? torqueLastRoute : {});
+    let torqueDiagnosticPrefix = "";
+    if (!liveTorqueDiagnostic && historicalTorqueDiagnostic) {
+      const historyAge = Number.isFinite(Number(torqueLastRoute.age_seconds)) ?
+        Math.round(Number(torqueLastRoute.age_seconds)) + "s old" : "age unknown";
+      torqueDiagnosticPrefix = torqueLastRoute.route_complete === true ?
+        "Last completed trial · " + historyAge + " · " :
+        "Interrupted trial checkpoint · " + historyAge + " · ";
+    }
+    let extendedTorqueText;
+    if (torqueDiagnostic.controller_authorized === true) {
+      const rawOutput = formatToadNumber(torqueDiagnostic.current_output_can, 0);
+      const peakOutput = formatToadNumber(torqueDiagnostic.peak_abs_output_can, 0);
+      const sampleCount = Number(torqueDiagnostic.extended_output_samples || 0);
+      const commandState = liveTorqueDiagnostic ?
+        (torqueDiagnostic.extension_active === true ? "controller command ACTIVE" : "controller command inactive") :
+        (torqueDiagnostic.extension_active === true ? "last sampled command was extended" :
+          "last sampled command was stock-range");
+      extendedTorqueText = torqueDiagnosticPrefix + commandState + " · " +
+        "latest " + rawOutput + " · sampled route peak " + peakOutput;
+      extendedTorqueText += " · " + String(sampleCount) + " sampled extended outputs";
+      if (liveTorqueDiagnostic &&
+          (torqueDiagnostic.inputs_valid !== true || torqueDiagnostic.output_valid !== true)) {
+        extendedTorqueText += " · input invalid";
+      }
+    } else if (steeringExperiment.effective === true) {
+      extendedTorqueText = "Waiting for fresh controller-command diagnostic";
+    } else {
+      extendedTorqueText = "Stock 1500 authority active";
+    }
+    setToadText("toadExtendedTorque", extendedTorqueText);
+
+    let torqueSafetyText;
+    const extendedStateSamples = Number(torqueDiagnostic.extended_window_car_state_samples || 0);
+    if (torqueDiagnostic.controller_authorized === true && extendedStateSamples > 0) {
+      const extendedFaults = torqueDiagnostic.extended_window_permanent_fault_seen === true ?
+        "PERMANENT FAULT during sampled extension" :
+        torqueDiagnostic.extended_window_temporary_fault_seen === true ?
+          "temporary fault during sampled extension" : "no fault in sampled extension window";
+      torqueSafetyText = torqueDiagnosticPrefix + "extended-window EPS peak " +
+        formatToadNumber(torqueDiagnostic.extended_window_peak_abs_eps_torque, 0) +
+        " · rate peak " + formatToadNumber(torqueDiagnostic.extended_window_peak_abs_steering_rate_deg, 1) + "°/s" +
+        " · driver input " + String(Number(torqueDiagnostic.extended_window_driver_override_samples || 0)) +
+        " samples · " + String(extendedStateSamples) + " EPS samples · " + extendedFaults;
+      if (torqueDiagnostic.temporary_fault_seen === true || torqueDiagnostic.permanent_fault_seen === true) {
+        torqueSafetyText += " · whole-route fault also seen";
+      }
+      if (liveTorqueDiagnostic && torqueDiagnostic.car_state_valid !== true) {
+        torqueSafetyText += " · current EPS input stale";
+      }
+    } else if (torqueDiagnostic.controller_authorized === true &&
+               Number(torqueDiagnostic.extended_output_samples || 0) > 0) {
+      torqueSafetyText = torqueDiagnosticPrefix + "No extended-window EPS/fault samples captured";
+    } else if (steeringExperiment.effective === true) {
+      torqueSafetyText = "Waiting for fresh EPS/fault diagnostic";
+    } else {
+      torqueSafetyText = "Not running an extended-authority trial";
+    }
+    setToadText("toadTorqueSafety", torqueSafetyText);
 
     let laneCenteringText = runtimeState;
     if (runtimeFresh && !config.lane_centering_assist) {
@@ -971,10 +1049,10 @@ Tools
       telemetry: toadTelemetry.checked
     };
     const steeringRequest = toadExperimentalSteeringResponse.checked;
-    const requestPayload = {
-      ...config,
-      experimental_steering_response_requested: steeringRequest
-    };
+    const requestPayload = { ...config };
+    if (toadSteeringRequestAllowed) {
+      requestPayload.experimental_steering_response_requested = steeringRequest;
+    }
 
     try {
       const state = await toadRequest("/toadpilot", {

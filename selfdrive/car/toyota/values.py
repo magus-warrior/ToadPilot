@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 from cereal import car
+from panda import Panda
 from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.car import CarSpecs, PlatformConfig, Platforms
 from openpilot.selfdrive.car import AngleRateLimit, dbc_dict
@@ -14,10 +15,26 @@ Ecu = car.CarParams.Ecu
 MIN_ACC_SPEED = 19. * CV.MPH_TO_MS
 PEDAL_TRANSITION = 10. * CV.MPH_TO_MS
 
+TOYOTA_STEER_COMMAND_SCALE = 1500
+TOADPILOT_HIGH_TORQUE_MAX = 1700
+
+
+def toadpilot_high_torque_enabled(CP):
+  """Bind the larger envelope to the same Camry-only Panda safety flag."""
+  try:
+    safety_param = CP.safetyConfigs[0].safetyParam
+    return (CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS2 and
+            CP.steerControlType == car.CarParams.SteerControlType.torque and
+            CP.lateralTuning.which() == "torque" and
+            bool(safety_param & Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE))
+  except (AttributeError, IndexError, TypeError):
+    return False
+
 
 class CarControllerParams:
   STEER_STEP = 1
-  STEER_MAX = 1500
+  STEER_COMMAND_SCALE = TOYOTA_STEER_COMMAND_SCALE
+  STEER_MAX = TOYOTA_STEER_COMMAND_SCALE
   STEER_ERROR_MAX = 350     # max delta between torque cmd and torque motor
 
   # Lane Tracing Assist (LTA) control limits
@@ -30,6 +47,9 @@ class CarControllerParams:
   ANGLE_RATE_LIMIT_DOWN = AngleRateLimit(speed_bp=[5, 25], angle_v=[0.36, 0.26])
 
   def __init__(self, CP):
+    self.TOADPILOT_HIGH_TORQUE = toadpilot_high_torque_enabled(CP)
+    self.STEER_MAX = TOADPILOT_HIGH_TORQUE_MAX if self.TOADPILOT_HIGH_TORQUE else self.STEER_COMMAND_SCALE
+
     if CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT:
       self.ACCEL_MAX = 2.0
     else:

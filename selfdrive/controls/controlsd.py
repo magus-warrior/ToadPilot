@@ -76,6 +76,20 @@ def get_lateral_target_curvature(lat_active, measured_curvature, requested_curva
   return requested_curvature if lat_active else measured_curvature
 
 
+def valid_calibrated_angular_velocity(llk, service_valid):
+  """Return calibrated angular velocity only from a healthy localization sample."""
+  if not service_valid:
+    return []
+  try:
+    values = [float(value) for value in llk.angularVelocityCalibrated.value]
+    valid = (llk.angularVelocityCalibrated.valid and llk.inputsOK and llk.sensorsOK and llk.posenetOK)
+  except (AttributeError, TypeError, ValueError):
+    return []
+  if not valid or len(values) != 3 or not all(math.isfinite(value) for value in values):
+    return []
+  return values
+
+
 def curvature_cap_alert_required(curvature_limited, controller_saturated, requested_curvature,
                                  actual_lateral_accel, v_ego):
   """Whether a sustained curvature cap leaves a meaningful raw path-tracking shortfall."""
@@ -846,8 +860,10 @@ class Controls:
     orientation_value = list(self.sm['liveLocationKalman'].calibratedOrientationNED.value)
     if len(orientation_value) > 2:
       CC.orientationNED = orientation_value
-    angular_rate_value = list(self.sm['liveLocationKalman'].angularVelocityCalibrated.value)
-    if len(angular_rate_value) > 2:
+    angular_rate_value = valid_calibrated_angular_velocity(
+      self.sm['liveLocationKalman'], self.sm.all_checks(['liveLocationKalman']),
+    )
+    if angular_rate_value:
       CC.angularVelocity = angular_rate_value
 
     CC.cruiseControl.override = self.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl

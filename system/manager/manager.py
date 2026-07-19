@@ -20,6 +20,8 @@ from openpilot.system.version import get_build_metadata, terms_version, training
 
 from openpilot.selfdrive.frogpilot.frogpilot_functions import convert_params, frogpilot_boot_functions, setup_frogpilot, uninstall_frogpilot
 from openpilot.selfdrive.frogpilot.frogpilot_variables import frogpilot_default_params, get_frogpilot_toggles, params_memory
+from openpilot.selfdrive.frogpilot.toadpilot import (latch_toadpilot_steering_response_request,
+                                                     persist_toadpilot_torque_last_route)
 
 
 def manager_init() -> None:
@@ -72,6 +74,11 @@ def manager_init() -> None:
   params.remove("DoToggleReset")
 
   frogpilot_boot_functions(build_metadata, params_cache)
+
+  # Steering authority is selected once per manager lifetime. Fleet saves only
+  # update the persistent request, so neither a live toggle refresh nor an
+  # ignition transition can change the controller/Panda envelope.
+  latch_toadpilot_steering_response_request(params)
 
   # Create folders needed for msgq
   try:
@@ -177,6 +184,12 @@ def manager_thread() -> None:
       tinygrad_model = frogpilot_toggles.tinygrad_model
 
     elif not started and started_prev:
+      # Preserve the final validated experimental-torque snapshot before the
+      # shared-memory status is cleared. This is a synchronous one-per-route write.
+      try:
+        persist_toadpilot_torque_last_route(params, params_memory)
+      except Exception:
+        cloudlog.exception("failed to preserve final ToadPilot torque diagnostic")
       params.clear_all(ParamKeyType.CLEAR_ON_OFFROAD_TRANSITION)
       params_memory.clear_all(ParamKeyType.CLEAR_ON_OFFROAD_TRANSITION)
 

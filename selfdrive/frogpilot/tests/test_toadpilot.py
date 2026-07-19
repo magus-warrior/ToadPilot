@@ -7,14 +7,27 @@ from types import SimpleNamespace
 
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, TOADPILOT_CONFIG_KEY,
-                                                     TOADPILOT_PROFILES, TOADPILOT_STEERING_RESPONSE_PROFILE,
+                                                     TOADPILOT_PROFILES, TOADPILOT_STEERING_RESPONSE_LATCH_ENV,
+                                                     TOADPILOT_STEERING_RESPONSE_BUILD,
+                                                     TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES,
+                                                     TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
+                                                     TOADPILOT_TORQUE_CHECKPOINT_KEY,
+                                                     TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+                                                     TOADPILOT_TORQUE_LAST_ROUTE_KEY,
+                                                     TOADPILOT_TORQUE_STATUS_KEY,
                                                      ToadPilotConfig,
                                                      ToadPilotHighAuthorityObserver, ToadPilotLateralAssist,
                                                      config_from_toggles, decode_toadpilot_config,
+                                                     latch_toadpilot_steering_response_request,
                                                      normalize_toadpilot_config, read_toadpilot_config,
+                                                     read_toadpilot_steering_response_latch,
+                                                     read_toadpilot_steering_response_profile,
                                                      read_toadpilot_steering_response_request, write_toadpilot_config,
-                                                     write_toadpilot_steering_response_request)
+                                                     write_toadpilot_steering_response_request,
+                                                     persist_toadpilot_torque_last_route,
+                                                     toadpilot_steering_response_panda_matched,
+                                                     valid_toadpilot_torque_summary)
 
 
 def run_assist(assist, config, **overrides):
@@ -244,6 +257,42 @@ class TestToadPilotConfig(unittest.TestCase):
           params.put(TOADPILOT_STEERING_RESPONSE_REQUEST_KEY, malformed)
           self.assertFalse(read_toadpilot_steering_response_request(params))
 
+  def test_steering_response_boot_latch_requires_exact_profile_and_is_immutable_until_relatch(self):
+    with TemporaryDirectory() as params_path:
+      params = Params(params_path)
+      environ = {}
+
+      params.put(TOADPILOT_STEERING_RESPONSE_REQUEST_KEY, "camry_tss2_response_research_v1")
+      self.assertIsNone(latch_toadpilot_steering_response_request(params, environ))
+      self.assertNotIn(TOADPILOT_STEERING_RESPONSE_LATCH_ENV, environ)
+      self.assertFalse(read_toadpilot_steering_response_latch(environ))
+
+      write_toadpilot_steering_response_request(True, params)
+      self.assertEqual(read_toadpilot_steering_response_profile(params), TOADPILOT_STEERING_RESPONSE_PROFILE)
+      # A persistent write alone cannot change the manager-lifetime latch.
+      self.assertFalse(read_toadpilot_steering_response_latch(environ))
+
+      self.assertEqual(latch_toadpilot_steering_response_request(params, environ),
+                       TOADPILOT_STEERING_RESPONSE_PROFILE)
+      self.assertTrue(read_toadpilot_steering_response_latch(environ))
+
+      write_toadpilot_steering_response_request(False, params)
+      self.assertTrue(read_toadpilot_steering_response_latch(environ))
+      self.assertIsNone(read_toadpilot_steering_response_profile(params))
+
+  def test_steering_response_requires_exact_single_panda_firmware_signature(self):
+    with TemporaryDirectory() as params_path:
+      params = Params(params_path)
+      expected = next(iter(TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES))
+
+      self.assertFalse(toadpilot_steering_response_panda_matched(params))
+      params.put("PandaSignatures", b"wrong")
+      self.assertFalse(toadpilot_steering_response_panda_matched(params))
+      params.put("PandaSignatures", expected + b"," + expected)
+      self.assertFalse(toadpilot_steering_response_panda_matched(params))
+      params.put("PandaSignatures", expected)
+      self.assertTrue(toadpilot_steering_response_panda_matched(params))
+
   def test_internal_params_allowlist_rejects_malformed_and_unknown_keys(self):
     with TemporaryDirectory() as params_path:
       params = Params(params_path)
@@ -254,6 +303,77 @@ class TestToadPilotConfig(unittest.TestCase):
       for key in (b"\xff", b"ToadPilotConfig\x00", "ToadPilotConfig\x00", "ToadPilotUnknown"):
         with self.subTest(key=key), self.assertRaises(UnknownKeyName):
           params.check_key(key)
+
+  def test_completed_torque_summary_is_validated_and_persisted(self):
+    summary = {
+      "schema_version": TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": 110.0,
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "steering_response_profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+      "steering_response_build": TOADPILOT_STEERING_RESPONSE_BUILD,
+      "route_id": "00000001--2026-07-18--12-00-00",
+      "route_started_at_unix": 100.0,
+      "route_complete": False,
+      "completed_at_unix": None,
+      "summary_source": "torqued_live",
+      "command_semantics": "controller_command_before_panda_or_eps",
+      "controller_authorized": True,
+      "extended_output_samples": 4,
+      "temporary_fault_seen": False,
+      "permanent_fault_seen": False,
+    }
+    self.assertTrue(valid_toadpilot_torque_summary(summary))
+
+    with TemporaryDirectory() as params_path, TemporaryDirectory() as status_path:
+      params = Params(params_path)
+      status_params = Params(status_path)
+      status_params.put(TOADPILOT_TORQUE_STATUS_KEY, json.dumps(summary))
+
+      self.assertFalse(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=109.0))
+      self.assertIsNone(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
+      self.assertTrue(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=111.0))
+      saved = json.loads(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
+      self.assertTrue(saved["route_complete"])
+      self.assertEqual(saved["completed_at_unix"], 111.0)
+      self.assertEqual(saved["summary_source"], "manager_offroad_transition")
+      self.assertTrue(valid_toadpilot_torque_summary(saved))
+
+  def test_torque_summary_persistence_rejects_stale_provenance_and_empty_routes(self):
+    base = {
+      "schema_version": TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": 110.0,
+      "fingerprint": "TOYOTA_CAMRY_TSS2",
+      "steering_response_profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+      "steering_response_build": TOADPILOT_STEERING_RESPONSE_BUILD,
+      "route_id": "route",
+      "route_started_at_unix": 100.0,
+      "route_complete": False,
+      "completed_at_unix": None,
+      "summary_source": "torqued_live",
+      "command_semantics": "controller_command_before_panda_or_eps",
+      "controller_authorized": True,
+      "extended_output_samples": 0,
+      "temporary_fault_seen": False,
+      "permanent_fault_seen": False,
+    }
+    self.assertTrue(valid_toadpilot_torque_summary(base))
+    for override in ({"schema_version": 1}, {"fingerprint": "TOYOTA_PRIUS"},
+                     {"steering_response_profile": "old"}, {"steering_response_build": "old"},
+                     {"route_id": ""}, {"route_id": " route "}, {"published_at_unix": "110.0"},
+                     {"published_at_unix": True}, {"route_started_at_unix": "100.0"},
+                     {"route_started_at_unix": 111.0}, {"summary_source": "unknown"},
+                     {"route_complete": True, "completed_at_unix": 109.0,
+                      "summary_source": "manager_offroad_transition"}):
+      with self.subTest(override=override):
+        self.assertFalse(valid_toadpilot_torque_summary({**base, **override}))
+
+    with TemporaryDirectory() as params_path, TemporaryDirectory() as status_path:
+      params = Params(params_path)
+      status_params = Params(status_path)
+      status_params.put(TOADPILOT_TORQUE_STATUS_KEY, json.dumps(base))
+      self.assertFalse(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=111.0))
+      self.assertIsNone(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
+      self.assertIsNone(params.get(TOADPILOT_TORQUE_CHECKPOINT_KEY))
 
 
 class TestToadPilotLateralAssist(unittest.TestCase):

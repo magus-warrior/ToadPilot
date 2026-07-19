@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+from panda import Panda
 
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
@@ -21,7 +22,8 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (DelayedLateralRe
                                                                  use_toadpilot_upstream_response)
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.selfdrive.frogpilot.toadpilot import ToadPilotConfig
-from openpilot.selfdrive.locationd.torqued import TorqueEstimator, live_location_sample_valid
+from openpilot.selfdrive.locationd.torqued import (TorqueEstimator, live_location_sample_valid,
+                                                   toadpilot_extended_torque_sample)
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
 
@@ -256,6 +258,12 @@ class TestTorqueResponseOutputNeutrality(CamryControllerFixture):
 
 
 class TestTorqueLearnerLocationValidity(CamryControllerFixture):
+  def test_above_stock_can_torque_is_excluded_from_normalized_learning(self):
+    self.assertFalse(toadpilot_extended_torque_sample(True, 1500))
+    self.assertTrue(toadpilot_extended_torque_sample(True, 1501))
+    self.assertTrue(toadpilot_extended_torque_sample(True, math.nan))
+    self.assertFalse(toadpilot_extended_torque_sample(False, 1700))
+
   def test_localizer_validity_requires_all_consumed_signals(self):
     self.assertTrue(live_location_sample_valid(location_sample()))
     self.assertFalse(live_location_sample_valid(location_sample(valid=False)))
@@ -280,6 +288,100 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
     add_point.assert_not_called()
     self.assertFalse(estimator.toadpilot_collecting)
     self.assertEqual(estimator.toadpilot_observer.accepted_samples, 0)
+
+  def test_authorized_raw_can_diagnostic_records_actual_extension_and_peak(self):
+    CP = CarInterface.get_params(
+      CAR.TOYOTA_CAMRY_TSS2, gen_empty_fingerprint(), [], False, False, self.params, False,
+    )
+    CP.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
+    with patch("openpilot.selfdrive.locationd.torqued.Params", return_value=self.params):
+      estimator = TorqueEstimator(CP)
+
+    def car_output(raw):
+      return SimpleNamespace(actuatorsOutput=SimpleNamespace(steer=-1.0, steerOutputCan=raw))
+
+    estimator.handle_log(10.0, "carOutput", car_output(-1600))
+    estimator.handle_log(10.0, "carState", SimpleNamespace(
+      vEgo=10.0,
+      steeringPressed=True,
+      steeringTorqueEps=-1550.0,
+      steeringRateDeg=42.5,
+      steerFaultTemporary=True,
+      steerFaultPermanent=False,
+    ))
+    active = estimator.toadpilot_torque_snapshot(inputs_valid=True)
+    self.assertTrue(active["controller_authorized"])
+    self.assertTrue(active["extension_active"])
+    self.assertEqual(active["current_output_can"], -1600.0)
+    self.assertEqual(active["peak_abs_output_can"], 1600.0)
+    self.assertEqual(active["extended_output_samples"], 1)
+    self.assertEqual(active["last_extended_monotonic"], 10.0)
+    self.assertTrue(active["car_state_valid"])
+    self.assertEqual(active["current_eps_torque"], -1550.0)
+    self.assertEqual(active["peak_abs_eps_torque"], 1550.0)
+    self.assertEqual(active["peak_abs_steering_rate_deg"], 42.5)
+    self.assertEqual(active["driver_override_samples"], 1)
+    self.assertTrue(active["temporary_fault_seen"])
+    self.assertFalse(active["permanent_fault_seen"])
+    self.assertEqual(active["extended_window_car_state_samples"], 1)
+    self.assertEqual(active["extended_window_peak_abs_eps_torque"], 1550.0)
+    self.assertEqual(active["extended_window_peak_abs_steering_rate_deg"], 42.5)
+    self.assertEqual(active["extended_window_driver_override_samples"], 1)
+    self.assertTrue(active["extended_window_temporary_fault_seen"])
+    self.assertFalse(active["extended_window_permanent_fault_seen"])
+
+    # The EPS can report a fault after the controller has begun its 0.4-second
+    # unwind. Keep that response attributed through the 0.5-second tail.
+    estimator.handle_log(10.1, "carOutput", car_output(-1400))
+    estimator.handle_log(10.1, "carState", SimpleNamespace(
+      vEgo=10.0,
+      steeringPressed=True,
+      steeringTorqueEps=-1400.0,
+      steeringRateDeg=90.0,
+      steerFaultTemporary=False,
+      steerFaultPermanent=True,
+    ))
+    inactive = estimator.toadpilot_torque_snapshot(inputs_valid=True)
+    self.assertFalse(inactive["extension_active"])
+    self.assertEqual(inactive["current_output_can"], -1400.0)
+    self.assertEqual(inactive["peak_abs_output_can"], 1600.0)
+    self.assertEqual(inactive["extended_output_samples"], 1)
+    self.assertTrue(inactive["permanent_fault_seen"])
+    self.assertTrue(inactive["extended_window_permanent_fault_seen"])
+    self.assertEqual(inactive["extended_window_car_state_samples"], 2)
+
+    # An unrelated state sample after the tail remains a whole-route metric,
+    # but cannot inflate the extension-window peak or sample count.
+    estimator.handle_log(11.0, "carOutput", car_output(-1400))
+    estimator.handle_log(11.0, "carState", SimpleNamespace(
+      vEgo=10.0,
+      steeringPressed=False,
+      steeringTorqueEps=-1450.0,
+      steeringRateDeg=120.0,
+      steerFaultTemporary=False,
+      steerFaultPermanent=False,
+    ))
+    after_tail = estimator.toadpilot_torque_snapshot(inputs_valid=True)
+    self.assertEqual(after_tail["extended_window_car_state_samples"], 2)
+    self.assertEqual(after_tail["extended_window_peak_abs_steering_rate_deg"], 90.0)
+
+    stale = estimator.toadpilot_torque_snapshot(inputs_valid=False)
+    self.assertFalse(stale["extension_active"])
+    self.assertFalse(stale["inputs_valid"])
+    self.assertFalse(stale["car_state_valid"])
+    self.assertIsNone(stale["current_eps_torque"])
+
+  def test_stock_controller_diagnostic_never_labels_extension(self):
+    CP = CarInterface.get_params(
+      CAR.TOYOTA_CAMRY_TSS2, gen_empty_fingerprint(), [], False, False, self.params, False,
+    )
+    with patch("openpilot.selfdrive.locationd.torqued.Params", return_value=self.params):
+      estimator = TorqueEstimator(CP)
+    estimator.update_toadpilot_torque_diagnostic(10.0, 1700)
+    status = estimator.toadpilot_torque_snapshot()
+    self.assertFalse(status["controller_authorized"])
+    self.assertFalse(status["extension_active"])
+    self.assertFalse(status["output_valid"])
 
 
 if __name__ == "__main__":

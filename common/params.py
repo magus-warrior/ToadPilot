@@ -11,16 +11,22 @@ class Params(_Params):
     "ToadPilotResetTune",
     "ToadPilotSteeringResponseRequest",
     "ToadPilotStatus",
+    "ToadPilotTorqueCheckpoint",
+    "ToadPilotTorqueLastRoute",
+    "ToadPilotTorqueStatus",
     "ToadPilotTuneStatus",
     "ToyotaPerformanceMode",  # Legacy prototype key; migration-status access only.
   }
   # The native registry in this stripped checkout does not know these keys, so
   # its transition cleanup deletes them as if they were unregistered. Preserve
-  # only user settings; status and one-shot command keys must remain ephemeral.
+  # only user settings plus compact torque checkpoint/route summaries; live
+  # status and one-shot command keys must remain ephemeral.
   _persistent_internal_keys = {
     "StartAccelRamp",
     "ToadPilotConfig",
     "ToadPilotSteeringResponseRequest",
+    "ToadPilotTorqueCheckpoint",
+    "ToadPilotTorqueLastRoute",
     "ToyotaPerformanceMode",
   }
 

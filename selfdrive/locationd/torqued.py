@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 import json
 import numpy as np
+import time
+import uuid
 from collections import deque, defaultdict
 
 import cereal.messaging as messaging
 from cereal import car, log
+from panda import Panda
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
+from openpilot.selfdrive.car.toyota.values import TOYOTA_STEER_COMMAND_SCALE
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator
 
 from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_toggles
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_LAT_ACCEL_OFFSET_MAX,
                                                      TOADPILOT_RESET_TUNE_KEY, TOADPILOT_TORQUE_CACHE_VERSION,
-                                                     TOADPILOT_TUNE_STATUS_KEY, ToadPilotHighAuthorityObserver)
+                                                     TOADPILOT_STEERING_RESPONSE_BUILD,
+                                                     TOADPILOT_STEERING_RESPONSE_PROFILE,
+                                                     TOADPILOT_TORQUE_CHECKPOINT_KEY,
+                                                     TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+                                                     TOADPILOT_TORQUE_STATUS_KEY,
+                                                     TOADPILOT_TUNE_STATUS_KEY,
+                                                     ToadPilotHighAuthorityObserver)
 
 HISTORY = 5  # secs
 POINTS_PER_BUCKET = 1500
@@ -36,6 +46,7 @@ LAT_ACC_THRESHOLD = 1
 STEER_BUCKET_BOUNDS = [(-0.5, -0.3), (-0.3, -0.2), (-0.2, -0.1), (-0.1, 0), (0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.5)]
 MIN_BUCKET_POINTS = np.array([100, 300, 500, 500, 500, 500, 300, 100])
 MIN_ENGAGE_BUFFER = 2  # secs
+TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS = 0.5
 
 VERSION = TOADPILOT_TORQUE_CACHE_VERSION  # v2 caches always store pure learner values, never manual overrides
 ALLOWED_CARS = ['toyota', 'hyundai']
@@ -58,6 +69,17 @@ def live_location_sample_valid(msg):
                 np.isfinite(yaw_rate_values[2]) and np.isfinite(orientation_values[0]))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
+
+
+def toadpilot_extended_torque_sample(capable, steer_output_can):
+  """Keep experimental above-stock commands out of normalized torque learning."""
+  if not capable:
+    return False
+  try:
+    steer_output_can = float(steer_output_can)
+  except (TypeError, ValueError):
+    return True
+  return not np.isfinite(steer_output_can) or abs(steer_output_can) > TOYOTA_STEER_COMMAND_SCALE
 
 
 class TorqueBuckets(PointBuckets):
@@ -93,6 +115,35 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_observer = ToadPilotHighAuthorityObserver(CP.carFingerprint)
     self.toadpilot_observe_enabled = False
     self.toadpilot_collecting = False
+    try:
+      self.toadpilot_high_torque_authorized = self.toadpilot_capable and any(
+        int(config.safetyParam) & Panda.FLAG_TOYOTA_TOADPILOT_HIGH_TORQUE
+        for config in CP.safetyConfigs
+      )
+    except (AttributeError, TypeError):
+      self.toadpilot_high_torque_authorized = False
+    self.toadpilot_torque_output_valid = False
+    self.toadpilot_torque_extension_active = False
+    self.toadpilot_torque_current_output_can = None
+    self.toadpilot_torque_peak_abs_output_can = 0.0
+    self.toadpilot_extended_output_samples = 0
+    self.toadpilot_last_extended_monotonic = None
+    self.toadpilot_extended_window_until = None
+    self.toadpilot_route_started_at_unix = time.time()
+    self.toadpilot_route_id = f"diagnostic-session:{uuid.uuid4().hex}"
+    self.toadpilot_car_state_valid = False
+    self.toadpilot_current_eps_torque = None
+    self.toadpilot_peak_abs_eps_torque = 0.0
+    self.toadpilot_peak_abs_steering_rate_deg = 0.0
+    self.toadpilot_driver_override_samples = 0
+    self.toadpilot_temporary_fault_seen = False
+    self.toadpilot_permanent_fault_seen = False
+    self.toadpilot_extended_window_car_state_samples = 0
+    self.toadpilot_extended_window_peak_abs_eps_torque = 0.0
+    self.toadpilot_extended_window_peak_abs_steering_rate_deg = 0.0
+    self.toadpilot_extended_window_driver_override_samples = 0
+    self.toadpilot_extended_window_temporary_fault_seen = False
+    self.toadpilot_extended_window_permanent_fault_seen = False
     self.offline_latAccelFactor = 0.0
     self.resets = 0.0
     self.use_params = CP.carName in ALLOWED_CARS and self.is_torque_tuning
@@ -239,6 +290,125 @@ class TorqueEstimator(ParameterEstimator):
       self.filtered_params[param].update(value)
       self.filtered_params[param].update_alpha(self.decay)
 
+  def update_toadpilot_torque_diagnostic(self, t, steer_output_can):
+    if not self.toadpilot_high_torque_authorized:
+      return
+    try:
+      steer_output_can = float(steer_output_can)
+      t = float(t)
+    except (TypeError, ValueError):
+      self.toadpilot_torque_output_valid = False
+      self.toadpilot_torque_extension_active = False
+      return
+    if not np.isfinite(steer_output_can) or not np.isfinite(t):
+      self.toadpilot_torque_output_valid = False
+      self.toadpilot_torque_extension_active = False
+      return
+
+    self.toadpilot_torque_output_valid = True
+    self.toadpilot_torque_current_output_can = steer_output_can
+    self.toadpilot_torque_peak_abs_output_can = max(self.toadpilot_torque_peak_abs_output_can,
+                                                    abs(steer_output_can))
+    self.toadpilot_torque_extension_active = abs(steer_output_can) > TOYOTA_STEER_COMMAND_SCALE
+    if self.toadpilot_torque_extension_active:
+      self.toadpilot_extended_output_samples += 1
+      self.toadpilot_last_extended_monotonic = t
+      self.toadpilot_extended_window_until = t + TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS
+
+  def toadpilot_torque_snapshot(self, inputs_valid=True, route_id=None):
+    inputs_valid = bool(inputs_valid)
+    if isinstance(route_id, bytes):
+      try:
+        route_id = route_id.decode("utf-8")
+      except UnicodeDecodeError:
+        route_id = None
+    if isinstance(route_id, str) and route_id.strip():
+      self.toadpilot_route_id = route_id.strip()[:256]
+    car_state_valid = bool(inputs_valid and self.toadpilot_car_state_valid)
+    return {
+      "schema_version": TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION,
+      "published_at_unix": round(time.time(), 3),
+      "fingerprint": self.toadpilot_observer.fingerprint,
+      "steering_response_profile": TOADPILOT_STEERING_RESPONSE_PROFILE,
+      "steering_response_build": TOADPILOT_STEERING_RESPONSE_BUILD,
+      "route_id": self.toadpilot_route_id,
+      "route_started_at_unix": round(self.toadpilot_route_started_at_unix, 3),
+      "route_complete": False,
+      "completed_at_unix": None,
+      "summary_source": "torqued_live",
+      "command_semantics": "controller_command_before_panda_or_eps",
+      "route_metrics_scope": "whole_authorized_route",
+      "extended_metrics_scope": "car_state_samples_during_extension_and_0.5s_post_extension_tail",
+      "extended_window_tail_seconds": TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS,
+      "controller_authorized": bool(self.toadpilot_high_torque_authorized),
+      "inputs_valid": inputs_valid,
+      "output_valid": bool(self.toadpilot_torque_output_valid),
+      "extension_active": bool(inputs_valid and self.toadpilot_torque_output_valid and
+                               self.toadpilot_torque_extension_active),
+      "current_output_can": (round(self.toadpilot_torque_current_output_can, 3)
+                             if self.toadpilot_torque_output_valid else None),
+      "peak_abs_output_can": round(self.toadpilot_torque_peak_abs_output_can, 3),
+      "extended_output_samples": int(self.toadpilot_extended_output_samples),
+      "last_extended_monotonic": (round(self.toadpilot_last_extended_monotonic, 3)
+                                  if self.toadpilot_last_extended_monotonic is not None else None),
+      "car_state_valid": car_state_valid,
+      "current_eps_torque": (round(self.toadpilot_current_eps_torque, 3)
+                             if car_state_valid else None),
+      "peak_abs_eps_torque": round(self.toadpilot_peak_abs_eps_torque, 3),
+      "peak_abs_steering_rate_deg": round(self.toadpilot_peak_abs_steering_rate_deg, 3),
+      "driver_override_samples": int(self.toadpilot_driver_override_samples),
+      "temporary_fault_seen": bool(self.toadpilot_temporary_fault_seen),
+      "permanent_fault_seen": bool(self.toadpilot_permanent_fault_seen),
+      "extended_window_car_state_samples": int(self.toadpilot_extended_window_car_state_samples),
+      "extended_window_peak_abs_eps_torque": round(self.toadpilot_extended_window_peak_abs_eps_torque, 3),
+      "extended_window_peak_abs_steering_rate_deg": round(
+        self.toadpilot_extended_window_peak_abs_steering_rate_deg, 3,
+      ),
+      "extended_window_driver_override_samples": int(self.toadpilot_extended_window_driver_override_samples),
+      "extended_window_temporary_fault_seen": bool(self.toadpilot_extended_window_temporary_fault_seen),
+      "extended_window_permanent_fault_seen": bool(self.toadpilot_extended_window_permanent_fault_seen),
+    }
+
+  def update_toadpilot_car_state_diagnostic(self, t, msg):
+    if not self.toadpilot_high_torque_authorized:
+      return
+    try:
+      t = float(t)
+      eps_torque = float(msg.steeringTorqueEps)
+      steering_rate_deg = float(msg.steeringRateDeg)
+      steering_pressed = bool(msg.steeringPressed)
+      temporary_fault = bool(msg.steerFaultTemporary)
+      permanent_fault = bool(msg.steerFaultPermanent)
+    except (AttributeError, TypeError, ValueError):
+      self.toadpilot_car_state_valid = False
+      return
+    if not np.isfinite(t) or not np.isfinite(eps_torque) or not np.isfinite(steering_rate_deg):
+      self.toadpilot_car_state_valid = False
+      return
+
+    self.toadpilot_car_state_valid = True
+    self.toadpilot_current_eps_torque = eps_torque
+    self.toadpilot_peak_abs_eps_torque = max(self.toadpilot_peak_abs_eps_torque, abs(eps_torque))
+    self.toadpilot_peak_abs_steering_rate_deg = max(self.toadpilot_peak_abs_steering_rate_deg,
+                                                    abs(steering_rate_deg))
+    self.toadpilot_driver_override_samples += int(steering_pressed)
+    self.toadpilot_temporary_fault_seen |= temporary_fault
+    self.toadpilot_permanent_fault_seen |= permanent_fault
+    in_extended_window = (self.toadpilot_last_extended_monotonic is not None and
+                          self.toadpilot_extended_window_until is not None and
+                          self.toadpilot_last_extended_monotonic <= t <= self.toadpilot_extended_window_until)
+    if in_extended_window:
+      self.toadpilot_extended_window_car_state_samples += 1
+      self.toadpilot_extended_window_peak_abs_eps_torque = max(
+        self.toadpilot_extended_window_peak_abs_eps_torque, abs(eps_torque),
+      )
+      self.toadpilot_extended_window_peak_abs_steering_rate_deg = max(
+        self.toadpilot_extended_window_peak_abs_steering_rate_deg, abs(steering_rate_deg),
+      )
+      self.toadpilot_extended_window_driver_override_samples += int(steering_pressed)
+      self.toadpilot_extended_window_temporary_fault_seen |= temporary_fault
+      self.toadpilot_extended_window_permanent_fault_seen |= permanent_fault
+
   def handle_log(self, t, which, msg):
     if which == "carControl":
       self.raw_points["carControl_t"].append(t + self.lag)
@@ -246,10 +416,13 @@ class TorqueEstimator(ParameterEstimator):
     elif which == "carOutput":
       self.raw_points["carOutput_t"].append(t + self.lag)
       self.raw_points["steer_torque"].append(-msg.actuatorsOutput.steer)
+      self.raw_points["steer_output_can"].append(msg.actuatorsOutput.steerOutputCan)
+      self.update_toadpilot_torque_diagnostic(t, msg.actuatorsOutput.steerOutputCan)
     elif which == "carState":
       self.raw_points["carState_t"].append(t + self.lag)
       self.raw_points["vego"].append(msg.vEgo)
       self.raw_points["steer_override"].append(msg.steeringPressed)
+      self.update_toadpilot_car_state_diagnostic(t, msg)
     elif which == "liveLocationKalman":
       self.toadpilot_collecting = False
       # This branch has no embedded monotonic sensor timestamp equivalent to
@@ -262,8 +435,12 @@ class TorqueEstimator(ParameterEstimator):
         steer_override = np.interp(np.arange(t - MIN_ENGAGE_BUFFER, t, DT_MDL), self.raw_points['carState_t'], self.raw_points['steer_override']).astype(bool)
         vego = np.interp(t, self.raw_points['carState_t'], self.raw_points['vego'])
         steer = np.interp(t, self.raw_points['carOutput_t'], self.raw_points['steer_torque'])
+        output_can_available = len(self.raw_points['steer_output_can']) == self.hist_len
+        steer_output_can = (np.interp(t, self.raw_points['carOutput_t'], self.raw_points['steer_output_can'])
+                            if output_can_available else np.nan)
+        extended_torque = toadpilot_extended_torque_sample(self.toadpilot_capable, steer_output_can)
         lateral_acc = (vego * yaw_rate) - (np.sin(roll) * ACCELERATION_DUE_TO_GRAVITY)
-        sample_valid = all(active) and (not any(steer_override)) and vego > MIN_VEL
+        sample_valid = all(active) and (not any(steer_override)) and vego > MIN_VEL and not extended_torque
         self.toadpilot_collecting = self.toadpilot_observe_enabled and sample_valid
         if self.toadpilot_observe_enabled and sample_valid:
           self.toadpilot_observer.add_sample(steer, lateral_acc)
@@ -349,6 +526,14 @@ def main(demo=False):
   with car.CarParams.from_bytes(params.get("CarParams", block=True)) as CP:
     estimator = TorqueEstimator(CP)
 
+  if not estimator.toadpilot_high_torque_authorized:
+    status_params.remove(TOADPILOT_TORQUE_STATUS_KEY)
+
+  last_torque_summary_write = 0.0
+  last_persisted_extended_samples = 0
+  last_persisted_temporary_fault = False
+  last_persisted_permanent_fault = False
+
   # FrogPilot variables
   frogpilot_toggles = get_frogpilot_toggles()
 
@@ -386,6 +571,30 @@ def main(demo=False):
       snapshot = estimator.toadpilot_observer.snapshot(collecting=collecting)
       status_params.put_nonblocking(TOADPILOT_TUNE_STATUS_KEY,
                                     json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
+
+    if sm.frame % 20 == 0 and estimator.toadpilot_high_torque_authorized:
+      torque_snapshot = estimator.toadpilot_torque_snapshot(
+        inputs_valid=sm.all_checks(), route_id=params.get("CurrentRoute", encoding="utf-8"),
+      )
+      status_params.put_nonblocking(TOADPILOT_TORQUE_STATUS_KEY,
+                                    json.dumps(torque_snapshot, sort_keys=True, separators=(",", ":")))
+      route_has_diagnostic = (torque_snapshot["extended_output_samples"] > 0 or
+                              torque_snapshot["temporary_fault_seen"] or
+                              torque_snapshot["permanent_fault_seen"])
+      fault_changed = (torque_snapshot["temporary_fault_seen"] != last_persisted_temporary_fault or
+                       torque_snapshot["permanent_fault_seen"] != last_persisted_permanent_fault)
+      first_extension = (torque_snapshot["extended_output_samples"] > 0 and
+                         last_persisted_extended_samples == 0)
+      # Persist a recoverable checkpoint without writing to flash at telemetry cadence.
+      # The manager synchronously writes the final snapshot at the offroad transition.
+      periodic_due = time.monotonic() - last_torque_summary_write >= 60.0
+      if route_has_diagnostic and (fault_changed or first_extension or periodic_due):
+        params.put_nonblocking(TOADPILOT_TORQUE_CHECKPOINT_KEY,
+                               json.dumps(torque_snapshot, sort_keys=True, separators=(",", ":")))
+        last_torque_summary_write = time.monotonic()
+        last_persisted_extended_samples = torque_snapshot["extended_output_samples"]
+        last_persisted_temporary_fault = torque_snapshot["temporary_fault_seen"]
+        last_persisted_permanent_fault = torque_snapshot["permanent_fault_seen"]
 
 if __name__ == "__main__":
   import argparse

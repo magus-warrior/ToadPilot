@@ -187,8 +187,9 @@ class LatControlTorque(LatControl):
     self.use_steering_angle = self.torque_params.useSteeringAngle
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
 
-    # TOADPILOT shapes demand only inside the normalized stock controller cap.
-    # Toyota CAN limits and Panda safety limits remain unchanged.
+    # TOADPILOT shapes demand inside the normalized stock controller cap. The
+    # separate reboot-latched Camry authority experiment, when present, is
+    # applied downstream only after this controller remains saturated.
     self.toadpilot_capable = (CP.carName == "toyota" and CP.carFingerprint == TOADPILOT_FINGERPRINT and
                               CP.lateralTuning.which() == "torque")
     self.toadpilot_assist = ToadPilotLateralAssist()
@@ -480,7 +481,7 @@ class LatControlTorque(LatControl):
           # This branch controls in normalized torque space. Split the base and
           # low-speed portions so changing KP cannot silently retune low-speed
           # response, preserving the intent of upstream #36335 without changing
-          # controller units or the stock output cap.
+          # controller units or the normalized output cap.
           base_torque_from_setpoint = self.torque_from_lateral_accel(
             LatControlInputs(feedback_lateral_accel, roll_compensation, CS.vEgo, CS.aEgo),
             self.torque_params, 0.0, lateral_accel_deadzone,
@@ -502,8 +503,8 @@ class LatControlTorque(LatControl):
         if upstream_response_active:
           # Upstream #36619 lowered the friction transition to 0.2 and made its
           # input delay-independent by adding filtered desired jerk. Apply only
-          # the friction term locally; Toyota's linear torque conversion and all
-          # controller/Panda authority limits remain unchanged.
+          # the friction term locally; Toyota's linear torque conversion and
+          # normal 0-1500 command mapping remain unchanged.
           ff = self.torque_from_lateral_accel(
             LatControlInputs(gravity_adjusted_lateral_accel, roll_compensation, CS.vEgo, CS.aEgo),
             self.torque_params, 0.0, lateral_accel_deadzone,

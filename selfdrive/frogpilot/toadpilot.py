@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import time
 
 from dataclasses import asdict, dataclass
@@ -12,9 +13,31 @@ from openpilot.common.params import Params
 TOADPILOT_CONFIG_KEY = "ToadPilotConfig"
 TOADPILOT_STATUS_KEY = "ToadPilotStatus"
 TOADPILOT_TUNE_STATUS_KEY = "ToadPilotTuneStatus"
+TOADPILOT_TORQUE_STATUS_KEY = "ToadPilotTorqueStatus"
+TOADPILOT_TORQUE_CHECKPOINT_KEY = "ToadPilotTorqueCheckpoint"
+TOADPILOT_TORQUE_LAST_ROUTE_KEY = "ToadPilotTorqueLastRoute"
 TOADPILOT_RESET_TUNE_KEY = "ToadPilotResetTune"
 TOADPILOT_STEERING_RESPONSE_REQUEST_KEY = "ToadPilotSteeringResponseRequest"
-TOADPILOT_STEERING_RESPONSE_PROFILE = "camry_tss2_response_research_v1"
+TOADPILOT_STEERING_RESPONSE_PROFILE = "camry_tss2_eps8965b33630_torque_1700_r15_d25_e350_rt450_v1"
+TOADPILOT_STEERING_RESPONSE_BUILD = "DEV-tp1700v1-DEBUG"
+TOADPILOT_STEERING_RESPONSE_LATCH_ENV = "TOADPILOT_STEERING_RESPONSE_LATCHED_PROFILE"
+TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES = frozenset({"camry_tss2_response_research_v1"})
+TOADPILOT_EPS_FIRMWARE = b"8965B33630\x00\x00\x00\x00\x00\x00"
+TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES = frozenset({
+  # DEV-tp1700v1-DEBUG, exact isolated F4/Uno and H7 builds.
+  bytes.fromhex(
+    "7c9842a14e0e17bd4e96372455a8be585d8b83a873b32f7db0fe1b3b4722053c"
+    "21ff847492fa2945015bd233d599583d0d5e093d34745a6f7b2418f516fa55f8"
+    "fcd45a6514f7a004613f57f0de38ec9359016ac5e95349e6680aca3c4525bf5a"
+    "1e9a5130c2fcd19edb8ea72f9b3603d13d342320ed54756f8613bdf964a6c78f"
+  ),
+  bytes.fromhex(
+    "762c81fe29ab340de9db4325d77687cd06e2ca926f1f3146f2eee5a833737615"
+    "c1bf193c13aa0a34b6350793ba24259f33bf50cf7bc91c2191f324ffb992c82f"
+    "4e7c9d61eab12ff09fed7c97a618a3fff5fb4d012d038572bf15ac4112954b54"
+    "b7df50f5d2d7939da49b51bbca13f9fbe372f88c4b47bf105f79c34776c07a14"
+  ),
+})
 TOADPILOT_FINGERPRINT = "TOYOTA_CAMRY_TSS2"
 TOADPILOT_LAT_ACCEL_OFFSET_MAX = 0.5
 TOADPILOT_LAT_ACCEL_FACTOR_MIN_RATIO = 0.7
@@ -23,6 +46,7 @@ TOADPILOT_FRICTION_MIN_RATIO = 0.5
 TOADPILOT_FRICTION_MAX_RATIO = 1.5
 TOADPILOT_TUNE_SCHEMA_VERSION = 1
 TOADPILOT_TORQUE_CACHE_VERSION = 2
+TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION = 2
 TOADPILOT_LANE_PROB_MIN = 0.65
 TOADPILOT_LANE_STD_MAX = 0.35
 TOADPILOT_LANE_WIDTH_MIN = 2.6
@@ -56,7 +80,8 @@ TOADPILOT_PROFILES = {
                               centering_gain=0.14, centering_max_accel=0.10,
                               centering_rise_alpha=0.025, centering_fall_alpha=0.10),
   # Full uses the same gates with more assertive demand shaping. Output remains
-  # capped by the stock normalized controller and Toyota/Panda safety limits.
+  # capped by the stock normalized controller. Any separately authorized Camry
+  # envelope is applied downstream only after sustained saturation.
   "full": SimpleNamespace(entry_assist=0.060, tracking_assist=0.150, rise_alpha=0.050, fall_alpha=0.16,
                           centering_gain=0.22, centering_max_accel=0.16,
                           centering_rise_alpha=0.035, centering_fall_alpha=0.12),
@@ -168,17 +193,54 @@ def read_toadpilot_steering_response_request(params=None):
   FrogPilot toggle snapshot. Saving the request must never make a controller
   or Panda envelope effective in a running process.
   """
+  return read_toadpilot_steering_response_profile(params) == TOADPILOT_STEERING_RESPONSE_PROFILE
+
+
+def read_toadpilot_steering_response_profile(params=None):
+  """Return the stored immutable profile identifier, if it is valid UTF-8."""
   params = params or Params()
   raw = params.get(TOADPILOT_STEERING_RESPONSE_REQUEST_KEY)
   if isinstance(raw, bytes):
     try:
       raw = raw.decode("utf-8")
     except UnicodeDecodeError:
-      return False
+      return None
+  return raw if isinstance(raw, str) and raw else None
+
+
+def latch_toadpilot_steering_response_request(params=None, environ=None):
+  """Latch an exact persistent request for this manager lifetime.
+
+  Fleet writes never update this environment value. Managed processes inherit
+  it only after manager starts again, keeping controller and Panda selection
+  independent from live FrogPilot toggle refreshes.
+  """
+  environ = os.environ if environ is None else environ
+  environ.pop(TOADPILOT_STEERING_RESPONSE_LATCH_ENV, None)
+  if read_toadpilot_steering_response_request(params):
+    environ[TOADPILOT_STEERING_RESPONSE_LATCH_ENV] = TOADPILOT_STEERING_RESPONSE_PROFILE
+    return TOADPILOT_STEERING_RESPONSE_PROFILE
+  return None
+
+
+def read_toadpilot_steering_response_latch(environ=None):
+  environ = os.environ if environ is None else environ
   # Bind the acknowledgement to one immutable research profile. A future
   # controller/Panda bundle must use a new profile identifier, so an old saved
   # request can never become effective merely because the software was updated.
-  return raw == TOADPILOT_STEERING_RESPONSE_PROFILE
+  return environ.get(TOADPILOT_STEERING_RESPONSE_LATCH_ENV) == TOADPILOT_STEERING_RESPONSE_PROFILE
+
+
+def toadpilot_steering_response_panda_matched(params=None):
+  """Require the exact Panda image paired with this immutable profile.
+
+  The Camry experiment intentionally supports one internal Panda. This strict
+  equality also fails closed for missing, stale, malformed, or multi-Panda
+  signature snapshots.
+  """
+  params = params or Params()
+  signatures = params.get("PandaSignatures")
+  return type(signatures) is bytes and signatures in TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES
 
 
 def write_toadpilot_steering_response_request(requested, params=None):
@@ -217,6 +279,74 @@ def read_json_status(key, params=None):
     return status if isinstance(status, dict) else {}
   except (TypeError, ValueError, json.JSONDecodeError):
     return {}
+
+
+def valid_toadpilot_torque_summary(summary):
+  """Validate persistent torque-trial provenance before presenting it as evidence."""
+  if not isinstance(summary, dict):
+    return False
+  published_at = summary.get("published_at_unix")
+  route_started_at = summary.get("route_started_at_unix")
+  extended_samples = summary.get("extended_output_samples")
+  route_complete = summary.get("route_complete")
+  if (isinstance(published_at, bool) or not isinstance(published_at, (int, float)) or
+      isinstance(route_started_at, bool) or not isinstance(route_started_at, (int, float))):
+    return False
+
+  if (summary.get("schema_version") != TOADPILOT_TORQUE_DIAGNOSTIC_SCHEMA_VERSION or
+      summary.get("fingerprint") != TOADPILOT_FINGERPRINT or
+      summary.get("steering_response_profile") != TOADPILOT_STEERING_RESPONSE_PROFILE or
+      summary.get("steering_response_build") != TOADPILOT_STEERING_RESPONSE_BUILD or
+      summary.get("command_semantics") != "controller_command_before_panda_or_eps" or
+      summary.get("controller_authorized") is not True or
+      type(extended_samples) is not int or extended_samples < 0 or
+      type(route_complete) is not bool or
+      not isinstance(summary.get("route_id"), str) or not summary["route_id"].strip() or
+      summary["route_id"] != summary["route_id"].strip() or
+      not math.isfinite(float(published_at)) or not math.isfinite(float(route_started_at)) or
+      float(route_started_at) > float(published_at)):
+    return False
+
+  completed_at = summary.get("completed_at_unix")
+  if route_complete:
+    if isinstance(completed_at, bool) or not isinstance(completed_at, (int, float)):
+      return False
+    if (not math.isfinite(float(completed_at)) or float(completed_at) < float(published_at) or
+        summary.get("summary_source") != "manager_offroad_transition"):
+      return False
+  elif completed_at is not None or summary.get("summary_source") != "torqued_live":
+    return False
+  return True
+
+
+def persist_toadpilot_torque_last_route(params=None, status_params=None, completed_at_unix=None):
+  """Synchronously preserve the final validated onroad torque diagnostic."""
+  params = params or Params()
+  status_params = status_params or Params("/dev/shm/params")
+  summary = read_json_status(TOADPILOT_TORQUE_STATUS_KEY, status_params)
+  if not valid_toadpilot_torque_summary(summary):
+    return False
+
+  route_has_diagnostic = (summary["extended_output_samples"] > 0 or
+                          summary.get("temporary_fault_seen") is True or
+                          summary.get("permanent_fault_seen") is True)
+  if not route_has_diagnostic:
+    return False
+
+  completed_at = time.time() if completed_at_unix is None else completed_at_unix
+  if (isinstance(completed_at, bool) or not isinstance(completed_at, (int, float)) or
+      not math.isfinite(completed_at) or float(completed_at) < float(summary["published_at_unix"])):
+    return False
+
+  final_summary = dict(summary)
+  final_summary["route_complete"] = True
+  final_summary["completed_at_unix"] = round(float(completed_at), 3)
+  final_summary["summary_source"] = "manager_offroad_transition"
+  if not valid_toadpilot_torque_summary(final_summary):
+    return False
+  params.put(TOADPILOT_TORQUE_LAST_ROUTE_KEY,
+             json.dumps(final_summary, sort_keys=True, separators=(",", ":")))
+  return True
 
 
 def _new_high_authority_stats():
@@ -685,7 +815,7 @@ class ToadPilotLaneCentering:
 
 
 class ToadPilotLateralAssist:
-  """Camry-specific demand shaping inside the stock electronic torque envelope."""
+  """Camry-specific demand shaping inside the stock normalized torque scale."""
 
   def __init__(self):
     self.residual = 0.0
