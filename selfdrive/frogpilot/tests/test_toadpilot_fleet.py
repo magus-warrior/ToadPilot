@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from openpilot.selfdrive.frogpilot.fleetmanager import helpers
 from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import START_ACCEL_RAMP_PARAM
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_CONFIG_KEY, TOADPILOT_CONFIG_VERSION, TOADPILOT_RESET_TUNE_KEY,
+                                                     TOADPILOT_NAVIGATION_STATUS_KEY,
                                                      TOADPILOT_STEERING_RESPONSE_BUILD,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
@@ -27,7 +28,11 @@ VALID_CONFIG = {
   "auto_tune": True,
   "lane_centering_assist": True,
   "smooth_lane_transitions": True,
+  "straight_line_smoothing": True,
+  "experimental_max_torque": 1500,
   "improved_stop_and_go": True,
+  "automatic_traffic_mode": True,
+  "map_stop_assist": True,
   "curve_assist_in_experimental": False,
   "smart_saturation_warning": True,
   "telemetry": True,
@@ -348,7 +353,10 @@ class TestToadPilotFleetMutations(unittest.TestCase):
       "auto_tune": False,
       "lane_centering_assist": False,
       "smooth_lane_transitions": False,
+      "straight_line_smoothing": False,
       "improved_stop_and_go": False,
+      "automatic_traffic_mode": False,
+      "map_stop_assist": False,
       "curve_assist_in_experimental": False,
       "smart_saturation_warning": False,
       "telemetry": False,
@@ -389,6 +397,36 @@ class TestToadPilotFleetMutations(unittest.TestCase):
          patch.object(helpers, "params_memory", memory), \
          patch.object(helpers, "update_frogpilot_toggles") as toggles_updated:
       with self.assertRaisesRegex(ValueError, "improved_stop_and_go"):
+        helpers.set_toadpilot_config(requested)
+
+    self.assertEqual(persistent.put_calls, [])
+    toggles_updated.assert_not_called()
+
+  def test_config_requires_straight_line_smoothing_choice_before_write(self):
+    requested = dict(VALID_CONFIG)
+    requested.pop("straight_line_smoothing")
+    persistent = MemoryParams({"IsOffroad": True})
+    memory = MemoryParams()
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles") as toggles_updated:
+      with self.assertRaisesRegex(ValueError, "straight_line_smoothing"):
+        helpers.set_toadpilot_config(requested)
+
+    self.assertEqual(persistent.put_calls, [])
+    toggles_updated.assert_not_called()
+
+  def test_config_requires_experimental_max_torque_choice_before_write(self):
+    requested = dict(VALID_CONFIG)
+    requested.pop("experimental_max_torque")
+    persistent = MemoryParams({"IsOffroad": True})
+    memory = MemoryParams()
+
+    with patch.object(helpers, "params", persistent), \
+         patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles") as toggles_updated:
+      with self.assertRaisesRegex(ValueError, "experimental_max_torque"):
         helpers.set_toadpilot_config(requested)
 
     self.assertEqual(persistent.put_calls, [])
@@ -591,9 +629,18 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'value="adaptive" selected', response.data)
     self.assertIn(b'id="toadLaneCentering" checked', response.data)
     self.assertIn(b'id="toadSmoothLaneTransitions" checked', response.data)
+    self.assertIn(b'id="toadStraightLineSmoothing" checked', response.data)
+    self.assertIn(b'straight_line_smoothing: toadStraightLineSmoothing.checked', response.data)
+    self.assertIn(b'role="tablist"', response.data)
     self.assertIn(b'Improved Camry stop-and-go', response.data)
     self.assertIn(b'id="toadImprovedStopAndGo" checked', response.data)
     self.assertIn(b'improved_stop_and_go: toadImprovedStopAndGo.checked', response.data)
+    self.assertIn(b'id="toadAutomaticTrafficMode" checked', response.data)
+    self.assertIn(b'automatic_traffic_mode: toadAutomaticTrafficMode.checked', response.data)
+    self.assertIn(b'id="toadMapStopAssist" checked', response.data)
+    self.assertIn(b'map_stop_assist: toadMapStopAssist.checked', response.data)
+    self.assertIn(b'id="toadAutomaticTrafficState"', response.data)
+    self.assertIn(b'id="toadMapStopState"', response.data)
     self.assertIn(b'id="toadStopAndGoState"', response.data)
     self.assertIn(b'id="toadStopGoLiveState"', response.data)
     self.assertIn(b'id="toadStopGoLastEvent"', response.data)
@@ -601,10 +648,12 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'id="toadPandaSafetyState"', response.data)
     self.assertIn(b'20 Hz diagnostic samples above 1500', response.data)
     self.assertIn(b'guarded planner-confirmed launch handoff enabled', response.data)
-    self.assertIn(b'Experimental Camry 1700 authority', response.data)
+    self.assertIn(b'Experimental Camry authority', response.data)
+    self.assertIn(b'id="toadExperimentalMaxTorque"', response.data)
+    self.assertIn(b'experimental_max_torque: Number(toadExperimentalMaxTorque.value)', response.data)
     self.assertIn(b'id="toadAuthoritySummary"', response.data)
     self.assertIn(b'id="toadAuthorityDetail"', response.data)
-    self.assertIn(b'1700 authority is active.', response.data)
+    self.assertIn(b'1700 hard authority is active.', response.data)
     self.assertNotIn(b'Existing authority by default.', response.data)
     self.assertIn(b'id="toadExperimentalSteeringResponse"', response.data)
     self.assertNotIn(b'id="toadExperimentalSteeringResponse" checked', response.data)
@@ -655,6 +704,19 @@ class TestToadPilotResetRoute(unittest.TestCase):
 
     self.assertEqual(response.status_code, 400)
     self.assertIn("offroad", response.get_json()["error"])
+
+  def test_mapbox_token_route_rejects_blank_and_non_text_values(self):
+    with patch.object(self.fleet_manager.fleet, "set_public_token") as set_public, \
+         patch.object(self.fleet_manager.fleet, "set_secret_token") as set_secret:
+      blank_response = self.client.post("/mapbox_token", json={"public_token": "  ", "secret_token": ""})
+      non_text_response = self.client.post("/mapbox_token", json={"public_token": 123})
+
+    self.assertEqual(blank_response.status_code, 400)
+    self.assertIn("Enter", blank_response.get_json()["error"])
+    self.assertEqual(non_text_response.status_code, 400)
+    self.assertIn("text", non_text_response.get_json()["error"])
+    set_public.assert_not_called()
+    set_secret.assert_not_called()
 
 
 class TestStartAccelRampFleet(unittest.TestCase):

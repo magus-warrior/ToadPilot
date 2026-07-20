@@ -1,8 +1,10 @@
+import hashlib
 import json
 import math
 import os
 import time
 
+from collections import deque
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 
@@ -15,10 +17,13 @@ TOADPILOT_STATUS_KEY = "ToadPilotStatus"
 TOADPILOT_STEERING_STATUS_KEY = "ToadPilotSteeringStatus"
 TOADPILOT_STOP_GO_STATUS_KEY = "ToadPilotStopGoStatus"
 TOADPILOT_STOP_GO_LAST_ROUTE_KEY = "ToadPilotStopGoLastRoute"
+TOADPILOT_NAVIGATION_STATUS_KEY = "ToadPilotNavigationStatus"
 TOADPILOT_TUNE_STATUS_KEY = "ToadPilotTuneStatus"
 TOADPILOT_TORQUE_STATUS_KEY = "ToadPilotTorqueStatus"
 TOADPILOT_TORQUE_CHECKPOINT_KEY = "ToadPilotTorqueCheckpoint"
 TOADPILOT_TORQUE_LAST_ROUTE_KEY = "ToadPilotTorqueLastRoute"
+TOADPILOT_TORQUE_TRIAL_DIR = "/data/toadpilot/torque_trials"
+TOADPILOT_NAVIGATION_TRIAL_DIR = "/data/toadpilot/navigation_trials"
 TOADPILOT_RESET_TUNE_KEY = "ToadPilotResetTune"
 TOADPILOT_STEERING_RESPONSE_REQUEST_KEY = "ToadPilotSteeringResponseRequest"
 TOADPILOT_STEERING_RESPONSE_PROFILE = "camry_tss2_eps8965b33630_torque_1700_r15_d25_e350_rt450_v1"
@@ -66,13 +71,32 @@ TOADPILOT_LANE_CENTER_FULL_SPEED = 12.0
 TOADPILOT_LANE_CENTER_CAP_MIN_SPEED = 15.0
 TOADPILOT_ASSIST_MAX_DECEL = -0.75
 TOADPILOT_CURVE_ASSIST_MIN_SPEED = 12.0
+# Curve assist is meant to cover the mild-to-moderate bends where the stock
+# torque loop can be late on entry.  The previous 0.25..2.00 m/s^2 ramp made
+# the assist effectively zero on ordinary road curves (the logged Camry event
+# peaked near 0.33 m/s^2).  Keep a deadband for straight-road noise, but reach
+# full profile authority before high lateral acceleration where the base loop
+# and downstream saturation handling should remain in charge.
+TOADPILOT_CURVE_ASSIST_START_ACCEL = 0.10
+TOADPILOT_CURVE_ASSIST_FULL_ACCEL = 0.75
+TOADPILOT_STRAIGHT_SMOOTH_ENTER_ACCEL = 0.08
+TOADPILOT_STRAIGHT_SMOOTH_RELEASE_ACCEL = 0.12
+TOADPILOT_STRAIGHT_SMOOTH_ALPHA = 0.08
+TOADPILOT_EXPERIMENTAL_TORQUE_MIN = 1500
+TOADPILOT_EXPERIMENTAL_TORQUE_MAX = 1700
+TOADPILOT_EXPERIMENTAL_TORQUE_STEP = 25
+TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT = TOADPILOT_EXPERIMENTAL_TORQUE_MIN
+TOADPILOT_TORQUE_TRACE_PRE_SAMPLES = 50
+TOADPILOT_TORQUE_TRACE_MAX_SAMPLES = 240
+TOADPILOT_TORQUE_TRACE_PREFIX_SAMPLES = 100
+TOADPILOT_TORQUE_TRACE_TAIL_SECONDS = 0.5
 TOADPILOT_LANE_CENTER_MAX_BASE_ACCEL = 0.65
 TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.50-0.65", 0.50, 0.65),
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 4
+TOADPILOT_CONFIG_VERSION = 7
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -100,7 +124,11 @@ class ToadPilotConfig:
   auto_tune: bool = True
   lane_centering_assist: bool = True
   smooth_lane_transitions: bool = True
+  straight_line_smoothing: bool = True
+  experimental_max_torque: int = TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT
   improved_stop_and_go: bool = True
+  automatic_traffic_mode: bool = True
+  map_stop_assist: bool = True
   curve_assist_in_experimental: bool = False
   smart_saturation_warning: bool = True
   telemetry: bool = True
@@ -108,7 +136,9 @@ class ToadPilotConfig:
 
 DEFAULT_TOADPILOT_CONFIG = ToadPilotConfig()
 FAILSAFE_TOADPILOT_CONFIG = ToadPilotConfig(enabled=False, profile="observe", lane_centering_assist=False,
-                                            smooth_lane_transitions=False, improved_stop_and_go=False)
+                                            smooth_lane_transitions=False, straight_line_smoothing=False,
+                                            improved_stop_and_go=False, automatic_traffic_mode=False,
+                                            map_stop_assist=False)
 DEFAULT_TOADPILOT_CONFIG_JSON = json.dumps(asdict(DEFAULT_TOADPILOT_CONFIG), sort_keys=True, separators=(",", ":"))
 _CONFIG_FIELDS = set(asdict(DEFAULT_TOADPILOT_CONFIG))
 _V1_CONFIG_FIELDS = {
@@ -117,6 +147,9 @@ _V1_CONFIG_FIELDS = {
 }
 _V2_CONFIG_FIELDS = _V1_CONFIG_FIELDS | {"lane_centering_assist"}
 _V3_CONFIG_FIELDS = _V2_CONFIG_FIELDS | {"smooth_lane_transitions"}
+_V4_CONFIG_FIELDS = _V3_CONFIG_FIELDS | {"improved_stop_and_go"}
+_V5_CONFIG_FIELDS = _V4_CONFIG_FIELDS | {"straight_line_smoothing"}
+_V6_CONFIG_FIELDS = _V5_CONFIG_FIELDS | {"experimental_max_torque"}
 
 
 def normalize_toadpilot_config(data, base=None, partial=False):
@@ -137,10 +170,21 @@ def normalize_toadpilot_config(data, base=None, partial=False):
   if type(normalized["profile"]) is not str or normalized["profile"] not in TOADPILOT_PROFILES:
     raise ValueError(f"Unknown TOADPILOT profile: {normalized['profile']}")
 
-  for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "improved_stop_and_go",
+  for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
+                "automatic_traffic_mode", "map_stop_assist",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
     if type(normalized[field]) is not bool:
       raise ValueError(f"TOADPILOT setting '{field}' must be a boolean.")
+
+  experimental_max_torque = normalized["experimental_max_torque"]
+  if (type(experimental_max_torque) is not int or
+      not TOADPILOT_EXPERIMENTAL_TORQUE_MIN <= experimental_max_torque <= TOADPILOT_EXPERIMENTAL_TORQUE_MAX or
+      (experimental_max_torque - TOADPILOT_EXPERIMENTAL_TORQUE_MIN) % TOADPILOT_EXPERIMENTAL_TORQUE_STEP != 0):
+    raise ValueError(
+      f"TOADPILOT experimental maximum torque must be an integer from "
+      f"{TOADPILOT_EXPERIMENTAL_TORQUE_MIN} to {TOADPILOT_EXPERIMENTAL_TORQUE_MAX} "
+      f"in {TOADPILOT_EXPERIMENTAL_TORQUE_STEP}-unit steps."
+    )
 
   return ToadPilotConfig(**normalized)
 
@@ -163,7 +207,11 @@ def decode_toadpilot_config(raw):
           "profile": "adaptive",
           "lane_centering_assist": True,
           "smooth_lane_transitions": True,
+          "straight_line_smoothing": True,
+          "experimental_max_torque": TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT,
           "improved_stop_and_go": True,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
         }
       elif data["version"] == 2:
         if set(data) != _V2_CONFIG_FIELDS:
@@ -172,7 +220,11 @@ def decode_toadpilot_config(raw):
           **data,
           "version": TOADPILOT_CONFIG_VERSION,
           "smooth_lane_transitions": True,
+          "straight_line_smoothing": True,
+          "experimental_max_torque": TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT,
           "improved_stop_and_go": True,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
         }
       elif data["version"] == 3:
         if set(data) != _V3_CONFIG_FIELDS:
@@ -180,7 +232,41 @@ def decode_toadpilot_config(raw):
         data = {
           **data,
           "version": TOADPILOT_CONFIG_VERSION,
+          "straight_line_smoothing": True,
+          "experimental_max_torque": TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT,
           "improved_stop_and_go": True,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
+        }
+      elif data["version"] == 4:
+        if set(data) != _V4_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 4 configuration.")
+        data = {
+          **data,
+          "version": TOADPILOT_CONFIG_VERSION,
+          "straight_line_smoothing": True,
+          "experimental_max_torque": TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
+        }
+      elif data["version"] == 5:
+        if set(data) != _V5_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 5 configuration.")
+        data = {
+          **data,
+          "version": TOADPILOT_CONFIG_VERSION,
+          "experimental_max_torque": TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
+        }
+      elif data["version"] == 6:
+        if set(data) != _V6_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 6 configuration.")
+        data = {
+          **data,
+          "version": TOADPILOT_CONFIG_VERSION,
+          "automatic_traffic_mode": True,
+          "map_stop_assist": True,
         }
     if not isinstance(data, dict) or set(data) != _CONFIG_FIELDS:
       raise ValueError("Malformed TOADPILOT configuration.")
@@ -279,7 +365,11 @@ def config_from_toggles(toggles):
       "auto_tune": getattr(toggles, "toadpilot_auto_tune"),
       "lane_centering_assist": getattr(toggles, "toadpilot_lane_centering_assist"),
       "smooth_lane_transitions": getattr(toggles, "toadpilot_smooth_lane_transitions"),
+      "straight_line_smoothing": getattr(toggles, "toadpilot_straight_line_smoothing"),
+      "experimental_max_torque": getattr(toggles, "toadpilot_experimental_max_torque"),
       "improved_stop_and_go": getattr(toggles, "toadpilot_improved_stop_and_go"),
+      "automatic_traffic_mode": getattr(toggles, "toadpilot_automatic_traffic_mode"),
+      "map_stop_assist": getattr(toggles, "toadpilot_map_stop_assist"),
       "curve_assist_in_experimental": getattr(toggles, "toadpilot_curve_assist_in_experimental"),
       "smart_saturation_warning": getattr(toggles, "toadpilot_smart_saturation_warning"),
       "telemetry": getattr(toggles, "toadpilot_telemetry"),
@@ -296,6 +386,60 @@ def read_json_status(key, params=None):
     return status if isinstance(status, dict) else {}
   except (TypeError, ValueError, json.JSONDecodeError):
     return {}
+
+
+class ToadPilotTorqueCommandTrace:
+  """Bounded 100 Hz trace preserving first entry and the most recent response."""
+
+  def __init__(self):
+    self.prebuffer = deque(maxlen=TOADPILOT_TORQUE_TRACE_PRE_SAMPLES)
+    self.trace = []
+    self.active = False
+    self.last_extended_t = None
+    self.dropped_samples = 0
+    self.windows = 0
+
+  def _append(self, sample):
+    if len(self.trace) >= TOADPILOT_TORQUE_TRACE_MAX_SAMPLES:
+      del self.trace[TOADPILOT_TORQUE_TRACE_PREFIX_SAMPLES]
+      self.dropped_samples += 1
+    self.trace.append(sample)
+
+  def update(self, t, output_can, **values):
+    try:
+      t = float(t)
+      output_can = float(output_can)
+    except (TypeError, ValueError):
+      return
+    if not math.isfinite(t) or not math.isfinite(output_can):
+      return
+
+    sample = {"t": round(t, 3), "output_can": int(round(output_can)), **values}
+    extended = abs(output_can) > TOADPILOT_EXPERIMENTAL_TORQUE_MIN
+    if extended and not self.active:
+      for buffered in self.prebuffer:
+        self._append(buffered)
+      self.prebuffer.clear()
+      self.active = True
+      self.windows += 1
+    if extended:
+      self.last_extended_t = t
+
+    if self.active:
+      self._append(sample)
+      if (not extended and self.last_extended_t is not None and
+          t > self.last_extended_t + TOADPILOT_TORQUE_TRACE_TAIL_SECONDS):
+        self.active = False
+    else:
+      self.prebuffer.append(sample)
+
+  def snapshot(self):
+    return {
+      "command_trace": list(self.trace),
+      "command_trace_dropped_samples": int(self.dropped_samples),
+      "command_trace_windows": int(self.windows),
+      "command_trace_sample_semantics": "controlsd_100hz_controller_frames_before_panda_or_eps",
+    }
 
 
 def valid_toadpilot_torque_summary(summary):
@@ -336,7 +480,100 @@ def valid_toadpilot_torque_summary(summary):
   return True
 
 
-def persist_toadpilot_torque_last_route(params=None, status_params=None, completed_at_unix=None):
+def validated_toadpilot_command_trace(status, torque_summary):
+  """Return a bounded same-drive controlsd trace, or an empty mapping."""
+  if not isinstance(status, dict) or not isinstance(torque_summary, dict):
+    return {}
+  trace = status.get("command_trace")
+  published_at = status.get("published_at_unix")
+  route_started_at = status.get("route_started_at_unix")
+  dropped = status.get("command_trace_dropped_samples")
+  windows = status.get("command_trace_windows")
+  if (status.get("schema_version") != 1 or
+      status.get("fingerprint") != TOADPILOT_FINGERPRINT or
+      status.get("command_semantics") != "controller_output_before_panda_or_eps" or
+      status.get("authorized") is not True or
+      not isinstance(trace, list) or len(trace) > TOADPILOT_TORQUE_TRACE_MAX_SAMPLES or
+      type(dropped) is not int or dropped < 0 or type(windows) is not int or windows < 0 or
+      isinstance(published_at, bool) or not isinstance(published_at, (int, float)) or
+      isinstance(route_started_at, bool) or not isinstance(route_started_at, (int, float)) or
+      not math.isfinite(float(published_at)) or not math.isfinite(float(route_started_at))):
+    return {}
+  for sample in trace:
+    if not isinstance(sample, dict):
+      return {}
+    sample_t = sample.get("t")
+    output_can = sample.get("output_can")
+    if (isinstance(sample_t, bool) or not isinstance(sample_t, (int, float)) or
+        not math.isfinite(float(sample_t)) or type(output_can) is not int or abs(output_can) > 2000):
+      return {}
+
+  try:
+    summary_started_at = float(torque_summary.get("route_started_at_unix", math.nan))
+    completed_at = float(torque_summary.get("completed_at_unix", math.nan))
+  except (TypeError, ValueError):
+    return {}
+  if (not math.isfinite(summary_started_at) or not math.isfinite(completed_at) or
+      abs(float(route_started_at) - summary_started_at) > 120.0 or
+      not summary_started_at <= float(published_at) <= completed_at + 5.0):
+    return {}
+  status_route = status.get("route_id")
+  summary_route = torque_summary.get("route_id")
+  same_named_route = isinstance(status_route, str) and status_route == summary_route
+  same_session = (isinstance(status_route, str) and isinstance(summary_route, str) and
+                  "session:" in status_route and "session:" in summary_route)
+  if not same_named_route and not same_session:
+    return {}
+
+  selected_max_torque = status.get("selected_max_torque")
+  if (type(selected_max_torque) is not int or
+      not TOADPILOT_EXPERIMENTAL_TORQUE_MIN <= selected_max_torque <= TOADPILOT_EXPERIMENTAL_TORQUE_MAX or
+      (selected_max_torque - TOADPILOT_EXPERIMENTAL_TORQUE_MIN) % TOADPILOT_EXPERIMENTAL_TORQUE_STEP != 0):
+    selected_max_torque = torque_summary.get("selected_max_torque", TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT)
+
+  return {
+    "command_trace": trace,
+    "command_trace_dropped_samples": dropped,
+    "command_trace_windows": windows,
+    "command_trace_sample_semantics": "controlsd_100hz_controller_frames_before_panda_or_eps",
+    "command_trace_source": "controlsd_shared_memory_at_offroad_transition",
+    "selected_max_torque": selected_max_torque,
+    "extra_delta_up_per_10ms": 5,
+  }
+
+
+def journal_toadpilot_torque_trial(summary, journal_dir=TOADPILOT_TORQUE_TRIAL_DIR):
+  """Atomically retain one GPS-free diagnostic artifact per completed trial."""
+  if not valid_toadpilot_torque_summary(summary) or summary.get("route_complete") is not True:
+    return None
+  try:
+    os.makedirs(journal_dir, mode=0o700, exist_ok=True)
+    route_digest = hashlib.sha256(summary["route_id"].encode("utf-8")).hexdigest()[:12]
+    completed_ms = int(round(float(summary["completed_at_unix"]) * 1000.0))
+    filename = f"{completed_ms}-{route_digest}.json"
+    final_path = os.path.join(journal_dir, filename)
+    if os.path.exists(final_path):
+      return final_path
+    temp_path = os.path.join(journal_dir, f".{filename}.{os.getpid()}.{time.time_ns()}.tmp")
+    payload = {**summary, "journal_version": 1, "privacy": "no_gps"}
+    with open(temp_path, "x", encoding="utf-8") as stream:
+      json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+      stream.flush()
+      os.fsync(stream.fileno())
+    os.chmod(temp_path, 0o600)
+    os.replace(temp_path, final_path)
+    return final_path
+  except (OSError, TypeError, ValueError):
+    try:
+      if "temp_path" in locals() and os.path.exists(temp_path):
+        os.unlink(temp_path)
+    except OSError:
+      pass
+    return None
+
+
+def persist_toadpilot_torque_last_route(params=None, status_params=None, completed_at_unix=None,
+                                        journal_dir=TOADPILOT_TORQUE_TRIAL_DIR):
   """Synchronously preserve the final validated onroad torque diagnostic."""
   params = params or Params()
   status_params = status_params or Params("/dev/shm/params")
@@ -359,10 +596,13 @@ def persist_toadpilot_torque_last_route(params=None, status_params=None, complet
   final_summary["route_complete"] = True
   final_summary["completed_at_unix"] = round(float(completed_at), 3)
   final_summary["summary_source"] = "manager_offroad_transition"
+  steering_status = read_json_status(TOADPILOT_STEERING_STATUS_KEY, status_params)
+  final_summary.update(validated_toadpilot_command_trace(steering_status, final_summary))
   if not valid_toadpilot_torque_summary(final_summary):
     return False
   params.put(TOADPILOT_TORQUE_LAST_ROUTE_KEY,
              json.dumps(final_summary, sort_keys=True, separators=(",", ":")))
+  journal_toadpilot_torque_trial(final_summary, journal_dir)
   return True
 
 
@@ -672,6 +912,83 @@ def toadpilot_steer_saturated(steer_limited, applied_steer):
   return not math.isfinite(steer) or abs(steer) >= 0.80
 
 
+class ToadPilotStraightLineSmoother:
+  """Damp tiny alternating model-curvature requests without delaying real curves."""
+
+  def __init__(self):
+    self.filtered_curvature = 0.0
+    self.raw_curvature = 0.0
+    self.initialized = False
+    self.active = False
+    self.reason = "not_started"
+
+  def reset(self, curvature=0.0, reason="reset"):
+    self.raw_curvature = float(curvature) if math.isfinite(curvature) else 0.0
+    self.filtered_curvature = self.raw_curvature
+    self.initialized = False
+    self.active = False
+    self.reason = reason
+    return self.raw_curvature
+
+  def update(self, config, desired_curvature, v_ego, lateral_active, steering_pressed,
+             steer_limited, lane_change_active, blinker_active, brake_pressed=False,
+             longitudinal_stopping=False):
+    try:
+      curvature = float(desired_curvature)
+      speed = float(v_ego)
+    except (TypeError, ValueError):
+      return self.reset(0.0, "input_invalid")
+
+    self.raw_curvature = curvature
+    hard_gate_reason = None
+    if not config.enabled or config.profile == "observe" or not config.straight_line_smoothing:
+      hard_gate_reason = "disabled"
+    elif not lateral_active:
+      hard_gate_reason = "lateral_inactive"
+    elif not math.isfinite(curvature) or not math.isfinite(speed):
+      hard_gate_reason = "input_invalid"
+    elif speed < TOADPILOT_CURVE_ASSIST_MIN_SPEED:
+      hard_gate_reason = "speed_low"
+    elif steering_pressed:
+      hard_gate_reason = "driver_steering"
+    elif steer_limited:
+      hard_gate_reason = "steer_limited"
+    elif lane_change_active:
+      hard_gate_reason = "lane_change"
+    elif blinker_active:
+      hard_gate_reason = "blinker"
+    elif brake_pressed:
+      hard_gate_reason = "brake_pressed"
+    elif longitudinal_stopping:
+      hard_gate_reason = "longitudinal_stopping"
+
+    if hard_gate_reason is not None:
+      return self.reset(curvature, hard_gate_reason)
+
+    lateral_accel = abs(curvature) * speed ** 2
+    threshold = (TOADPILOT_STRAIGHT_SMOOTH_RELEASE_ACCEL if self.active
+                 else TOADPILOT_STRAIGHT_SMOOTH_ENTER_ACCEL)
+    if lateral_accel > threshold:
+      return self.reset(curvature, "curve")
+
+    if not self.initialized:
+      self.filtered_curvature = curvature
+      self.initialized = True
+    else:
+      self.filtered_curvature += TOADPILOT_STRAIGHT_SMOOTH_ALPHA * (curvature - self.filtered_curvature)
+    self.active = True
+    self.reason = "active"
+    return self.filtered_curvature
+
+  def snapshot(self):
+    return {
+      "straight_line_smoothing_active": bool(self.active),
+      "straight_line_smoothing_reason": self.reason,
+      "straight_line_raw_curvature": round(float(self.raw_curvature), 8),
+      "straight_line_smoothed_curvature": round(float(self.filtered_curvature), 8),
+    }
+
+
 class ToadPilotLaneCentering:
   """Small, confidence-gated curvature trim toward the detected lane center."""
 
@@ -906,7 +1223,9 @@ class ToadPilotLateralAssist:
     self.last_curvature = desired_curvature
 
     direction = 1.0 if desired_lateral_accel > 0.0 else -1.0 if desired_lateral_accel < 0.0 else 0.0
-    curve_strength = float(clip((abs(desired_lateral_accel) - 0.25) / 1.75, 0.0, 1.0))
+    curve_strength = float(interp(abs(desired_lateral_accel),
+                                  [TOADPILOT_CURVE_ASSIST_START_ACCEL, TOADPILOT_CURVE_ASSIST_FULL_ACCEL],
+                                  [0.0, 1.0]))
     experimental_allowed = not experimental_mode or config.curve_assist_in_experimental
     hard_gate = (not config.enabled or config.profile == "observe" or steering_pressed or steer_limited or
                  abs(steering_rate_deg) >= 75.0 or not experimental_allowed or

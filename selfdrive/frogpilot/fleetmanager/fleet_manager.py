@@ -192,9 +192,6 @@ def addr_input():
     if fleet.get_public_token() is None:
       return redirect(url_for('public_token_input'))
 
-    if fleet.get_secret_token() is None:
-      return redirect(url_for('app_token_input'))
-
   if search_input == 1:
     amap_key, amap_key_2 = fleet.get_amap_key()
     if not amap_key or not amap_key_2:
@@ -316,6 +313,40 @@ def tools_route():
   response = Response(render_template("tools.html"))
   response.headers["Cache-Control"] = "no-store"
   return response
+
+@app.route("/mapbox_token", methods=['GET', 'POST'])
+def mapbox_token_route():
+  if request.method == 'GET':
+    response = jsonify({
+      "public_configured": fleet.get_public_token() is not None,
+      "secret_configured": fleet.get_secret_token() is not None,
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+  request_data = request.get_json(silent=True)
+  if not isinstance(request_data, dict):
+    return jsonify({"error": "Mapbox token request must be a JSON object."}), 400
+  try:
+    public_token = request_data.get("public_token")
+    secret_token = request_data.get("secret_token")
+    if public_token is not None and not isinstance(public_token, str):
+      raise ValueError("Mapbox public token must be text.")
+    if secret_token is not None and not isinstance(secret_token, str):
+      raise ValueError("Mapbox secret token must be text.")
+    if not any(token is not None and token.strip() for token in (public_token, secret_token)):
+      raise ValueError("Enter a Mapbox public or secret token.")
+    if public_token is not None and public_token.strip():
+      fleet.set_public_token(public_token)
+    if secret_token is not None and secret_token.strip():
+      fleet.set_secret_token(secret_token)
+  except ValueError as error:
+    return jsonify({"error": str(error)}), 400
+  return jsonify({
+    "public_configured": fleet.get_public_token() is not None,
+    "secret_configured": fleet.get_secret_token() is not None,
+    "message": "Mapbox token settings saved.",
+  })
 
 @app.route("/get_toggle_values", methods=['GET'])
 def get_toggle_values_route():

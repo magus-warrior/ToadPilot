@@ -12,6 +12,7 @@ class Params(_Params):
     "ToadPilotSteeringResponseRequest",
     "ToadPilotStatus",
     "ToadPilotSteeringStatus",
+    "ToadPilotNavigationStatus",
     "ToadPilotStopGoStatus",
     "ToadPilotStopGoLastRoute",
     "ToadPilotTorqueCheckpoint",

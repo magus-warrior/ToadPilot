@@ -59,6 +59,25 @@ Tools
   .door-btn {
   }
 
+  .mapbox-panel {
+    width: min(700px, 94%);
+    text-align: left;
+  }
+
+  .mapbox-panel input {
+    width: 100%;
+    padding: 8px;
+  }
+
+  .mapbox-status {
+    min-height: 24px;
+    margin-top: 8px;
+  }
+
+  .mapbox-status.error {
+    color: #d64040;
+  }
+
   .toadpilot-panel {
     width: min(940px, 94%);
     padding: 20px;
@@ -94,6 +113,33 @@ Tools
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 12px;
+  }
+
+  .toadpilot-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 16px 0 12px;
+    padding: 4px;
+    border-radius: 10px;
+    background: rgba(127, 127, 127, 0.12);
+  }
+
+  .toadpilot-tab {
+    flex: 1 1 0;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+  }
+
+  .toadpilot-tab[aria-selected="true"] {
+    border-color: rgba(30, 135, 240, 0.65);
+    background: rgba(30, 135, 240, 0.18);
+    font-weight: 600;
+  }
+
+  .toadpilot-tab-panel[hidden] {
+    display: none !important;
   }
 
   .toadpilot-field,
@@ -250,6 +296,19 @@ Tools
 
   <div class="separator"></div>
 
+  <section class="mapbox-panel" aria-labelledby="mapboxTitle">
+    <h1 id="mapboxTitle">Mapbox Navigation Token</h1>
+    <p>Paste your Mapbox public token (<code>pk...</code>) for destination search. A secret token (<code>sk...</code>) is optional and is used for routing when configured.</p>
+    <label for="mapboxPublicToken"><strong>Public token</strong></label>
+    <input id="mapboxPublicToken" type="password" autocomplete="off" spellcheck="false" placeholder="pk.xxxxx...">
+    <label for="mapboxSecretToken"><strong>Secret token (optional)</strong></label>
+    <input id="mapboxSecretToken" type="password" autocomplete="off" spellcheck="false" placeholder="sk.xxxxx...">
+    <button type="button" id="mapboxSaveButton">Save Mapbox Tokens</button>
+    <div id="mapboxStatus" class="mapbox-status" role="status" aria-live="polite"></div>
+  </section>
+
+  <div class="separator"></div>
+
   <div class="toadpilot-panel" aria-labelledby="toadpilotTitle">
     <div class="toadpilot-heading">
       <h1 id="toadpilotTitle">TOADPILOT</h1>
@@ -265,7 +324,14 @@ Tools
       <span id="toadAuthorityDetail">Reading the saved request and current boot state.</span>
     </div>
 
-    <div class="toadpilot-config-grid">
+    <div class="toadpilot-tabs" role="tablist" aria-label="TOADPILOT settings sections">
+      <button type="button" class="toadpilot-tab" id="toadTabDriving" role="tab" aria-selected="true" aria-controls="toadPanelDriving">Driving</button>
+      <button type="button" class="toadpilot-tab" id="toadTabResearch" role="tab" aria-selected="false" aria-controls="toadPanelResearch">Research</button>
+      <button type="button" class="toadpilot-tab" id="toadTabStatus" role="tab" aria-selected="false" aria-controls="toadPanelStatus">Live Status</button>
+    </div>
+
+    <section class="toadpilot-tab-panel" id="toadPanelDriving" role="tabpanel" aria-labelledby="toadTabDriving">
+      <div class="toadpilot-config-grid">
       <label class="toadpilot-check" for="toadEnabled">
         <span><strong>Enable TOADPILOT</strong><br><small>Default on; may be configured offline, while unsupported cars remain stock.</small></span>
         <input type="checkbox" id="toadEnabled" checked>
@@ -285,6 +351,11 @@ Tools
         <input type="checkbox" id="toadAutoTune" checked>
       </label>
 
+      <label class="toadpilot-check" for="toadStraightLineSmoothing">
+        <span><strong>Smooth straight-line steering</strong><br><small>Default on; filters tiny rapid left/right requests while releasing immediately into real curves.</small></span>
+        <input type="checkbox" id="toadStraightLineSmoothing" checked>
+      </label>
+
       <label class="toadpilot-check" for="toadLaneCentering">
         <span><strong>Lane centering assist</strong><br><small>Default on; adds a small, confidence-gated path correction in Adaptive/Full.</small></span>
         <input type="checkbox" id="toadLaneCentering" checked>
@@ -300,9 +371,41 @@ Tools
         <input type="checkbox" id="toadImprovedStopAndGo" checked>
       </label>
 
+      <label class="toadpilot-check" for="toadAutomaticTrafficMode">
+        <span><strong>Automatic Traffic Mode</strong><br><small>Default on. Enters after sustained close, slow traffic or repeated stop-and-go cycles, then waits for sustained free flow before leaving. A mapped intersection only supports real traffic evidence; it cannot trigger this alone.</small></span>
+        <input type="checkbox" id="toadAutomaticTrafficMode" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadMapStopAssist">
+        <span><strong>Mapped stop-sign assist</strong><br><small>Default on. Uses an active navigation route to approach a mapped stop sign, requires a true standstill, holds one second, then releases only the map request. Traffic lights never release from map timing, and gas cancels the map stop.</small></span>
+        <input type="checkbox" id="toadMapStopAssist" checked>
+      </label>
+
+      </div>
+      <p id="toadProfileHelp" class="toadpilot-profile-help"></p>
+    </section>
+
+    <section class="toadpilot-tab-panel" id="toadPanelResearch" role="tabpanel" aria-labelledby="toadTabResearch" hidden>
+      <div class="toadpilot-config-grid">
+
       <label class="toadpilot-check" for="toadExperimentalSteeringResponse">
-        <span><strong>Experimental Camry 1700 authority</strong><br><small>Closed-course research only, default off. The EPS may accept 1700 or fault; this is not a benign rejection test. Exact, non-forced Camry TSS2 identification and reboot are required. Extension is limited to main engagement, 5-15 m/s, sustained saturation with calibrated-yaw undertracking, and no lane change, braking, driver input, or steering rate at/above 75°/s. Rise 15, fall 25, EPS error 350, and RT delta 450 remain unchanged; a command at 1700 takes up to 0.08 s to unwind to 1500.</small></span>
+        <span><strong>Experimental Camry authority</strong><br><small>Closed-course research only, default off. Exact, non-forced Camry TSS2 identification and reboot are required. The Panda hard ceiling remains 1700, with stock EPS-error, real-time, and release limits. The controller uses the selected cap below and slows only the extra rise above 1500.</small></span>
         <input type="checkbox" id="toadExperimentalSteeringResponse">
+      </label>
+
+      <label class="toadpilot-field" for="toadExperimentalMaxTorque">
+        <span><strong>Experimental maximum torque</strong><br><small>Default 1500 (stock). Test upward in 25-unit steps; the previous fault appeared at 1560, so begin at 1525. The selected value is frozen when the controller starts and cannot be raised during a drive.</small></span>
+        <select id="toadExperimentalMaxTorque">
+          <option value="1500" selected>1500 · Stock cap</option>
+          <option value="1525">1525</option>
+          <option value="1550">1550</option>
+          <option value="1575">1575</option>
+          <option value="1600">1600</option>
+          <option value="1625">1625</option>
+          <option value="1650">1650</option>
+          <option value="1675">1675</option>
+          <option value="1700">1700 · Panda ceiling</option>
+        </select>
       </label>
 
       <label class="toadpilot-check" for="toadExperimentalAssist">
@@ -316,12 +419,11 @@ Tools
       </label>
 
       <label class="toadpilot-check" for="toadTelemetry">
-        <span><strong>Runtime telemetry</strong><br><small>Publish controller and observer status to shared memory.</small></span>
+        <span><strong>Runtime telemetry</strong><br><small>Publish live status and retain GPS-free mapped-stop trials under <code>/data/toadpilot/navigation_trials</code>.</small></span>
         <input type="checkbox" id="toadTelemetry" checked>
       </label>
-    </div>
-
-    <p id="toadProfileHelp" class="toadpilot-profile-help"></p>
+      </div>
+    </section>
 
     <div class="toadpilot-actions">
       <button type="button" id="toadSaveButton">Save TOADPILOT Settings</button>
@@ -330,7 +432,8 @@ Tools
     </div>
     <div id="toadMessage" class="toadpilot-message" role="status" aria-live="polite"></div>
 
-    <div class="toadpilot-status-grid">
+    <section class="toadpilot-tab-panel" id="toadPanelStatus" role="tabpanel" aria-labelledby="toadTabStatus" hidden>
+      <div class="toadpilot-status-grid">
       <section class="toadpilot-status-card">
         <h3>Vehicle &amp; authority</h3>
         <dl>
@@ -368,7 +471,10 @@ Tools
           <dt>Trial safety</dt><dd id="toadTorqueSafety">Waiting for EPS/fault data...</dd>
           <dt>Stop/go live</dt><dd id="toadStopGoLiveState">Waiting for longitudinal controller...</dd>
           <dt>Stop/go last event</dt><dd id="toadStopGoLastEvent">Waiting for a launch event...</dd>
+          <dt>Automatic traffic</dt><dd id="toadAutomaticTrafficState">Waiting for planner...</dd>
+          <dt>Mapped stop</dt><dd id="toadMapStopState">Waiting for navigation...</dd>
           <dt>Lane centering</dt><dd id="toadLaneCenteringState">Waiting for controller...</dd>
+          <dt>Straight smoothing</dt><dd id="toadStraightSmoothingState">Waiting for controller...</dd>
           <dt>Feed-forward</dt><dd id="toadFeedforward">Waiting...</dd>
           <dt>Experimental</dt><dd id="toadExperimentalState">Waiting...</dd>
         </dl>
@@ -381,11 +487,12 @@ Tools
           Preliminary diagnostics only; never applied to tune. Lane-change/model/steer-limit context is not labeled yet.
         </p>
       </section>
-    </div>
+      </div>
 
-    <p id="toadLegacyNotice" class="toadpilot-legacy-notice" hidden>
-      The old ToyotaPerformanceMode prototype key is still set, but it is ignored. TOADPILOT uses only the saved controls above.
-    </p>
+      <p id="toadLegacyNotice" class="toadpilot-legacy-notice" hidden>
+        The old ToyotaPerformanceMode prototype key is still set, but it is ignored. TOADPILOT uses only the saved controls above.
+      </p>
+    </section>
   </div>
 
   <div class="separator"></div>
@@ -482,13 +589,21 @@ Tools
   const unlockButton = document.getElementById('unlockButton');
   const captureTmuxLogButton = document.getElementById('captureTmuxLogButton');
   const downloadTmuxLogButton = document.getElementById("downloadTmuxLogButton");
+  const mapboxPublicToken = document.getElementById("mapboxPublicToken");
+  const mapboxSecretToken = document.getElementById("mapboxSecretToken");
+  const mapboxSaveButton = document.getElementById("mapboxSaveButton");
+  const mapboxStatus = document.getElementById("mapboxStatus");
   const toadEnabled = document.getElementById("toadEnabled");
   const toadProfile = document.getElementById("toadProfile");
   const toadAutoTune = document.getElementById("toadAutoTune");
+  const toadStraightLineSmoothing = document.getElementById("toadStraightLineSmoothing");
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
   const toadImprovedStopAndGo = document.getElementById("toadImprovedStopAndGo");
+  const toadAutomaticTrafficMode = document.getElementById("toadAutomaticTrafficMode");
+  const toadMapStopAssist = document.getElementById("toadMapStopAssist");
   const toadExperimentalSteeringResponse = document.getElementById("toadExperimentalSteeringResponse");
+  const toadExperimentalMaxTorque = document.getElementById("toadExperimentalMaxTorque");
   const toadExperimentalAssist = document.getElementById("toadExperimentalAssist");
   const toadSmartWarning = document.getElementById("toadSmartWarning");
   const toadTelemetry = document.getElementById("toadTelemetry");
@@ -496,6 +611,7 @@ Tools
   const toadRefreshButton = document.getElementById("toadRefreshButton");
   const toadResetTuneButton = document.getElementById("toadResetTuneButton");
   const toadMessage = document.getElementById("toadMessage");
+  const toadTabs = Array.from(document.querySelectorAll(".toadpilot-tab"));
   const startRampSlider = document.getElementById("startRampSlider");
   const startRampReadout = document.getElementById("startRampReadout");
   const startRampSaveButton = document.getElementById("startRampSaveButton");
@@ -505,10 +621,14 @@ Tools
     toadEnabled,
     toadProfile,
     toadAutoTune,
+    toadStraightLineSmoothing,
     toadLaneCentering,
     toadSmoothLaneTransitions,
     toadImprovedStopAndGo,
+    toadAutomaticTrafficMode,
+    toadMapStopAssist,
     toadExperimentalSteeringResponse,
+    toadExperimentalMaxTorque,
     toadExperimentalAssist,
     toadSmartWarning,
     toadTelemetry
@@ -527,11 +647,68 @@ Tools
   let startRampMutating = false;
   let startRampOnroad = true;
 
+  function setMapboxStatus(message, isError) {
+    mapboxStatus.textContent = message || "";
+    mapboxStatus.classList.toggle("error", Boolean(isError));
+  }
+
+  async function loadMapboxTokenStatus() {
+    try {
+      const response = await fetch('/mapbox_token', { cache: 'no-store' });
+      const data = await response.json();
+      const configured = [];
+      if (data.public_configured) configured.push("public token");
+      if (data.secret_configured) configured.push("secret token");
+      setMapboxStatus(configured.length ? "Configured: " + configured.join(" and ") + ". Paste a value to replace it." : "No Mapbox token is configured.", false);
+    } catch (error) {
+      setMapboxStatus("Could not read Mapbox token status.", true);
+    }
+  }
+
+  mapboxSaveButton.addEventListener('click', async function() {
+    const publicToken = mapboxPublicToken.value.trim();
+    const secretToken = mapboxSecretToken.value.trim();
+    mapboxSaveButton.disabled = true;
+    try {
+      const response = await fetch('/mapbox_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_token: publicToken, secret_token: secretToken })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Could not save Mapbox token.");
+      }
+      mapboxPublicToken.value = "";
+      mapboxSecretToken.value = "";
+      setMapboxStatus(data.message || "Mapbox token settings saved.", false);
+    } catch (error) {
+      setMapboxStatus(error.message || "Could not save Mapbox token.", true);
+    } finally {
+      mapboxSaveButton.disabled = false;
+    }
+  });
+
+  loadMapboxTokenStatus();
+
   const toadProfileDescriptions = {
     observe: "Observe keeps stock controller output unchanged while collecting diagnostics.",
     adaptive: "Adaptive adds modest curve support and, when separately enabled, a gentle confidence-gated lane-centering correction.",
     full: "Full Existing Authority uses stronger bounded curve and optional lane-centering assistance, while stock Toyota/Panda limits remain unchanged."
   };
+
+  function selectToadTab(selectedTab) {
+    toadTabs.forEach(tab => {
+      const selected = tab === selectedTab;
+      tab.setAttribute("aria-selected", selected ? "true" : "false");
+      const panel = document.getElementById(tab.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !selected;
+    });
+  }
+
+  toadTabs.forEach(tab => {
+    tab.addEventListener("click", () => selectToadTab(tab));
+  });
 
   function setToadText(id, value) {
     document.getElementById(id).textContent = value;
@@ -636,6 +813,7 @@ Tools
     const steeringStatus = data.steering_status || {};
     const stopGoStatus = data.stop_go_status || {};
     const stopGoLastRoute = data.stop_go_last_route || {};
+    const navigationStatus = data.navigation_status || {};
     const torqueStatus = data.torque_status || {};
     const torqueLastRoute = data.torque_last_route || {};
     const environment = data.environment || {};
@@ -652,10 +830,14 @@ Tools
       toadEnabled.checked = config.enabled !== false;
       toadProfile.value = config.profile || "adaptive";
       toadAutoTune.checked = config.auto_tune !== false;
+      toadStraightLineSmoothing.checked = config.straight_line_smoothing !== false;
       toadLaneCentering.checked = config.lane_centering_assist !== false;
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
       toadImprovedStopAndGo.checked = config.improved_stop_and_go !== false;
+      toadAutomaticTrafficMode.checked = config.automatic_traffic_mode !== false;
+      toadMapStopAssist.checked = config.map_stop_assist !== false;
       toadExperimentalSteeringResponse.checked = steeringExperiment.requested === true;
+      toadExperimentalMaxTorque.value = String(config.experimental_max_torque || 1500);
       toadExperimentalAssist.checked = Boolean(config.curve_assist_in_experimental);
       toadSmartWarning.checked = config.smart_saturation_warning !== false;
       toadTelemetry.checked = config.telemetry !== false;
@@ -732,9 +914,54 @@ Tools
       setToadText("toadStopGoLastEvent", "No saved stop/go drive yet");
     }
 
+    if (navigationStatus.fresh === true) {
+      if (navigationStatus.auto_traffic_enabled !== true) {
+        setToadText("toadAutomaticTrafficState", "Off by setting");
+      } else {
+        const trafficOverride = Number(navigationStatus.traffic_mode_override || 0);
+        const trafficState = navigationStatus.traffic_mode_effective === true ? "ACTIVE" : "READY";
+        let trafficReason = String(navigationStatus.auto_traffic_reason || "monitoring").replace(/_/g, " ");
+        if (trafficOverride < 0) {
+          trafficReason += " · driver forced off";
+        } else if (trafficOverride > 0) {
+          trafficReason += " · driver forced on";
+        }
+        setToadText("toadAutomaticTrafficState", trafficState + " · " + trafficReason +
+          " · confidence " + Math.round(Number(navigationStatus.auto_traffic_confidence || 0) * 100) + "%");
+      }
+
+      if (navigationStatus.map_stop_enabled !== true) {
+        setToadText("toadMapStopState", "Off by setting");
+      } else {
+        const stopState = String(navigationStatus.map_stop_state || "idle").replace(/_/g, " ").toUpperCase();
+        const conditionType = String(navigationStatus.condition_type || "none").replace(/_/g, " ");
+        const rawConditionDistance = (navigationStatus.map_stop_active === true &&
+          navigationStatus.map_estimated_distance_m !== null &&
+          navigationStatus.map_estimated_distance_m !== undefined) ?
+          navigationStatus.map_estimated_distance_m : navigationStatus.condition_distance;
+        const conditionDistance = Number(rawConditionDistance);
+        let mapStopText = stopState + " · " + conditionType;
+        if (navigationStatus.condition_valid === true && rawConditionDistance !== null &&
+            rawConditionDistance !== undefined && Number.isFinite(conditionDistance)) {
+          mapStopText += " · " + conditionDistance.toFixed(1) + " m";
+        }
+        if (navigationStatus.trial_logging_healthy === false ||
+            Number(navigationStatus.trial_logging_failures || 0) > 0) {
+          mapStopText += " · LOG WRITE FAILED";
+        } else if (Number(navigationStatus.trial_logging_pending || 0) > 0) {
+          mapStopText += " · saving trial";
+        }
+        setToadText("toadMapStopState", mapStopText);
+      }
+    } else {
+      setToadText("toadAutomaticTrafficState", config.automatic_traffic_mode === false ? "Off by setting" : "Waiting for planner heartbeat");
+      setToadText("toadMapStopState", config.map_stop_assist === false ? "Off by setting" : "Waiting for valid routed stop data");
+    }
+
     const limits = capability.hard_limits;
     setToadText("toadHardLimits", limits ?
       "±" + limits.steer_max +
+      " hard · selected ±" + String(config.experimental_max_torque || 1500) +
       " · rise " + limits.steer_delta_up +
       " · fall " + limits.steer_delta_down +
       " · EPS error " + limits.steer_error_max : "Not applicable");
@@ -742,8 +969,8 @@ Tools
     let authoritySummary;
     let authorityDetail;
     if (steeringExperiment.effective === true && steeringExperiment.requested === true) {
-      authoritySummary = "1700 authority is active.";
-      authorityDetail = "The saved request, reboot latch, Camry controller flag, and paired Panda firmware all match for this boot.";
+      authoritySummary = String(config.experimental_max_torque || 1500) + " selected · 1700 hard authority is active.";
+      authorityDetail = "The saved request, reboot latch, Camry controller flag, and paired Panda firmware all match for this boot. Extra rise above 1500 is limited to 5 units per 10 ms.";
     } else if (steeringExperiment.effective === true) {
       authoritySummary = "1700 authority is active until reboot.";
       authorityDetail = "The checkbox is now off, so the stock 1500-unit envelope will return after reboot.";
@@ -886,6 +1113,18 @@ Tools
       extendedTorqueText = torqueDiagnosticPrefix + commandState + " · " +
         "latest " + rawOutput + " · sampled route peak " + peakOutput;
       extendedTorqueText += " · " + String(sampleCount) + " 20 Hz diagnostic samples above 1500";
+      const commandTrace = torqueDiagnostic.command_trace || steeringStatus.command_trace || [];
+      if (commandTrace.length) {
+        extendedTorqueText += " · " + String(commandTrace.length) + " frame-level trace samples captured for journal";
+        const droppedTraceSamples = Number(torqueDiagnostic.command_trace_dropped_samples ||
+          steeringStatus.command_trace_dropped_samples || 0);
+        if (droppedTraceSamples > 0) {
+          extendedTorqueText += " (" + String(droppedTraceSamples) + " steady samples omitted between entry and tail)";
+        }
+      }
+      if (Number.isFinite(Number(torqueDiagnostic.selected_max_torque))) {
+        extendedTorqueText += " · selected cap " + String(torqueDiagnostic.selected_max_torque);
+      }
       if (torqueDiagnostic.controller_state) {
         extendedTorqueText += " · sampled state " + String(torqueDiagnostic.controller_state).replace(/_/g, " ");
       }
@@ -956,6 +1195,21 @@ Tools
         formatToadNumber(runtime.lane_centering_curvature_delta, 6) + " 1/m";
     }
     setToadText("toadLaneCenteringState", laneCenteringText);
+
+    let straightSmoothingText = runtimeState;
+    if (runtimeFresh && !config.straight_line_smoothing) {
+      straightSmoothingText = "Disabled by setting";
+    } else if (runtimeFresh && runtime.straight_line_smoothing_active === true) {
+      straightSmoothingText = "Active · filtering tiny straight-line requests";
+    } else if (runtimeFresh && runtime.straight_line_smoothing_reason) {
+      straightSmoothingText = "Paused: " + String(runtime.straight_line_smoothing_reason).replace(/_/g, " ");
+    }
+    if (runtimeFresh && Number.isFinite(Number(runtime.straight_line_raw_curvature)) &&
+        Number.isFinite(Number(runtime.straight_line_smoothed_curvature))) {
+      straightSmoothingText += " · raw " + formatToadNumber(runtime.straight_line_raw_curvature, 6) +
+        " / smooth " + formatToadNumber(runtime.straight_line_smoothed_curvature, 6);
+    }
+    setToadText("toadStraightSmoothingState", straightSmoothingText);
 
     let feedforwardText;
     if (runtimeFresh) {
@@ -1191,9 +1445,13 @@ Tools
       enabled: toadEnabled.checked,
       profile: toadProfile.value,
       auto_tune: toadAutoTune.checked,
+      straight_line_smoothing: toadStraightLineSmoothing.checked,
+      experimental_max_torque: Number(toadExperimentalMaxTorque.value),
       lane_centering_assist: toadLaneCentering.checked,
       smooth_lane_transitions: toadSmoothLaneTransitions.checked,
       improved_stop_and_go: toadImprovedStopAndGo.checked,
+      automatic_traffic_mode: toadAutomaticTrafficMode.checked,
+      map_stop_assist: toadMapStopAssist.checked,
       curve_assist_in_experimental: toadExperimentalAssist.checked,
       smart_saturation_warning: toadSmartWarning.checked,
       telemetry: toadTelemetry.checked

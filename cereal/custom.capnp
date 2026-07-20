@@ -32,6 +32,7 @@ struct FrogPilotCarState @0x81c2f05a394cf4af {
   pauseLongitudinal @12 :Bool;
   sportGear @13 :Bool;
   trafficMode @14 :Bool;
+  trafficModeOverride @15 :Int8;  # -1 forced off, 0 automatic, 1 forced on
 }
 
 struct FrogPilotDeviceState @0xaedffd8f31e7b55d {
@@ -40,9 +41,19 @@ struct FrogPilotDeviceState @0xaedffd8f31e7b55d {
 }
 
 struct FrogPilotNavigation @0xf35cc4560bbf6ec2 {
+  enum IntersectionConditionType {
+    unknown @0;
+    stopSign @1;
+    trafficSignal @2;
+  }
+
   approachingIntersection @0 :Bool;
   approachingTurn @1 :Bool;
   navigationSpeedLimit @2 :Float32;
+  intersectionConditionValid @3 :Bool;
+  intersectionConditionType @4 :IntersectionConditionType;
+  intersectionConditionDistance @5 :Float32;  # meters remaining along the routed geometry
+  intersectionConditionId @6 :UInt64;          # deterministic physical-condition identifier
 }
 
 struct FrogPilotPlan @0xda96579883444c35 {
@@ -78,6 +89,13 @@ struct FrogPilotPlan @0xda96579883444c35 {
   vCruise @29 :Float32;
   vtscControllingCurve @30 :Bool;
   vtscSpeed @31 :Float32;
+  autoTrafficMode @32 :Bool;
+  autoTrafficModeReason @33 :Text;
+  autoTrafficModeConfidence @34 :Float32;
+  mapStopActive @35 :Bool;
+  mapStopState @36 :Text;
+  mapStopDistance @37 :Float32;
+  trafficModeBlend @38 :Float32;  # 0 normal profile, 1 full Traffic Mode profile
 }
 
 struct CustomReserved4 @0x80ae746ee2596b11 {

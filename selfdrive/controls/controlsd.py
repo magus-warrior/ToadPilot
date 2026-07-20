@@ -41,6 +41,8 @@ from openpilot.selfdrive.frogpilot.toadpilot import (
   TOADPILOT_STOP_GO_STATUS_KEY,
   ToadPilotLaneCentering,
   ToadPilotLaneContext,
+  ToadPilotStraightLineSmoother,
+  ToadPilotTorqueCommandTrace,
   config_from_toggles,
   extract_toadpilot_lane_context,
   toadpilot_steer_saturated,
@@ -198,6 +200,7 @@ class Controls:
       self.LaC = LatControlTorque(self.CP, self.CI)
 
     self.toadpilot_lane_centering = ToadPilotLaneCentering()
+    self.toadpilot_straight_line_smoother = ToadPilotStraightLineSmoother()
     self.toadpilot_lane_centering_capable = (
       self.CP.carName == "toyota" and self.CP.carFingerprint == TOADPILOT_FINGERPRINT and
       self.CP.lateralTuning.which() == "torque"
@@ -232,6 +235,7 @@ class Controls:
     self.toadpilot_steering_extended_observations = 0
     self.toadpilot_steering_peak_output_can = 0.0
     self.toadpilot_steering_last_transition_unix = None
+    self.toadpilot_torque_command_trace = ToadPilotTorqueCommandTrace()
     self.toadpilot_diagnostic_route_started_at_unix = time.time()
     self.toadpilot_diagnostic_route_id = (
       self.params.get("CurrentRoute", encoding="utf-8") or
@@ -729,9 +733,12 @@ class Controls:
     self.toadpilot_panda_tx_blocked_previous = counts
 
   def _publish_toadpilot_steering_status(self, CS):
-    if getattr(self.frogpilot_toggles, "toadpilot_telemetry", False) is not True:
-      return
     output = self.sm["carOutput"].actuatorsOutput
+    # The experimental envelope always retains its safety trace, even when
+    # optional general TOADPILOT telemetry is off.
+    if (getattr(self.frogpilot_toggles, "toadpilot_telemetry", False) is not True and
+        not bool(getattr(output, "toadPilotHighTorqueAuthorized", False))):
+      return
     self._update_toadpilot_panda_diagnostic(output)
     car_output_valid = bool(self.sm.valid["carOutput"])
     state = (str(getattr(output, "toadPilotHighTorqueState", "") or "stock")
@@ -746,6 +753,25 @@ class Controls:
       output_can = abs(float(output.steerOutputCan))
       self.toadpilot_steering_peak_output_can = max(self.toadpilot_steering_peak_output_can, output_can)
       self.toadpilot_steering_extended_observations += int(output_can > 1500.0)
+      output_t = self.sm.logMonoTime["carOutput"] * 1e-9
+      self.toadpilot_torque_command_trace.update(
+        output_t,
+        float(output.steerOutputCan),
+        target_can=int(round(float(getattr(output, "toadPilotHighTorqueTargetCan", 0.0)))),
+        state=state,
+        reason=reason,
+        requested_steer=round(float(output.steer), 4),
+        headroom_scale=round(float(getattr(output, "toadPilotHighTorqueHeadroomScale", 0.0)), 3),
+        steering_rate_rise=round(float(getattr(output, "toadPilotSteeringRateRise", 0.0)), 1),
+        steer_request=bool(getattr(output, "toadPilotSteerRequest", False)),
+        eps_torque=round(float(CS.steeringTorqueEps), 1),
+        steering_rate_deg=round(float(CS.steeringRateDeg), 1),
+        steering_pressed=bool(CS.steeringPressed),
+        temporary_fault=bool(CS.steerFaultTemporary),
+        permanent_fault=bool(CS.steerFaultPermanent),
+        eps_state=int(getattr(CS, "steerFaultStatus", 255)),
+        eps_initial_fault_state=int(getattr(CS, "steerFaultStatusInitial", 255)),
+      )
     if transition:
       self.toadpilot_steering_state = state
       self.toadpilot_steering_reason = reason
@@ -805,6 +831,9 @@ class Controls:
       "panda_safety_tx_blocked_last_output_can": self.toadpilot_panda_tx_blocked_last_output_can,
       "panda_block_semantics": "aggregate_all_transmit_addresses_not_steering_specific",
       "diagnostic_trigger": "transition" if transition_publish else "heartbeat",
+      "selected_max_torque": int(getattr(self.frogpilot_toggles, "toadpilot_experimental_max_torque", 1500)),
+      "extra_delta_up_per_10ms": 5,
+      **self.toadpilot_torque_command_trace.snapshot(),
     }
     params_memory.put_nonblocking(
       TOADPILOT_STEERING_STATUS_KEY, json.dumps(payload, sort_keys=True, separators=(",", ":")),
@@ -905,9 +934,21 @@ class Controls:
       centering_steer_saturated = toadpilot_steer_saturated(
         self.steer_limited, self.sm["carOutput"].actuatorsOutput.steer,
       )
-      requested_curvature = self.toadpilot_lane_centering.update(
+      straight_requested_curvature = self.toadpilot_straight_line_smoother.update(
         toadpilot_config,
         model_v2.action.desiredCurvature,
+        CS.vEgo,
+        CC.latActive and self.toadpilot_lane_centering_capable,
+        CS.steeringPressed,
+        centering_steer_saturated,
+        model_v2.meta.laneChangeState != LaneChangeState.off,
+        CS.leftBlinker or CS.rightBlinker,
+        brake_pressed=CS.brakePressed,
+        longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
+      )
+      requested_curvature = self.toadpilot_lane_centering.update(
+        toadpilot_config,
+        straight_requested_curvature,
         CS.vEgo,
         lane_context,
         CC.latActive and self.toadpilot_lane_centering_capable,
@@ -931,6 +972,10 @@ class Controls:
       # Keep model-curvature limiting distinct from downstream car/safety
       # clipping (`steer_limited`), which TOADPILOT uses for torque saturation.
       actuators.curvature = self.desired_curvature
+      toadpilot_centering_status = {
+        **self.toadpilot_lane_centering.snapshot(),
+        **self.toadpilot_straight_line_smoother.snapshot(),
+      }
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                              self.steer_limited, self.desired_curvature,
                                                                              self.curvature_limited,
@@ -938,7 +983,7 @@ class Controls:
                                                                              model_data=self.sm['modelV2'], frogpilot_toggles=self.frogpilot_toggles,
                                                                              experimental_mode=self.experimental_mode,
                                                                              toadpilot_longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
-                                                                             toadpilot_centering_status=self.toadpilot_lane_centering.snapshot())
+                                                                             toadpilot_centering_status=toadpilot_centering_status)
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
       if self.sm.recv_frame['testJoystick'] > 0:

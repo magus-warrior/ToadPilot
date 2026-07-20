@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 
 from dataclasses import replace
@@ -12,6 +13,7 @@ from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, T
                                                      TOADPILOT_STEERING_RESPONSE_PANDA_SIGNATURES,
                                                      TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_RESPONSE_REQUEST_KEY,
+                                                     TOADPILOT_STEERING_STATUS_KEY,
                                                      TOADPILOT_STOP_GO_DIAGNOSTIC_SCHEMA_VERSION,
                                                      TOADPILOT_STOP_GO_LAST_ROUTE_KEY,
                                                      TOADPILOT_STOP_GO_STATUS_KEY,
@@ -21,6 +23,7 @@ from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG, T
                                                      TOADPILOT_TORQUE_STATUS_KEY,
                                                      ToadPilotConfig,
                                                      ToadPilotHighAuthorityObserver, ToadPilotLateralAssist,
+                                                     ToadPilotStraightLineSmoother, ToadPilotTorqueCommandTrace,
                                                      config_from_toggles, decode_toadpilot_config,
                                                      latch_toadpilot_steering_response_request,
                                                      normalize_toadpilot_config, read_toadpilot_config,
@@ -57,7 +60,11 @@ class TestToadPilotConfig(unittest.TestCase):
       auto_tune=True,
       lane_centering_assist=True,
       smooth_lane_transitions=True,
+      straight_line_smoothing=True,
+      experimental_max_torque=1500,
       improved_stop_and_go=True,
+      automatic_traffic_mode=True,
+      map_stop_assist=True,
       curve_assist_in_experimental=False,
       smart_saturation_warning=True,
       telemetry=True,
@@ -65,13 +72,17 @@ class TestToadPilotConfig(unittest.TestCase):
 
   def test_normalizes_valid_config(self):
     config = normalize_toadpilot_config({
-      "version": 4,
+      "version": 7,
       "enabled": True,
       "profile": "full",
       "auto_tune": False,
       "lane_centering_assist": True,
       "smooth_lane_transitions": False,
+      "straight_line_smoothing": False,
+      "experimental_max_torque": 1550,
       "improved_stop_and_go": False,
+      "automatic_traffic_mode": False,
+      "map_stop_assist": False,
       "curve_assist_in_experimental": True,
       "smart_saturation_warning": False,
       "telemetry": False,
@@ -83,7 +94,11 @@ class TestToadPilotConfig(unittest.TestCase):
       auto_tune=False,
       lane_centering_assist=True,
       smooth_lane_transitions=False,
+      straight_line_smoothing=False,
+      experimental_max_torque=1550,
       improved_stop_and_go=False,
+      automatic_traffic_mode=False,
+      map_stop_assist=False,
       curve_assist_in_experimental=True,
       smart_saturation_warning=False,
       telemetry=False,
@@ -95,6 +110,24 @@ class TestToadPilotConfig(unittest.TestCase):
 
     self.assertEqual(config, replace(base, profile="full"))
 
+  def test_torque_command_trace_preserves_entry_and_rolling_fault_tail(self):
+    trace = ToadPilotTorqueCommandTrace()
+    for frame in range(60):
+      trace.update(frame * 0.01, 1500, temporary_fault=False)
+    trace.update(0.60, 1505, temporary_fault=False)
+    for frame in range(1, 300):
+      trace.update(0.60 + frame * 0.01, 1525, temporary_fault=frame == 299)
+
+    snapshot = trace.snapshot()
+    self.assertEqual(len(snapshot["command_trace"]), 240)
+    self.assertGreater(snapshot["command_trace_dropped_samples"], 0)
+    self.assertEqual(snapshot["command_trace_windows"], 1)
+    self.assertEqual(snapshot["command_trace"][0]["t"], 0.1)
+    self.assertEqual(snapshot["command_trace"][50]["output_can"], 1505)
+    self.assertTrue(snapshot["command_trace"][-1]["temporary_fault"])
+    self.assertEqual(snapshot["command_trace_sample_semantics"],
+                     "controlsd_100hz_controller_frames_before_panda_or_eps")
+
   def test_rejects_unknown_or_mistyped_values(self):
     invalid_configs = (
       {"not_a_setting": True},
@@ -104,8 +137,14 @@ class TestToadPilotConfig(unittest.TestCase):
       {"enabled": 1},
       {"auto_tune": "true"},
       {"smooth_lane_transitions": 1},
+      {"straight_line_smoothing": 1},
+      {"experimental_max_torque": True},
+      {"experimental_max_torque": 1510},
+      {"experimental_max_torque": 1725},
       {"improved_stop_and_go": 1},
-      {"version": 5},
+      {"automatic_traffic_mode": 1},
+      {"map_stop_assist": 1},
+      {"version": 8},
     )
 
     for config in invalid_configs:
@@ -133,12 +172,16 @@ class TestToadPilotConfig(unittest.TestCase):
 
     config = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(config.version, 4)
+    self.assertEqual(config.version, 7)
     self.assertTrue(config.enabled)
     self.assertEqual(config.profile, "adaptive")
     self.assertTrue(config.lane_centering_assist)
     self.assertTrue(config.smooth_lane_transitions)
+    self.assertTrue(config.straight_line_smoothing)
+    self.assertEqual(config.experimental_max_torque, 1500)
     self.assertTrue(config.improved_stop_and_go)
+    self.assertTrue(config.automatic_traffic_mode)
+    self.assertTrue(config.map_stop_assist)
     for field in ("auto_tune", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
       self.assertEqual(getattr(config, field), legacy[field])
 
@@ -156,9 +199,13 @@ class TestToadPilotConfig(unittest.TestCase):
 
     expected = {
       **explicit,
-      "version": 4,
+      "version": 7,
       "smooth_lane_transitions": True,
+      "straight_line_smoothing": True,
+      "experimental_max_torque": 1500,
       "improved_stop_and_go": True,
+      "automatic_traffic_mode": True,
+      "map_stop_assist": True,
     }
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
@@ -175,10 +222,11 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": False,
     }
 
-    expected = {**explicit, "version": 4, "improved_stop_and_go": True}
+    expected = {**explicit, "version": 7, "straight_line_smoothing": True, "experimental_max_torque": 1500,
+                "improved_stop_and_go": True, "automatic_traffic_mode": True, "map_stop_assist": True}
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
-  def test_explicit_v4_config_is_preserved_exactly(self):
+  def test_explicit_v4_config_migrates_with_straight_smoothing_enabled(self):
     explicit = {
       "version": 4,
       "enabled": False,
@@ -192,7 +240,47 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": False,
     }
 
-    self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**explicit))
+    expected = {**explicit, "version": 7, "straight_line_smoothing": True, "experimental_max_torque": 1500,
+                "automatic_traffic_mode": True, "map_stop_assist": True}
+    self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
+
+  def test_explicit_v5_config_migrates_to_stock_experimental_cap(self):
+    explicit = {
+      "version": 5,
+      "enabled": True,
+      "profile": "adaptive",
+      "auto_tune": True,
+      "lane_centering_assist": True,
+      "smooth_lane_transitions": True,
+      "straight_line_smoothing": True,
+      "improved_stop_and_go": True,
+      "curve_assist_in_experimental": False,
+      "smart_saturation_warning": True,
+      "telemetry": True,
+    }
+
+    expected = {**explicit, "version": 7, "experimental_max_torque": 1500,
+                "automatic_traffic_mode": True, "map_stop_assist": True}
+    self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
+
+  def test_explicit_v6_config_enables_navigation_automation_defaults(self):
+    explicit = {
+      "version": 6,
+      "enabled": True,
+      "profile": "full",
+      "auto_tune": True,
+      "lane_centering_assist": True,
+      "smooth_lane_transitions": True,
+      "straight_line_smoothing": True,
+      "experimental_max_torque": 1525,
+      "improved_stop_and_go": True,
+      "curve_assist_in_experimental": False,
+      "smart_saturation_warning": True,
+      "telemetry": True,
+    }
+
+    expected = {**explicit, "version": 7, "automatic_traffic_mode": True, "map_stop_assist": True}
+    self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
   def test_malformed_or_hybrid_v2_config_fails_closed(self):
     valid_v2 = {
@@ -218,6 +306,7 @@ class TestToadPilotConfig(unittest.TestCase):
         self.assertEqual(config.profile, "observe")
         self.assertFalse(config.lane_centering_assist)
         self.assertFalse(config.smooth_lane_transitions)
+        self.assertFalse(config.straight_line_smoothing)
         self.assertFalse(config.improved_stop_and_go)
 
   def test_malformed_shared_toggles_fall_back_safely(self):
@@ -233,6 +322,7 @@ class TestToadPilotConfig(unittest.TestCase):
     self.assertTrue(config.auto_tune)
     self.assertFalse(config.lane_centering_assist)
     self.assertFalse(config.smooth_lane_transitions)
+    self.assertFalse(config.straight_line_smoothing)
     self.assertFalse(config.improved_stop_and_go)
     self.assertFalse(config.curve_assist_in_experimental)
 
@@ -246,6 +336,7 @@ class TestToadPilotConfig(unittest.TestCase):
     self.assertEqual(config.profile, "observe")
     self.assertFalse(config.lane_centering_assist)
     self.assertFalse(config.smooth_lane_transitions)
+    self.assertFalse(config.straight_line_smoothing)
     self.assertFalse(config.improved_stop_and_go)
 
   def test_params_roundtrip(self):
@@ -355,19 +446,45 @@ class TestToadPilotConfig(unittest.TestCase):
     }
     self.assertTrue(valid_toadpilot_torque_summary(summary))
 
-    with TemporaryDirectory() as params_path, TemporaryDirectory() as status_path:
+    with TemporaryDirectory() as params_path, TemporaryDirectory() as status_path, TemporaryDirectory() as journal_path:
       params = Params(params_path)
       status_params = Params(status_path)
       status_params.put(TOADPILOT_TORQUE_STATUS_KEY, json.dumps(summary))
+      status_params.put(TOADPILOT_STEERING_STATUS_KEY, json.dumps({
+        "schema_version": 1,
+        "published_at_unix": 110.5,
+        "route_started_at_unix": 100.0,
+        "route_id": summary["route_id"],
+        "fingerprint": "TOYOTA_CAMRY_TSS2",
+        "command_semantics": "controller_output_before_panda_or_eps",
+        "authorized": True,
+        "selected_max_torque": 1525,
+        "extra_delta_up_per_10ms": 5,
+        "command_trace": [{"t": 10.0, "output_can": 1505, "temporary_fault": False}],
+        "command_trace_dropped_samples": 0,
+        "command_trace_windows": 1,
+      }))
 
-      self.assertFalse(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=109.0))
+      self.assertFalse(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=109.0,
+                                                           journal_dir=journal_path))
       self.assertIsNone(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
-      self.assertTrue(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=111.0))
+      self.assertTrue(persist_toadpilot_torque_last_route(params, status_params, completed_at_unix=111.0,
+                                                          journal_dir=journal_path))
       saved = json.loads(params.get(TOADPILOT_TORQUE_LAST_ROUTE_KEY))
       self.assertTrue(saved["route_complete"])
       self.assertEqual(saved["completed_at_unix"], 111.0)
       self.assertEqual(saved["summary_source"], "manager_offroad_transition")
+      self.assertEqual(saved["selected_max_torque"], 1525)
+      self.assertEqual(saved["command_trace"][0]["output_can"], 1505)
+      self.assertEqual(saved["command_trace_source"], "controlsd_shared_memory_at_offroad_transition")
       self.assertTrue(valid_toadpilot_torque_summary(saved))
+      journal_files = os.listdir(journal_path)
+      self.assertEqual(len(journal_files), 1)
+      with open(os.path.join(journal_path, journal_files[0]), encoding="utf-8") as stream:
+        journaled = json.load(stream)
+      self.assertEqual(journaled["privacy"], "no_gps")
+      self.assertEqual(journaled["route_id"], summary["route_id"])
+      self.assertEqual(journaled["command_trace"][0]["output_can"], 1505)
 
   def test_torque_summary_persistence_rejects_stale_provenance_and_empty_routes(self):
     base = {
@@ -466,6 +583,36 @@ class TestToadPilotLateralAssist(unittest.TestCase):
     self.assertGreater(adaptive_outputs[-1], 0.0)
     self.assertGreater(full_outputs[-1], adaptive_outputs[-1])
 
+  def test_mild_curve_entry_gets_useful_but_bounded_assist(self):
+    config = ToadPilotConfig(enabled=True, profile="full")
+    assist = ToadPilotLateralAssist()
+
+    # Matches the scale of the logged right curve: desired acceleration was
+    # about 0.33 m/s^2 while actual response initially reached only 0.23.
+    outputs = [run_assist(
+      assist, config,
+      desired_curvature=0.0015,
+      desired_lateral_accel=0.33,
+      actual_lateral_accel=0.23,
+      v_ego=15.0,
+    ) for _ in range(30)]
+    output = outputs[-1]
+
+    self.assertGreater(output, 0.005)
+    self.assertLessEqual(output, TOADPILOT_PROFILES["full"].entry_assist +
+                         TOADPILOT_PROFILES["full"].tracking_assist)
+
+  def test_straight_road_noise_does_not_activate_curve_assist(self):
+    config = ToadPilotConfig(enabled=True, profile="full")
+    output = run_assist(
+      ToadPilotLateralAssist(), config,
+      desired_curvature=0.0002,
+      desired_lateral_accel=0.09,
+      actual_lateral_accel=0.0,
+      v_ego=15.0,
+    )
+    self.assertEqual(output, 0.0)
+
   def test_driver_input_and_steering_limits_gate_assist(self):
     config = ToadPilotConfig(enabled=True, profile="full")
     gated_inputs = (
@@ -540,6 +687,56 @@ class TestToadPilotLateralAssist(unittest.TestCase):
     assist.status_params = FailOnWrite()
     assist.publish_status(ToadPilotConfig(enabled=False, telemetry=True), active=False)
     assist.publish_status(ToadPilotConfig(enabled=True, telemetry=False), active=True)
+
+
+class TestToadPilotStraightLineSmoother(unittest.TestCase):
+  @staticmethod
+  def update(smoother, config, curvature, **overrides):
+    inputs = {
+      "v_ego": 15.0,
+      "lateral_active": True,
+      "steering_pressed": False,
+      "steer_limited": False,
+      "lane_change_active": False,
+      "blinker_active": False,
+    }
+    inputs.update(overrides)
+    return smoother.update(config, curvature, **inputs)
+
+  def test_default_on_damps_tiny_alternating_straight_requests(self):
+    config = ToadPilotConfig(profile="full")
+    smoother = ToadPilotStraightLineSmoother()
+    raw = 0.00035  # 0.079 m/s^2 at 15 m/s: inside the straight-line window.
+
+    outputs = [self.update(smoother, config, raw if index % 2 == 0 else -raw)
+               for index in range(120)]
+
+    self.assertTrue(config.straight_line_smoothing)
+    self.assertTrue(smoother.snapshot()["straight_line_smoothing_active"])
+    self.assertLess(max(abs(output) for output in outputs[-20:]), raw * 0.1)
+
+  def test_real_curve_releases_immediately_without_entry_lag(self):
+    config = ToadPilotConfig(profile="full")
+    smoother = ToadPilotStraightLineSmoother()
+    for index in range(40):
+      self.update(smoother, config, 0.0003 if index % 2 == 0 else -0.0003)
+
+    curve = 0.001
+    self.assertEqual(self.update(smoother, config, curve), curve)
+    self.assertFalse(smoother.snapshot()["straight_line_smoothing_active"])
+    self.assertEqual(smoother.snapshot()["straight_line_smoothing_reason"], "curve")
+
+  def test_toggle_and_safety_gates_preserve_raw_request(self):
+    raw = 0.0003
+    cases = (
+      (replace(ToadPilotConfig(profile="full"), straight_line_smoothing=False), {}),
+      (ToadPilotConfig(profile="full"), {"steering_pressed": True}),
+      (ToadPilotConfig(profile="full"), {"lane_change_active": True}),
+      (ToadPilotConfig(profile="full"), {"brake_pressed": True}),
+    )
+    for config, overrides in cases:
+      with self.subTest(config=config, overrides=overrides):
+        self.assertEqual(self.update(ToadPilotStraightLineSmoother(), config, raw, **overrides), raw)
 
 
 class TestToadPilotHighAuthorityObserver(unittest.TestCase):

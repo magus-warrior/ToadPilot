@@ -34,13 +34,13 @@ class TestInternalParamsPersistence(unittest.TestCase):
   def test_runtime_status_is_not_preserved(self):
     with tempfile.TemporaryDirectory() as params_path:
       params = Params(params_path)
-      for key in ("ToadPilotStatus", "ToadPilotSteeringStatus", "ToadPilotStopGoStatus",
+      for key in ("ToadPilotStatus", "ToadPilotSteeringStatus", "ToadPilotStopGoStatus", "ToadPilotNavigationStatus",
                   "ToadPilotTuneStatus", "ToadPilotTorqueStatus"):
         params.put(key, "runtime")
 
       params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
 
-      for key in ("ToadPilotStatus", "ToadPilotSteeringStatus", "ToadPilotStopGoStatus",
+      for key in ("ToadPilotStatus", "ToadPilotSteeringStatus", "ToadPilotStopGoStatus", "ToadPilotNavigationStatus",
                   "ToadPilotTuneStatus", "ToadPilotTorqueStatus"):
         self.assertIsNone(params.get(key))
 

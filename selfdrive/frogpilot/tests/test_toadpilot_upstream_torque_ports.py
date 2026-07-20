@@ -64,6 +64,8 @@ def controller_toggles(*, enabled=True, profile="adaptive", steer_kp=1.0):
     toadpilot_auto_tune=False,
     toadpilot_lane_centering_assist=True,
     toadpilot_smooth_lane_transitions=True,
+    toadpilot_straight_line_smoothing=True,
+    toadpilot_experimental_max_torque=1500,
     toadpilot_improved_stop_and_go=True,
     toadpilot_curve_assist_in_experimental=False,
     toadpilot_smart_saturation_warning=True,
@@ -143,14 +145,10 @@ class TestDelayedLateralResponse(unittest.TestCase):
 
 
 class TestTorqueResponseGates(unittest.TestCase):
-  def test_only_linear_adaptive_and_full_profiles_enable_response(self):
-    for profile in ("adaptive", "full"):
-      with self.subTest(profile=profile):
-        self.assertTrue(use_toadpilot_upstream_response(
-          ToadPilotConfig(profile=profile), True, False, False, True,
-        ))
-
-    rejected = (
+  def test_upstream_response_port_stays_disabled_for_all_profiles(self):
+    configurations = (
+      (ToadPilotConfig(profile="adaptive"), True, False, False, True),
+      (ToadPilotConfig(profile="full"), True, False, False, True),
       (ToadPilotConfig(profile="observe"), True, False, False, True),
       (ToadPilotConfig(enabled=False), True, False, False, True),
       (ToadPilotConfig(), False, False, False, True),
@@ -158,7 +156,7 @@ class TestTorqueResponseGates(unittest.TestCase):
       (ToadPilotConfig(), True, False, True, True),
       (ToadPilotConfig(), True, False, False, False),
     )
-    for args in rejected:
+    for args in configurations:
       with self.subTest(args=args):
         self.assertFalse(use_toadpilot_upstream_response(*args))
 
@@ -314,13 +312,15 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
       steerFaultPermanent=False,
       steerFaultStatusInitial=21,
     ))
-    active = estimator.toadpilot_torque_snapshot(inputs_valid=True)
+    active = estimator.toadpilot_torque_snapshot(inputs_valid=True, experimental_max_torque=1550)
     self.assertTrue(active["controller_authorized"])
     self.assertTrue(active["extension_active"])
     self.assertEqual(active["current_output_can"], -1600.0)
     self.assertEqual(active["peak_abs_output_can"], 1600.0)
     self.assertEqual(active["extended_output_samples"], 1)
     self.assertEqual(active["output_sample_semantics"], "torqued_latest_carOutput_at_20hz_not_CAN_frame_count")
+    self.assertEqual(active["selected_max_torque"], 1550)
+    self.assertEqual(active["extra_delta_up_per_10ms"], 5)
     self.assertEqual(active["controller_state"], "extended")
     self.assertEqual(active["controller_reason"], "curve_undertracking")
     self.assertEqual(active["last_extended_monotonic"], 10.0)
@@ -373,6 +373,7 @@ class TestTorqueLearnerLocationValidity(CamryControllerFixture):
     after_tail = estimator.toadpilot_torque_snapshot(inputs_valid=True)
     self.assertEqual(after_tail["extended_window_car_state_samples"], 2)
     self.assertEqual(after_tail["extended_window_peak_abs_steering_rate_deg"], 90.0)
+    self.assertEqual(after_tail["selected_max_torque"], 1550)
 
     stale = estimator.toadpilot_torque_snapshot(inputs_valid=False)
     self.assertFalse(stale["extension_active"])

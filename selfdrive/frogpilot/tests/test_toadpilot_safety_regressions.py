@@ -78,7 +78,11 @@ def toad_toggles(*, enabled=True, profile="adaptive", auto_tune=True):
     toadpilot_auto_tune=auto_tune,
     toadpilot_lane_centering_assist=True,
     toadpilot_smooth_lane_transitions=True,
+    toadpilot_straight_line_smoothing=True,
+    toadpilot_experimental_max_torque=1500,
     toadpilot_improved_stop_and_go=True,
+    toadpilot_automatic_traffic_mode=True,
+    toadpilot_map_stop_assist=True,
     toadpilot_curve_assist_in_experimental=False,
     toadpilot_smart_saturation_warning=True,
     toadpilot_telemetry=False,
@@ -117,7 +121,7 @@ def centering_config(*, profile="adaptive", experimental_opt_in=False):
   )
 
 
-class TestToadPilotConfigV4(unittest.TestCase):
+class TestToadPilotConfigV7(unittest.TestCase):
   def test_route_logger_stays_disabled_after_low_memory_failure(self):
     self.assertNotIn("loggerd", managed_processes)
 
@@ -134,13 +138,17 @@ class TestToadPilotConfigV4(unittest.TestCase):
 
     migrated = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(TOADPILOT_CONFIG_VERSION, 4)
+    self.assertEqual(TOADPILOT_CONFIG_VERSION, 7)
     self.assertEqual(migrated.version, TOADPILOT_CONFIG_VERSION)
     self.assertTrue(migrated.enabled)
     self.assertEqual(migrated.profile, "adaptive")
     self.assertTrue(migrated.lane_centering_assist)
     self.assertTrue(migrated.smooth_lane_transitions)
+    self.assertTrue(migrated.straight_line_smoothing)
+    self.assertEqual(migrated.experimental_max_torque, 1500)
     self.assertTrue(migrated.improved_stop_and_go)
+    self.assertTrue(migrated.automatic_traffic_mode)
+    self.assertTrue(migrated.map_stop_assist)
     for field in ("auto_tune", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
       self.assertEqual(getattr(migrated, field), legacy[field])
 
@@ -157,7 +165,7 @@ class TestToadPilotConfigV4(unittest.TestCase):
     malformed_cases = (
       {key: value for key, value in valid_v1.items() if key != "telemetry"},
       {**valid_v1, "unexpected": True},
-      {**valid_v1, "version": 5},
+      {**valid_v1, "version": 8},
       {**valid_v1, "version": True},
       {**valid_v1, "version": 1.0},
     )
@@ -169,6 +177,7 @@ class TestToadPilotConfigV4(unittest.TestCase):
         self.assertEqual(config.profile, "observe")
         self.assertFalse(config.lane_centering_assist)
         self.assertFalse(config.smooth_lane_transitions)
+        self.assertFalse(config.straight_line_smoothing)
         self.assertFalse(config.improved_stop_and_go)
 
   def test_lane_centering_default_is_on_but_runtime_toggle_is_strict_bool(self):
@@ -189,6 +198,17 @@ class TestToadPilotConfigV4(unittest.TestCase):
 
     base.toadpilot_smooth_lane_transitions = 1
     self.assertFalse(config_from_toggles(base).smooth_lane_transitions)
+
+  def test_straight_line_smoothing_default_is_on_but_runtime_toggle_is_strict_bool(self):
+    base = toad_toggles()
+    self.assertTrue(DEFAULT_TOADPILOT_CONFIG.straight_line_smoothing)
+    self.assertTrue(config_from_toggles(base).straight_line_smoothing)
+
+    base.toadpilot_straight_line_smoothing = 1
+    self.assertFalse(config_from_toggles(base).straight_line_smoothing)
+
+    base.toadpilot_straight_line_smoothing = False
+    self.assertFalse(config_from_toggles(base).straight_line_smoothing)
 
     base.toadpilot_smooth_lane_transitions = False
     self.assertFalse(config_from_toggles(base).smooth_lane_transitions)

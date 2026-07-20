@@ -89,7 +89,7 @@ def frogpilot_thread():
   toggles_last_updated = datetime.datetime.now()
 
   pm = messaging.PubMaster(["frogpilotPlan"])
-  sm = messaging.SubMaster(["carState", "controlsState", "deviceState", "driverMonitoringState",
+  sm = messaging.SubMaster(["carControl", "carState", "controlsState", "deviceState", "driverMonitoringState",
                             "liveLocationKalman", "managerState", "modelV2", "pandaStates", "radarState",
                             "frogpilotCarState", "frogpilotNavigation"],
                             poll="modelV2", ignore_avg_freq=["radarState"])
@@ -114,6 +114,7 @@ def frogpilot_thread():
     toggles_updated = (now - toggles_last_updated).total_seconds() <= 1
 
     if not started and started_previously:
+      frogpilot_planner.close()
       frogpilot_planner = FrogPilotPlanner()
       frogpilot_tracking = FrogPilotTracking()
 
@@ -141,8 +142,19 @@ def frogpilot_thread():
       params_memory.put_bool("IsOnroad", True)
 
     if started and sm.updated["modelV2"]:
+      navigation_log_time = sm.logMonoTime["frogpilotNavigation"]
+      navigation_age_s = (max((time.monotonic_ns() - navigation_log_time) / 1e9, 0.0)
+                          if navigation_log_time > 0 else float("inf"))
+      navigation_service_alive = bool(sm.alive["frogpilotNavigation"])
+      navigation_service_valid = bool(sm.valid["frogpilotNavigation"])
+      navigation_valid = navigation_service_valid and navigation_service_alive
       frogpilot_planner.update(sm["carState"], sm["controlsState"], sm["frogpilotCarState"], sm["frogpilotNavigation"],
-                               sm["liveLocationKalman"], sm["modelV2"], radarless_model, sm["radarState"], frogpilot_toggles)
+                               sm["liveLocationKalman"], sm["modelV2"], radarless_model, sm["radarState"], frogpilot_toggles,
+                               navigation_age_s=navigation_age_s, navigation_valid=navigation_valid,
+                               navigation_service_alive=navigation_service_alive,
+                               navigation_service_valid=navigation_service_valid,
+                               navigation_updated=bool(sm.updated["frogpilotNavigation"]),
+                               carControl=sm["carControl"])
       frogpilot_planner.publish(sm, pm, toggles_updated)
 
       frogpilot_tracking.update(sm["carState"], sm["controlsState"], sm["frogpilotCarState"])

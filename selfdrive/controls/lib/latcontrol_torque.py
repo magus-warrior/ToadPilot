@@ -127,10 +127,11 @@ def kp_independent_low_speed_error(base_error, shaped_error, kp):
 
 
 def use_toadpilot_upstream_response(config, capable, use_nnff, use_nnff_lite, response_ready):
-  # Observe/disabled retain the exact branch baseline. NNFF already has its own
-  # model-specific jerk and friction path, so do not stack this response on it.
-  return bool(capable and config.enabled and config.profile in ("adaptive", "full") and
-              not use_nnff and not use_nnff_lite and response_ready)
+  # The partial upstream 0.11.1 torque-response port is disabled after on-road
+  # validation showed degraded curve tracking on the Camry. Keep the isolated
+  # implementation available for offline comparison without activating it in
+  # any TOADPILOT profile.
+  return False
 
 
 def torque_model_data_good(model_data):
@@ -343,6 +344,10 @@ class LatControlTorque(LatControl):
       "lane_centering_confidence": None,
       "lane_centering_confirm_samples": 0,
       "lane_centering_curvature_delta": 0.0,
+      "straight_line_smoothing_active": False,
+      "straight_line_smoothing_reason": "unavailable",
+      "straight_line_raw_curvature": 0.0,
+      "straight_line_smoothed_curvature": 0.0,
     }
     self._apply_toadpilot_tune(toadpilot_config)
 

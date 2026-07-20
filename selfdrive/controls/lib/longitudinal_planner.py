@@ -15,6 +15,7 @@ from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import Longi
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC, LEAD_ACCEL_TAU
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_UNSET, CONTROL_N, get_speed_error
 from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
 A_CRUISE_MIN = -1.2
@@ -280,7 +281,11 @@ class LongitudinalPlanner:
       lead_states = [self.lead_one, self.lead_two]
       for index in range(len(lead_states)):
         if len(model_leads) > index:
-          distance_offset = max(frogpilot_toggles.increased_stopped_distance + min(10 - v_ego, 0), 0) if not sm['frogpilotCarState'].trafficMode else 0
+          normal_distance_offset = max(frogpilot_toggles.increased_stopped_distance + min(10 - v_ego, 0), 0)
+          traffic_mode_blend = (sm['frogpilotPlan'].trafficModeBlend
+                                if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else 0.0)
+          distance_offset = blend_traffic_mode_value(normal_distance_offset, 0.0,
+                                                     traffic_mode_blend)
           model_lead = model_leads[index]
           lead_states[index].update(model_lead.x[0] - distance_offset, model_lead.y[0], model_lead.v[0], model_lead.a[0], model_lead.prob)
         else:

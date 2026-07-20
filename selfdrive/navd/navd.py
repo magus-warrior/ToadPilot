@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import math
 import os
 import threading
+from dataclasses import dataclass
+from enum import IntEnum
 
 import requests
 
@@ -23,6 +26,213 @@ from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_togg
 REROUTE_DISTANCE = 25
 MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
+INTERSECTION_CONDITION_MAX_DISTANCE = 10_000.0
+INTERSECTION_CONDITION_PASSED_TOLERANCE = 2.0
+
+
+class IntersectionConditionType(IntEnum):
+  UNKNOWN = 0
+  STOP_SIGN = 1
+  TRAFFIC_SIGNAL = 2
+
+
+INTERSECTION_CONDITION_CAPNP_TYPES = {
+  IntersectionConditionType.UNKNOWN: "unknown",
+  IntersectionConditionType.STOP_SIGN: "stopSign",
+  IntersectionConditionType.TRAFFIC_SIGNAL: "trafficSignal",
+}
+
+
+@dataclass(frozen=True)
+class RouteIntersectionCondition:
+  step_index: int
+  geometry_index: int
+  condition_type: IntersectionConditionType
+  coordinate: Coordinate
+  condition_id: int
+
+
+def intersection_condition_id(condition_type: IntersectionConditionType, coordinate: Coordinate) -> int:
+  """Return an ID that remains stable when Mapbox re-slices or recomputes a route."""
+  identity = f"{int(condition_type)}:{coordinate.latitude:.7f}:{coordinate.longitude:.7f}".encode()
+  condition_id = int.from_bytes(hashlib.blake2b(identity, digest_size=8, person=b"toad-nav-stop").digest(), "big")
+  return condition_id or 1
+
+
+def extract_route_intersection_conditions(route) -> list[RouteIntersectionCondition]:
+  """Parse Mapbox conditions using geometry indexes relative to the route leg.
+
+  Mapbox nests intersections inside steps, but ``geometry_index`` is relative
+  to the start of the *leg*, not the containing step. Step geometries repeat
+  their shared boundary point, so remove that duplicate while reconstructing
+  the leg geometry used to validate indexes and recover a missing location.
+  """
+  leg_geometry_coordinates = []
+  for step in route:
+    step_coordinates = step.get("geometry", {}).get("coordinates", [])
+    if not isinstance(step_coordinates, list):
+      continue
+    start_index = 1 if leg_geometry_coordinates and step_coordinates and \
+      step_coordinates[0] == leg_geometry_coordinates[-1] else 0
+    leg_geometry_coordinates.extend(step_coordinates[start_index:])
+
+  conditions = []
+  for step_index, step in enumerate(route):
+    for intersection in step.get("intersections", []):
+      geometry_index = intersection.get("geometry_index")
+      if type(geometry_index) is not int or not 0 <= geometry_index < len(leg_geometry_coordinates):
+        continue
+
+      if intersection.get("stop_sign"):
+        condition_type = IntersectionConditionType.STOP_SIGN
+      elif intersection.get("traffic_signal"):
+        condition_type = IntersectionConditionType.TRAFFIC_SIGNAL
+      else:
+        continue
+
+      location = intersection.get("location", leg_geometry_coordinates[geometry_index])
+      if not isinstance(location, (list, tuple)) or len(location) < 2:
+        continue
+      try:
+        longitude, latitude = float(location[0]), float(location[1])
+      except (TypeError, ValueError):
+        continue
+      if not math.isfinite(latitude) or not math.isfinite(longitude):
+        continue
+
+      coordinate = Coordinate(latitude, longitude)
+      conditions.append(RouteIntersectionCondition(
+        step_index=step_index,
+        geometry_index=geometry_index,
+        condition_type=condition_type,
+        coordinate=coordinate,
+        condition_id=intersection_condition_id(condition_type, coordinate),
+      ))
+
+  return sorted(conditions, key=lambda condition: (condition.geometry_index, condition.step_index,
+                                                     condition.condition_type))
+
+
+def distance_to_geometry_index(geometry: list[Coordinate], geometry_index: int) -> float | None:
+  if not 0 <= geometry_index < len(geometry):
+    return None
+  return sum(geometry[index].distance_to(geometry[index + 1]) for index in range(geometry_index))
+
+
+def geometry_length(geometry: list[Coordinate]) -> float:
+  return distance_to_geometry_index(geometry, len(geometry) - 1) or 0.0
+
+
+def flatten_route_geometry(route_geometry: list[list[Coordinate]]) -> tuple[list[Coordinate], list[int]]:
+  """Reconstruct a leg geometry and each step's starting leg index."""
+  leg_geometry = []
+  step_start_indexes = []
+  for step_geometry in route_geometry:
+    shares_boundary = bool(leg_geometry and step_geometry and leg_geometry[-1] == step_geometry[0])
+    step_start_indexes.append(len(leg_geometry) - 1 if shares_boundary else len(leg_geometry))
+    leg_geometry.extend(step_geometry[1:] if shares_boundary else step_geometry)
+  return leg_geometry, step_start_indexes
+
+
+def projected_distance_along_geometry(geometry: list[Coordinate], position: Coordinate) -> float:
+  """Project a position onto a path and return road distance from the path start."""
+  if len(geometry) < 2:
+    return 0.0
+
+  closest_distance = math.inf
+  closest_along_geometry = 0.0
+  distance_before_segment = 0.0
+  for start, end in zip(geometry, geometry[1:]):
+    # Project in a local metric plane. Raw longitude degrees shrink with
+    # latitude and otherwise bias progress on diagonal roads.
+    longitude_scale = math.cos(math.radians((start.latitude + end.latitude + position.latitude) / 3.0))
+    segment_x = (end.longitude - start.longitude) * longitude_scale
+    segment_y = end.latitude - start.latitude
+    segment_length_squared = segment_x ** 2 + segment_y ** 2
+    if segment_length_squared == 0:
+      continue
+
+    position_x = (position.longitude - start.longitude) * longitude_scale
+    position_y = position.latitude - start.latitude
+    projection_scale = max(0.0, min((position_x * segment_x + position_y * segment_y) /
+                                    segment_length_squared, 1.0))
+    projection = Coordinate(
+      start.latitude + (end.latitude - start.latitude) * projection_scale,
+      start.longitude + (end.longitude - start.longitude) * projection_scale,
+    )
+    distance_to_path = projection.distance_to(position)
+    if distance_to_path < closest_distance:
+      closest_distance = distance_to_path
+      closest_along_geometry = distance_before_segment + start.distance_to(projection)
+
+    distance_before_segment += start.distance_to(end)
+
+  return closest_along_geometry
+
+
+def next_intersection_condition_for_step(conditions: list[RouteIntersectionCondition], step_index: int,
+                                         geometry: list[Coordinate], along_geometry: float) -> tuple[float, RouteIntersectionCondition] | None:
+  """Find the next condition and its road distance within the current route step."""
+  if not math.isfinite(along_geometry):
+    return None
+
+  candidates = []
+  for condition in conditions:
+    if condition.step_index != step_index:
+      continue
+    # The Mapbox index is leg-global. The intersection location is the safe
+    # way to locate it when this helper only has one step's geometry.
+    condition_along_geometry = projected_distance_along_geometry(geometry, condition.coordinate)
+
+    remaining_distance = condition_along_geometry - along_geometry
+    if (remaining_distance < -INTERSECTION_CONDITION_PASSED_TOLERANCE or
+        remaining_distance > INTERSECTION_CONDITION_MAX_DISTANCE):
+      continue
+    # Keep the small signed distance after the stop line. Consumers use this
+    # to positively distinguish a passed condition from a transient absence.
+    candidates.append((remaining_distance, condition))
+
+  if not candidates:
+    return None
+  return min(candidates, key=lambda candidate: (candidate[0], candidate[1].geometry_index))
+
+
+def next_intersection_condition_on_route(conditions: list[RouteIntersectionCondition], step_index: int,
+                                         route_geometry: list[list[Coordinate]],
+                                         along_geometry: float) -> tuple[float, RouteIntersectionCondition] | None:
+  """Find the next condition using Mapbox's leg-global geometry indexes."""
+  if not math.isfinite(along_geometry) or not 0 <= step_index < len(route_geometry):
+    return None
+
+  leg_geometry, step_start_indexes = flatten_route_geometry(route_geometry)
+  current_step_start_distance = distance_to_geometry_index(leg_geometry, step_start_indexes[step_index])
+  if current_step_start_distance is None:
+    return None
+  current_route_distance = current_step_start_distance + along_geometry
+
+  candidates = []
+  for condition in conditions:
+    if condition.step_index < step_index or condition.step_index >= len(route_geometry):
+      continue
+
+    condition_route_distance = distance_to_geometry_index(leg_geometry, condition.geometry_index)
+    if condition_route_distance is None:
+      continue
+
+    remaining_distance = condition_route_distance - current_route_distance
+    if remaining_distance < -INTERSECTION_CONDITION_PASSED_TOLERANCE:
+      continue
+
+    if remaining_distance > INTERSECTION_CONDITION_MAX_DISTANCE:
+      continue
+    # Keep the small signed distance after the stop line. Consumers use this
+    # to positively distinguish a passed condition from a transient absence.
+    candidates.append((remaining_distance, condition))
+
+  if not candidates:
+    return None
+  return min(candidates, key=lambda candidate: (candidate[0], candidate[1].geometry_index,
+                                                  candidate[1].step_index))
 
 
 class RouteEngine:
@@ -58,7 +268,11 @@ class RouteEngine:
       self.mapbox_token = os.environ["MAPBOX_TOKEN"]
       self.mapbox_host = "https://api.mapbox.com"
     else:
-      self.mapbox_token = self.params.get("MapboxSecretKey", encoding='utf8')
+      # A public token is sufficient for Mapbox Directions. Prefer an existing
+      # secret token for compatibility, but allow the Fleet Manager UI's single
+      # public-token setup as well.
+      self.mapbox_token = (self.params.get("MapboxSecretKey", encoding='utf8') or
+                           self.params.get("MapboxPublicKey", encoding='utf8'))
       self.mapbox_host = "https://api.mapbox.com"
 
     # FrogPilot variables
@@ -69,8 +283,7 @@ class RouteEngine:
 
     self.nav_speed_limit = 0
 
-    self.stop_coord = []
-    self.stop_signal = []
+    self.route_intersection_conditions = []
 
   def update(self):
     self.sm.update(0)
@@ -140,6 +353,9 @@ class RouteEngine:
       lang = lang.replace('main_', '')
 
     token = self.mapbox_token
+    if "MAPBOX_TOKEN" not in os.environ:
+      token = (self.params.get("MapboxSecretKey", encoding='utf8') or
+               self.params.get("MapboxPublicKey", encoding='utf8'))
     if token is None:
       token = self.api.get_token()
 
@@ -217,17 +433,7 @@ class RouteEngine:
       if len(r['routes']):
         self.route = r['routes'][0]['legs'][0]['steps']
         self.route_geometry = []
-
-        # Iterate through the steps in self.route to find "stop_sign" and "traffic_light"
-        if self.frogpilot_toggles.conditional_navigation_intersections:
-          self.stop_signal = []
-          self.stop_coord = []
-
-          for step in self.route:
-            for intersection in step["intersections"]:
-              if "stop_sign" in intersection or "traffic_signal" in intersection:
-                self.stop_signal.append(intersection["geometry_index"])
-                self.stop_coord.append(Coordinate.from_mapbox_tuple(intersection["location"]))
+        self.route_intersection_conditions = extract_route_intersection_conditions(self.route)
 
         maxspeed_idx = 0
         maxspeeds = r['routes'][0]['legs'][0]['annotation']['maxspeed']
@@ -278,8 +484,9 @@ class RouteEngine:
       self.pm.send('frogpilotNavigation', fp_msg)
       return
 
-    step = self.route[self.step_idx]
-    geometry = self.route_geometry[self.step_idx]
+    instruction_step_index = self.step_idx
+    step = self.route[instruction_step_index]
+    geometry = self.route_geometry[instruction_step_index]
     along_geometry = distance_along_geometry(geometry, self.last_position)
     distance_to_maneuver_along_geometry = step['distance'] - along_geometry
 
@@ -383,21 +590,24 @@ class RouteEngine:
           self.params.remove("NavDestination")
           self.clear_route()
 
+    condition_along_geometry = projected_distance_along_geometry(geometry, self.last_position)
+    next_condition = next_intersection_condition_on_route(self.route_intersection_conditions, instruction_step_index,
+                                                         self.route_geometry, condition_along_geometry)
+    # Automatic map constraints need a live GPS fix, not only a valid
+    # dead-reckoned localizer position. Smooth dead-reckoning drift otherwise
+    # looks like fresh navigation data to downstream age checks.
+    condition_valid = next_condition is not None and self.localizer_valid and self.gps_ok
+    distance_to_condition = next_condition[0] if condition_valid else 0.0
+
     if self.frogpilot_toggles.conditional_navigation:
       v_ego = self.sm['carState'].vEgo
       seconds_to_stop = interp(v_ego, [0, 22.5, 45], [5, 10, 10])
 
-      closest_condition_indices = [idx for idx in self.stop_signal if idx >= closest_idx]
-      if closest_condition_indices:
-        closest_condition_index = min(closest_condition_indices, key=lambda idx: abs(closest_idx - idx))
-        index = self.stop_signal.index(closest_condition_index)
+      self.approaching_intersection = (self.frogpilot_toggles.conditional_navigation_intersections and condition_valid and
+                                       distance_to_condition < max((seconds_to_stop * v_ego), 25))
 
-        distance_to_condition = self.last_position.distance_to(self.stop_coord[index])
-        self.approaching_intersection = self.frogpilot_toggles.conditional_navigation_intersections and distance_to_condition < max((seconds_to_stop * v_ego), 25)
-      else:
-        self.approaching_intersection = False
-
-      self.approaching_turn = self.frogpilot_toggles.conditional_navigation_turns and distance_to_maneuver_along_geometry < max((seconds_to_stop * v_ego), 25)
+      self.approaching_turn = (self.frogpilot_toggles.conditional_navigation_turns and
+                               distance_to_maneuver_along_geometry < max((seconds_to_stop * v_ego), 25))
     else:
       self.approaching_intersection = False
       self.approaching_turn = False
@@ -405,6 +615,12 @@ class RouteEngine:
     fp_msg.frogpilotNavigation.approachingIntersection = self.approaching_intersection
     fp_msg.frogpilotNavigation.approachingTurn = self.approaching_turn
     fp_msg.frogpilotNavigation.navigationSpeedLimit = self.nav_speed_limit
+    fp_msg.frogpilotNavigation.intersectionConditionValid = condition_valid
+    if condition_valid:
+      condition = next_condition[1]
+      fp_msg.frogpilotNavigation.intersectionConditionType = INTERSECTION_CONDITION_CAPNP_TYPES[condition.condition_type]
+      fp_msg.frogpilotNavigation.intersectionConditionDistance = distance_to_condition
+      fp_msg.frogpilotNavigation.intersectionConditionId = condition.condition_id
 
     self.pm.send('frogpilotNavigation', fp_msg)
 
@@ -422,6 +638,7 @@ class RouteEngine:
   def clear_route(self):
     self.route = None
     self.route_geometry = None
+    self.route_intersection_conditions = []
     self.step_idx = None
     self.nav_destination = None
 

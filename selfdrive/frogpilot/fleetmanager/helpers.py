@@ -58,6 +58,7 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
                                                                         parse_start_accel_ramp,
                                                                         validate_start_accel_ramp)
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES,
+                                                     TOADPILOT_NAVIGATION_STATUS_KEY,
                                                      TOADPILOT_RESET_TUNE_KEY,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
                                                      TOADPILOT_STEERING_STATUS_KEY,
@@ -272,9 +273,25 @@ def get_public_token():
   token = params.get("MapboxPublicKey", encoding='utf8')
   return token.strip() if token and token.startswith("pk") else None
 
+def set_public_token(token):
+  if not isinstance(token, str):
+    raise ValueError("Mapbox token must be text.")
+  token = token.strip()
+  if not token.startswith("pk."):
+    raise ValueError("Enter a Mapbox public token beginning with 'pk.'.")
+  params.put("MapboxPublicKey", token)
+
 def get_secret_token():
   token = params.get("MapboxSecretKey", encoding='utf8')
   return token.strip() if token and token.startswith("sk") else None
+
+def set_secret_token(token):
+  if not isinstance(token, str):
+    raise ValueError("Mapbox secret token must be text.")
+  token = token.strip()
+  if not token.startswith("sk."):
+    raise ValueError("Enter a Mapbox secret token beginning with 'sk.'.")
+  params.put("MapboxSecretKey", token)
 
 def get_search_input():
   return params.get_int("SearchInput")
@@ -833,6 +850,7 @@ def get_toadpilot_state():
     "steering_status": _get_toadpilot_status(TOADPILOT_STEERING_STATUS_KEY),
     "stop_go_status": _get_toadpilot_status(TOADPILOT_STOP_GO_STATUS_KEY),
     "stop_go_last_route": _get_toadpilot_last_stop_go_route(),
+    "navigation_status": _get_toadpilot_status(TOADPILOT_NAVIGATION_STATUS_KEY),
     "tune_status": _get_toadpilot_status(TOADPILOT_TUNE_STATUS_KEY),
     "torque_status": _get_toadpilot_status(TOADPILOT_TORQUE_STATUS_KEY),
     "torque_last_route": _get_toadpilot_last_torque_route(),
@@ -867,8 +885,9 @@ def set_toadpilot_config(request_data):
     _require_toadpilot_offroad()
 
   required_fields = {
-    "version", "enabled", "profile", "auto_tune", "lane_centering_assist", "smooth_lane_transitions",
-    "improved_stop_and_go", "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
+    "version", "enabled", "profile", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "experimental_max_torque",
+    "improved_stop_and_go", "automatic_traffic_mode", "map_stop_assist",
+    "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
   }
   missing_fields = required_fields - set(request_data)
   if missing_fields:
@@ -885,6 +904,7 @@ def set_toadpilot_config(request_data):
     params_memory.remove(TOADPILOT_STATUS_KEY)
     params_memory.remove(TOADPILOT_STEERING_STATUS_KEY)
     params_memory.remove(TOADPILOT_STOP_GO_STATUS_KEY)
+    params_memory.remove(TOADPILOT_NAVIGATION_STATUS_KEY)
     params_memory.remove(TOADPILOT_TUNE_STATUS_KEY)
   update_frogpilot_toggles()
   return get_toadpilot_state()

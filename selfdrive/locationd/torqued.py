@@ -150,6 +150,7 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_extended_window_permanent_fault_seen = False
     self.toadpilot_temporary_fault_statuses = set()
     self.toadpilot_extended_window_temporary_fault_statuses = set()
+    self.toadpilot_selected_max_torque = TOYOTA_STEER_COMMAND_SCALE
     self.offline_latAccelFactor = 0.0
     self.resets = 0.0
     self.use_params = CP.carName in ALLOWED_CARS and self.is_torque_tuning
@@ -327,8 +328,10 @@ class TorqueEstimator(ParameterEstimator):
     self.toadpilot_controller_state_samples[state] = self.toadpilot_controller_state_samples.get(state, 0) + 1
     self.toadpilot_controller_reason_samples[reason] = self.toadpilot_controller_reason_samples.get(reason, 0) + 1
 
-  def toadpilot_torque_snapshot(self, inputs_valid=True, route_id=None):
+  def toadpilot_torque_snapshot(self, inputs_valid=True, route_id=None, experimental_max_torque=None):
     inputs_valid = bool(inputs_valid)
+    if type(experimental_max_torque) is int:
+      self.toadpilot_selected_max_torque = experimental_max_torque
     if isinstance(route_id, bytes):
       try:
         route_id = route_id.decode("utf-8")
@@ -354,6 +357,8 @@ class TorqueEstimator(ParameterEstimator):
       "extended_metrics_scope": "car_state_samples_during_extension_and_0.5s_post_extension_tail",
       "extended_window_tail_seconds": TOADPILOT_EXTENDED_DIAGNOSTIC_TAIL_SECONDS,
       "controller_authorized": bool(self.toadpilot_high_torque_authorized),
+      "selected_max_torque": int(self.toadpilot_selected_max_torque),
+      "extra_delta_up_per_10ms": 5,
       "inputs_valid": inputs_valid,
       "output_valid": bool(self.toadpilot_torque_output_valid),
       "extension_active": bool(inputs_valid and self.toadpilot_torque_output_valid and
@@ -599,6 +604,7 @@ def main(demo=False):
     if sm.frame % 20 == 0 and estimator.toadpilot_high_torque_authorized:
       torque_snapshot = estimator.toadpilot_torque_snapshot(
         inputs_valid=sm.all_checks(), route_id=params.get("CurrentRoute", encoding="utf-8"),
+        experimental_max_torque=getattr(frogpilot_toggles, "toadpilot_experimental_max_torque", None),
       )
       status_params.put_nonblocking(TOADPILOT_TORQUE_STATUS_KEY,
                                     json.dumps(torque_snapshot, sort_keys=True, separators=(",", ":")))

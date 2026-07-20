@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import time
+
 from cereal import car, custom
 from openpilot.selfdrive.controls.lib.drive_helpers import CRUISE_LONG_PRESS
 from openpilot.selfdrive.controls.lib.events import ET, EventName
@@ -7,6 +9,46 @@ from openpilot.selfdrive.frogpilot.frogpilot_variables import NON_DRIVING_GEARS,
 
 ButtonType = car.CarState.ButtonEvent.Type
 FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
+
+# frogpilotPlan normally arrives at 20 Hz. Ten missed periods matches
+# SubMaster's service-alive timeout while independently rejecting an old packet.
+AUTO_TRAFFIC_PLAN_MAX_AGE_S = 0.5
+
+
+def get_auto_traffic_recommendation(sm, now_ns=None):
+  """Return a fresh automatic recommendation, failing inactive for live data.
+
+  Lightweight dict fixtures do not expose SubMaster freshness metadata, so they
+  retain the historical direct-message behavior used by unit tests and reusers.
+  A real SubMaster exposes all three dictionaries and must pass every check.
+  """
+  try:
+    recommendation = bool(sm["frogpilotPlan"].autoTrafficMode)
+  except (AttributeError, KeyError, TypeError):
+    return False
+
+  alive = getattr(sm, "alive", None)
+  valid = getattr(sm, "valid", None)
+  log_mono_times = getattr(sm, "logMonoTime", None)
+  if alive is None and valid is None and log_mono_times is None:
+    return recommendation
+
+  try:
+    if not alive["frogpilotPlan"] or not valid["frogpilotPlan"]:
+      return False
+    log_mono_time = log_mono_times["frogpilotPlan"]
+  except (KeyError, TypeError):
+    return False
+
+  if isinstance(log_mono_time, bool) or not isinstance(log_mono_time, (int, float)) or log_mono_time <= 0:
+    return False
+
+  current_time_ns = time.monotonic_ns() if now_ns is None else now_ns
+  if isinstance(current_time_ns, bool) or not isinstance(current_time_ns, (int, float)):
+    return False
+  age_s = (current_time_ns - log_mono_time) / 1e9
+  return recommendation and 0.0 <= age_s <= AUTO_TRAFFIC_PLAN_MAX_AGE_S
+
 
 def handle_experimental_mode(conditional_experimental_mode):
   if conditional_experimental_mode:
@@ -32,8 +74,26 @@ class FrogPilotCard:
     self.pause_longitudinal = False
     self.prev_distance_button = False
     self.traffic_mode = False
+    self.traffic_mode_override = 0
 
     self.gap_counter = 0
+
+  def toggle_traffic_mode(self, sm):
+    if getattr(self.car.frogpilot_toggles, "toadpilot_automatic_traffic_mode", False):
+      auto_active = get_auto_traffic_recommendation(sm)
+      if self.traffic_mode_override == 0:
+        self.traffic_mode_override = -1 if auto_active else 1
+      else:
+        self.traffic_mode_override = 0
+    else:
+      self.traffic_mode = not self.traffic_mode
+
+  def get_traffic_mode(self, sm):
+    if getattr(self.car.frogpilot_toggles, "toadpilot_automatic_traffic_mode", False):
+      auto_traffic_mode = get_auto_traffic_recommendation(sm)
+      return self.traffic_mode_override > 0 or (self.traffic_mode_override == 0 and auto_traffic_mode)
+    self.traffic_mode_override = 0
+    return self.traffic_mode
 
   def update_distance_button(self, sm):
     if self.car.frogpilot_toggles.experimental_mode_via_distance and sm["carControl"].longActive:
@@ -45,7 +105,7 @@ class FrogPilotCard:
     elif self.car.frogpilot_toggles.pause_longitudinal_via_distance:
       self.pause_longitudinal = not self.pause_longitudinal
     elif self.car.frogpilot_toggles.traffic_mode_via_distance:
-      self.traffic_mode = not self.traffic_mode
+      self.toggle_traffic_mode(sm)
 
   def update_distance_button_long(self, sm):
     if self.car.frogpilot_toggles.experimental_mode_via_distance_long and sm["carControl"].longActive:
@@ -57,7 +117,7 @@ class FrogPilotCard:
     elif self.car.frogpilot_toggles.pause_longitudinal_via_distance_long:
       self.pause_longitudinal = not self.pause_longitudinal
     elif self.car.frogpilot_toggles.traffic_mode_via_distance_long:
-      self.traffic_mode = not self.traffic_mode
+      self.toggle_traffic_mode(sm)
 
   def update_distance_button_very_long(self, sm):
     self.update_distance_button_long(sm)
@@ -71,7 +131,7 @@ class FrogPilotCard:
     elif self.car.frogpilot_toggles.pause_longitudinal_via_distance_very_long:
       self.pause_longitudinal = not self.pause_longitudinal
     elif self.car.frogpilot_toggles.traffic_mode_via_distance_very_long:
-      self.traffic_mode = not self.traffic_mode
+      self.toggle_traffic_mode(sm)
 
   def update_lkas_button(self, sm):
     if self.car.frogpilot_toggles.experimental_mode_via_lkas and sm["carControl"].longActive:
@@ -83,7 +143,7 @@ class FrogPilotCard:
     elif self.car.frogpilot_toggles.pause_longitudinal_via_lkas:
       self.pause_longitudinal = not self.pause_longitudinal
     elif self.car.frogpilot_toggles.traffic_mode_via_lkas:
-      self.traffic_mode = not self.traffic_mode
+      self.toggle_traffic_mode(sm)
 
   def update(self, carState, frogpilotCarState, sm):
     self.always_on_lateral_enabled = self.car.frogpilot_toggles.always_on_lateral_set
@@ -136,6 +196,7 @@ class FrogPilotCard:
     frogpilotCarState.forceCoast = self.force_coast
     frogpilotCarState.pauseLateral = self.pause_lateral
     frogpilotCarState.pauseLongitudinal = self.pause_longitudinal
-    frogpilotCarState.trafficMode = self.traffic_mode
+    frogpilotCarState.trafficMode = self.get_traffic_mode(sm)
+    frogpilotCarState.trafficModeOverride = self.traffic_mode_override
 
     return frogpilotCarState

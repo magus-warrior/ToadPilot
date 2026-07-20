@@ -21,10 +21,12 @@ from openpilot.selfdrive.car.toyota.carcontroller import (TOADPILOT_HIGH_TORQUE_
                                                          TOADPILOT_STOP_RELEASE_WINDUP_LIMIT,
                                                          CarController,
                                                          actual_curvature_from_angular_velocity,
+                                                         configured_high_torque_cap,
                                                          high_torque_headroom_scale,
                                                          high_torque_runtime_allowed,
                                                          high_torque_runtime_reason,
                                                          high_torque_tracking_shortfall,
+                                                         limit_extra_torque_rise,
                                                          steer_torque_target,
                                                          update_high_torque_authority)
 from openpilot.selfdrive.car.toyota.interface import CarInterface
@@ -98,6 +100,24 @@ class TestToadPilotHighTorqueController(unittest.TestCase):
     self.assertEqual(high_torque_headroom_scale(TOADPILOT_HIGH_TORQUE_MAX_STEERING_RATE, 0.0), 0.0)
     self.assertEqual(high_torque_headroom_scale(TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE,
                                                 TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA), 0.0)
+
+  def test_selected_cap_is_bounded_and_malformed_values_fail_to_stock(self):
+    params = controller_params()
+    for configured in (1500, 1525, 1550, 1700):
+      with self.subTest(configured=configured):
+        self.assertEqual(configured_high_torque_cap(configured, params), configured)
+        self.assertEqual(steer_torque_target(1.0, params, True, max_torque=configured), configured)
+
+    for malformed in (None, True, 1499, 1510, 1701, 1550.0, "1550"):
+      with self.subTest(malformed=malformed):
+        self.assertEqual(configured_high_torque_cap(malformed, params), TOYOTA_STEER_COMMAND_SCALE)
+
+  def test_extra_rise_is_five_per_frame_without_slowing_stock_or_release(self):
+    self.assertEqual(limit_extra_torque_rise(1700, 1500, 1500), 1505)
+    self.assertEqual(limit_extra_torque_rise(1700, 1505, 1500), 1510)
+    self.assertEqual(limit_extra_torque_rise(-1700, -1550, 1500), -1555)
+    self.assertEqual(limit_extra_torque_rise(1490, 1400, 1500), 1490)
+    self.assertEqual(limit_extra_torque_rise(1500, 1560, 1500), 1500)
 
   def test_saturation_arming_is_continuous_with_release_hysteresis(self):
     direction = frames = 0
@@ -238,6 +258,7 @@ class TestToadPilotHighTorqueControllerSequence(unittest.TestCase):
       unlock_doors=False,
       reverse_cruise_increase=False,
       toadpilot_improved_stop_and_go=True,
+      toadpilot_experimental_max_torque=1700,
     )
 
   def tearDown(self):
@@ -272,6 +293,23 @@ class TestToadPilotHighTorqueControllerSequence(unittest.TestCase):
       self.assertFalse(self.controller.high_torque_armed)
       self.assertEqual(self.controller.high_torque_saturation_frames, 0)
     self.assertLessEqual(abs(output.steerOutputCan), TOYOTA_STEER_COMMAND_SCALE)
+
+  def test_selected_cap_is_frozen_and_extra_command_uses_slow_rise(self):
+    self.toggles.toadpilot_experimental_max_torque = 1550
+    outputs = []
+    for frame in range(180):
+      if frame == 1:
+        # A live toggle refresh cannot raise authority after initialization.
+        self.toggles.toadpilot_experimental_max_torque = 1700
+      outputs.append(self.update())
+
+    self.assertEqual(self.controller.toadpilot_experimental_max_torque, 1550)
+    self.assertEqual(max(abs(output.steerOutputCan) for output in outputs), 1550)
+    extra_outputs = [output for output in outputs if abs(output.steerOutputCan) > TOYOTA_STEER_COMMAND_SCALE]
+    extra = [abs(output.steerOutputCan) for output in extra_outputs]
+    self.assertGreater(len(extra), 1)
+    self.assertEqual(extra[:3], [1505, 1510, 1515])
+    self.assertEqual(abs(extra_outputs[0].toadPilotHighTorqueTargetCan), 1550)
 
   def test_full_ceiling_unwinds_at_the_unchanged_rate_after_a_runtime_blocker(self):
     self.controller.last_steer = -TOADPILOT_HIGH_TORQUE_MAX

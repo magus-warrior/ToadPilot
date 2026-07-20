@@ -15,6 +15,7 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.common.simple_kalman import KF1D
 
+from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
 from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_toggles
 
 # Default lead acceleration decay set to 50% at 1s
@@ -182,7 +183,7 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
 
 def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
              model_v_ego: float, model_data: capnp._DynamicStructReader, standstill: bool,
-             frogpilot_toggles: SimpleNamespace, frogpilotCarState: capnp._DynamicStructReader,
+             frogpilot_toggles: SimpleNamespace, traffic_mode_blend: float,
              low_speed_override: bool = True) -> dict[str, Any]:
   # Determine leads, this is where the essential logic happens
   if len(tracks) > 0 and ready and lead_msg.prob > frogpilot_toggles.lead_detection_probability:
@@ -213,7 +214,8 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
         lead_dict['vLead'] = lead_dict['vLeadK']
 
   if 'dRel' in lead_dict:
-    lead_dict['dRel'] -= frogpilot_toggles.increased_stopped_distance if not frogpilotCarState.trafficMode else 0
+    lead_dict['dRel'] -= blend_traffic_mode_value(frogpilot_toggles.increased_stopped_distance, 0.0,
+                                                 traffic_mode_blend)
 
   return lead_dict
 
@@ -304,8 +306,10 @@ class RadarD:
       model_v_ego = self.v_ego
     leads_v3 = sm['modelV2'].leadsV3
     if len(leads_v3) > 1:
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, sm['frogpilotCarState'], low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, sm['frogpilotCarState'], low_speed_override=False)
+      traffic_mode_blend = (sm['frogpilotPlan'].trafficModeBlend
+                            if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else 0.0)
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, traffic_mode_blend, low_speed_override=True)
+      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, traffic_mode_blend, low_speed_override=False)
 
     if self.frogpilot_toggles.adjacent_lead_tracking and self.ready:
       self.radar_state.leadLeft = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=True)

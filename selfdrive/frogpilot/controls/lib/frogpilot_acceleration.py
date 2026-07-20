@@ -3,6 +3,7 @@ import numpy as np
 
 from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, get_max_accel
 
+from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
 from openpilot.selfdrive.frogpilot.frogpilot_variables import CITY_SPEED_LIMIT
 
 A_CRUISE_MIN_ECO =   A_CRUISE_MIN / 2
@@ -43,31 +44,41 @@ class FrogPilotAcceleration:
     eco_gear = frogpilotCarState.ecoGear
     sport_gear = frogpilotCarState.sportGear
 
-    if frogpilotCarState.trafficMode:
-      self.max_accel = get_max_accel(v_ego)
-    elif frogpilot_toggles.map_acceleration and (eco_gear or sport_gear):
+    if frogpilot_toggles.map_acceleration and (eco_gear or sport_gear):
       if eco_gear:
-        self.max_accel = get_max_accel_eco(v_ego)
+        normal_max_accel = get_max_accel_eco(v_ego)
       else:
         if frogpilot_toggles.sport_plus:
-          self.max_accel = get_max_accel_sport_plus(v_ego)
+          normal_max_accel = get_max_accel_sport_plus(v_ego)
         else:
-          self.max_accel = get_max_accel_sport(v_ego)
+          normal_max_accel = get_max_accel_sport(v_ego)
     else:
       if frogpilot_toggles.acceleration_profile == 1:
-        self.max_accel = get_max_accel_eco(v_ego)
+        normal_max_accel = get_max_accel_eco(v_ego)
       elif frogpilot_toggles.acceleration_profile == 2:
-        self.max_accel = get_max_accel_sport(v_ego)
+        normal_max_accel = get_max_accel_sport(v_ego)
       elif frogpilot_toggles.sport_plus:
-        self.max_accel = get_max_accel_sport_plus(v_ego)
+        normal_max_accel = get_max_accel_sport_plus(v_ego)
       else:
-        self.max_accel = get_max_accel(v_ego)
+        normal_max_accel = get_max_accel(v_ego)
+
+    traffic_max_accel = get_max_accel(v_ego)
 
     if frogpilot_toggles.human_acceleration:
-      if self.frogpilot_planner.frogpilot_following.following_lead and not frogpilotCarState.trafficMode:
-        self.max_accel = float(np.clip(self.frogpilot_planner.lead_one.aLeadK, self.max_accel, get_max_allowed_accel(v_ego)))
-      self.max_accel = min(get_max_accel_low_speeds(self.max_accel, self.frogpilot_planner.v_cruise), self.max_accel)
-      self.max_accel = min(get_max_accel_ramp_off(self.max_accel, self.frogpilot_planner.v_cruise, v_ego), self.max_accel)
+      if self.frogpilot_planner.frogpilot_following.following_lead:
+        normal_max_accel = float(np.clip(self.frogpilot_planner.lead_one.aLeadK, normal_max_accel,
+                                         get_max_allowed_accel(v_ego)))
+      normal_max_accel = min(get_max_accel_low_speeds(normal_max_accel, self.frogpilot_planner.v_cruise),
+                             normal_max_accel)
+      normal_max_accel = min(get_max_accel_ramp_off(normal_max_accel, self.frogpilot_planner.v_cruise, v_ego),
+                             normal_max_accel)
+      traffic_max_accel = min(get_max_accel_low_speeds(traffic_max_accel, self.frogpilot_planner.v_cruise),
+                              traffic_max_accel)
+      traffic_max_accel = min(get_max_accel_ramp_off(traffic_max_accel, self.frogpilot_planner.v_cruise, v_ego),
+                              traffic_max_accel)
+
+    self.max_accel = blend_traffic_mode_value(normal_max_accel, traffic_max_accel,
+                                              self.frogpilot_planner.frogpilot_following.traffic_mode_blend)
 
     if frogpilotCarState.forceCoast:
       self.min_accel = A_CRUISE_MIN_ECO

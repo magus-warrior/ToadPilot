@@ -65,6 +65,11 @@ TOADPILOT_HIGH_TORQUE_RAPID_RISE_MIN_RATE = 45.0
 TOADPILOT_HIGH_TORQUE_RAPID_RISE_DELTA = 20.0
 TOADPILOT_HIGH_TORQUE_RATE_HISTORY_FRAMES = 10  # 100 ms at 100 Hz
 TOADPILOT_HIGH_TORQUE_FAULT_COOLDOWN_FRAMES = 100  # extra authority only; stock steering remains available
+# The first drive reached 1560 in about 40 ms and immediately coincided with
+# EPS state 25. Keep Toyota's stock 15-unit limit through 1500, then approach
+# experimental authority more gradually so peak and rise can be separated.
+TOADPILOT_HIGH_TORQUE_EXTRA_DELTA_UP = 5
+TOADPILOT_HIGH_TORQUE_CONFIG_STEP = 25
 
 # LTA limits
 # EPS ignores commands above this angle and causes PCS to fault
@@ -226,23 +231,45 @@ def high_torque_headroom_scale(steering_rate_deg, steering_rate_rise):
                       [1.0, 0.0]))
 
 
-def steer_torque_target(requested_steer, params, high_torque_armed, headroom_scale=1.0):
+def configured_high_torque_cap(value, params):
+  """Fail closed to stock for malformed or unauthorized runtime settings."""
+  if not params.TOADPILOT_HIGH_TORQUE or type(value) is not int:
+    return params.STEER_COMMAND_SCALE
+  if not params.STEER_COMMAND_SCALE <= value <= params.STEER_MAX:
+    return params.STEER_COMMAND_SCALE
+  if (value - params.STEER_COMMAND_SCALE) % TOADPILOT_HIGH_TORQUE_CONFIG_STEP != 0:
+    return params.STEER_COMMAND_SCALE
+  return value
+
+
+def limit_extra_torque_rise(target, last, stock_max, extra_delta_up=TOADPILOT_HIGH_TORQUE_EXTRA_DELTA_UP):
+  """Slow only increasing magnitude above stock; release remains unchanged."""
+  target = int(target)
+  last = int(last)
+  if target == 0 or target * last < 0 or abs(target) <= stock_max or abs(target) <= abs(last):
+    return target
+  allowed_magnitude = stock_max + max(0, abs(last) - stock_max) + extra_delta_up
+  return (1 if target > 0 else -1) * min(abs(target), allowed_magnitude)
+
+
+def steer_torque_target(requested_steer, params, high_torque_armed, headroom_scale=1.0, max_torque=None):
   """Preserve stock scaling, then add proportional headroom once armed."""
   requested_steer = float(clip(requested_steer, -1.0, 1.0))
+  max_torque = params.STEER_MAX if max_torque is None else configured_high_torque_cap(max_torque, params)
   target = int(round(requested_steer * params.STEER_COMMAND_SCALE))
-  if params.TOADPILOT_HIGH_TORQUE and high_torque_armed and \
+  if params.TOADPILOT_HIGH_TORQUE and max_torque > params.STEER_COMMAND_SCALE and high_torque_armed and \
       abs(requested_steer) > TOADPILOT_HIGH_TORQUE_MAPPING_START:
     direction = 1 if requested_steer > 0.0 else -1
     stock_mapping_start = TOADPILOT_HIGH_TORQUE_MAPPING_START * params.STEER_COMMAND_SCALE
     target_magnitude = interp(
       abs(requested_steer), [TOADPILOT_HIGH_TORQUE_MAPPING_START, 1.0],
-      [stock_mapping_start, params.STEER_MAX],
+      [stock_mapping_start, max_torque],
     )
     stock_target = requested_steer * params.STEER_COMMAND_SCALE
     scaled_magnitude = abs(stock_target) + clip(float(headroom_scale), 0.0, 1.0) * \
       (target_magnitude - abs(stock_target))
     target = int(round(direction * scaled_magnitude))
-  return int(clip(target, -params.STEER_MAX, params.STEER_MAX))
+  return int(clip(target, -max_torque, max_torque))
 
 
 def update_standstill_request(standstill_req, *, no_stop_timer, hybrid, gas_interceptor, sng_hack,
@@ -309,6 +336,9 @@ class CarController(CarControllerBase):
     self.high_torque_fault_cooldown_frames = 0
     self.high_torque_status_state = "stock"
     self.high_torque_status_reason = "initializing"
+    # Freeze the off-road selection for this controller lifetime. FrogPilot
+    # toggle refreshes cannot raise the cap during a drive.
+    self.toadpilot_experimental_max_torque = None
 
     # *** start long control state ***
     self.long_pid = get_long_tune(self.CP, self.params)
@@ -351,6 +381,11 @@ class CarController(CarControllerBase):
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
     lat_active = CC.latActive and abs(CS.out.steeringTorque) < MAX_USER_TORQUE
+    if self.toadpilot_experimental_max_torque is None:
+      self.toadpilot_experimental_max_torque = configured_high_torque_cap(
+        getattr(frogpilot_toggles, "toadpilot_experimental_max_torque", None), self.params,
+      )
+    selected_extension_enabled = self.toadpilot_experimental_max_torque > self.params.STEER_COMMAND_SCALE
 
     stop_go_launch_eligible = (
       getattr(frogpilot_toggles, "toadpilot_improved_stop_and_go", False) is True and
@@ -408,6 +443,9 @@ class CarController(CarControllerBase):
     )
     high_torque_reason = high_torque_runtime_reason(**runtime_gate_values)
     high_torque_allowed = high_torque_runtime_allowed(**runtime_gate_values)
+    if self.params.TOADPILOT_HIGH_TORQUE and not selected_extension_enabled:
+      high_torque_reason = "configured_stock_cap"
+      high_torque_allowed = False
 
     steering_rate_abs = abs(float(CS.out.steeringRateDeg)) if math.isfinite(float(CS.out.steeringRateDeg)) else math.inf
     self.high_torque_rate_history.append(steering_rate_abs)
@@ -431,7 +469,7 @@ class CarController(CarControllerBase):
 
     self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed = \
       update_high_torque_authority(
-        actuators.steer, high_torque_allowed, self.params.TOADPILOT_HIGH_TORQUE,
+        actuators.steer, high_torque_allowed, self.params.TOADPILOT_HIGH_TORQUE and selected_extension_enabled,
         self.high_torque_saturation_direction, self.high_torque_saturation_frames, self.high_torque_armed,
       )
     if high_torque_allowed and not self.high_torque_armed and \
@@ -450,7 +488,11 @@ class CarController(CarControllerBase):
     elif high_torque_allowed and self.high_torque_saturation_frames > 0:
       high_torque_reason = "saturation_handshake"
 
-    new_steer = steer_torque_target(actuators.steer, self.params, self.high_torque_armed, headroom_scale)
+    mapped_steer = steer_torque_target(
+      actuators.steer, self.params, self.high_torque_armed, headroom_scale,
+      self.toadpilot_experimental_max_torque,
+    )
+    new_steer = limit_extra_torque_rise(mapped_steer, self.last_steer, self.params.STEER_COMMAND_SCALE)
     # Runtime blockers remove the extended target immediately. The applied CAN
     # command still unwinds through Toyota/Panda's unchanged 25-unit/frame limit;
     # from 1700, returning to the stock 1500 envelope takes up to 0.08 seconds.
@@ -722,7 +764,9 @@ class CarController(CarControllerBase):
     new_actuators.toadPilotHighTorqueReason = self.high_torque_status_reason
     new_actuators.toadPilotHighTorqueArmProgress = \
       self.high_torque_saturation_frames / TOADPILOT_HIGH_TORQUE_SATURATION_FRAMES
-    new_actuators.toadPilotHighTorqueTargetCan = new_steer
+    # Keep target telemetry as the mapped request before the extra-only slew;
+    # steerOutputCan records the command that was actually passed to Panda.
+    new_actuators.toadPilotHighTorqueTargetCan = mapped_steer
     new_actuators.toadPilotHighTorqueHeadroomScale = effective_headroom_scale
     new_actuators.toadPilotSteeringRateRise = steering_rate_rise
     new_actuators.toadPilotFaultCooldown = cooldown_frames_remaining * DT_CTRL
