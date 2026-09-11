@@ -77,8 +77,14 @@ class FrogPilotAcceleration:
       traffic_max_accel = min(get_max_accel_ramp_off(traffic_max_accel, self.frogpilot_planner.v_cruise, v_ego),
                               traffic_max_accel)
 
-    self.max_accel = blend_traffic_mode_value(normal_max_accel, traffic_max_accel,
-                                              self.frogpilot_planner.frogpilot_following.traffic_mode_blend)
+    if getattr(frogpilot_toggles, "toadpilot_responsive_takeoff", False):
+      # Keep the selected Human Acceleration/profile ceiling in traffic. This
+      # is a ceiling, not a forced acceleration: the lead-aware MPC still
+      # chooses the trajectory and every stop/brake gate remains downstream.
+      self.max_accel = normal_max_accel
+    else:
+      self.max_accel = blend_traffic_mode_value(normal_max_accel, traffic_max_accel,
+                                                self.frogpilot_planner.frogpilot_following.traffic_mode_blend)
 
     if frogpilotCarState.forceCoast:
       self.min_accel = A_CRUISE_MIN_ECO

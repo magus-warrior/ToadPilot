@@ -1,5 +1,12 @@
 # TOADPILOT
 
+**2026-09-10 longitudinal update:** schema 9 replaces the old stop-and-go
+switch and start-ramp slider with default-on Responsive takeoff and Smooth
+stop finish. See [current behavior and validation](TOADPILOT_RESPONSIVE_STOP_GO.md).
+The independently configured start boost is restored through its existing API
+and saved setting. The start-ramp and configuration sections below describe
+earlier UI revisions.
+
 Project notes and safety contract for the TOADPILOT lateral-control fork.
 
 **Status:** local development build, updated 2026-07-19. New configurations default to enabled with the `Adaptive` profile, lane centering, smooth lane transitions, and guarded Camry stop-and-go on. Effective controller output remains limited to the exact `TOYOTA_CAMRY_TSS2` torque-control fingerprint. It is not a general Toyota tune.

@@ -331,6 +331,7 @@ Tools
     </div>
 
     <section class="toadpilot-tab-panel" id="toadPanelDriving" role="tabpanel" aria-labelledby="toadTabDriving">
+      <p id="toadLongitudinalReadiness" role="status">Checking stop/go controller readiness...</p>
       <div class="toadpilot-config-grid">
       <label class="toadpilot-check" for="toadEnabled">
         <span><strong>Enable TOADPILOT</strong><br><small>Default on; may be configured offline, while unsupported cars remain stock.</small></span>
@@ -338,9 +339,9 @@ Tools
       </label>
 
       <label class="toadpilot-field" for="toadProfile">
-        <span><strong>Profile</strong></span>
+        <span><strong>Steering profile only</strong><br><small>Does not disable responsive takeoff, smooth stop finish, or automatic traffic.</small></span>
         <select id="toadProfile">
-          <option value="observe">Observe</option>
+          <option value="observe">Stock steering (no added assist)</option>
           <option value="adaptive" selected>Adaptive</option>
           <option value="full">Full Existing Authority</option>
         </select>
@@ -366,13 +367,18 @@ Tools
         <input type="checkbox" id="toadSmoothLaneTransitions" checked>
       </label>
 
-      <label class="toadpilot-check" for="toadImprovedStopAndGo">
-        <span><strong>Improved Camry stop-and-go</strong><br><small>Default on. Allows a planner-confirmed launch to proceed through a stale Toyota cruise-standstill signal. Brake input, a renewed stop request, disengagement, and normal acceleration limits still cancel or bound the launch.</small></span>
-        <input type="checkbox" id="toadImprovedStopAndGo" checked>
+      <label class="toadpilot-check" for="toadResponsiveTakeoff">
+        <span><strong>Responsive takeoff</strong><br><small>Default on. Keeps your chosen acceleration profile in traffic and releases the previous brake hold when the planner requests movement. Follows the planner's lead-car decisions without an added launch kick.</small></span>
+        <input type="checkbox" id="toadResponsiveTakeoff" checked>
+      </label>
+
+      <label class="toadpilot-check" for="toadSmoothStopFinish">
+        <span><strong>Smooth stop finish</strong><br><small>Default on. Gently eases the final low-speed approach when braking demand allows. Keeps normal stop holding and stronger braking available; following distance is unchanged.</small></span>
+        <input type="checkbox" id="toadSmoothStopFinish" checked>
       </label>
 
       <label class="toadpilot-check" for="toadAutomaticTrafficMode">
-        <span><strong>Automatic Traffic Mode</strong><br><small>Default on. Enters after sustained close, slow traffic or repeated stop-and-go cycles, then waits for sustained free flow before leaving. A mapped intersection only supports real traffic evidence; it cannot trigger this alone.</small></span>
+        <span><strong>Automatic Traffic Mode</strong><br><small id="toadTrafficThresholdHelp">Checking saved mph threshold...</small></span>
         <input type="checkbox" id="toadAutomaticTrafficMode" checked>
       </label>
 
@@ -480,59 +486,12 @@ Tools
         </dl>
       </section>
 
-      <section class="toadpilot-status-card">
-        <h3>High-authority observer</h3>
-        <div id="toadObserverStatus">Waiting for observe-only samples...</div>
-        <p class="toadpilot-observe-note">
-          Preliminary diagnostics only; never applied to tune. Lane-change/model/steer-limit context is not labeled yet.
-        </p>
-      </section>
       </div>
 
       <p id="toadLegacyNotice" class="toadpilot-legacy-notice" hidden>
         The old ToyotaPerformanceMode prototype key is still set, but it is ignored. TOADPILOT uses only the saved controls above.
       </p>
     </section>
-  </div>
-
-  <div class="separator"></div>
-
-  <div class="toadpilot-panel" aria-labelledby="startRampTitle">
-    <div class="toadpilot-heading">
-      <h1 id="startRampTitle">Camry Start Acceleration Ramp</h1>
-      <p class="toadpilot-description">
-        Optional low-speed launch assistance for Camry TSS2 openpilot longitudinal control.
-      </p>
-      <span id="startRampSupportBadge" class="toadpilot-badge">Checking vehicle...</span>
-    </div>
-
-    <div class="toadpilot-boundary">
-      <strong>The toggle above controls the guarded stop-release correction.</strong>
-      This slider only adds a ramped acceleration floor after a real stopped-to-go transition while the planner
-      is requesting forward acceleration. It never bypasses a planner stop, brake input, or disengagement. When
-      Improved Camry stop-and-go is effective, only a stale Toyota cruise-standstill status is filtered during the
-      speed- and time-bounded launch handoff.
-    </div>
-
-    <div class="start-ramp-control">
-      <label for="startRampSlider">
-        <strong>Start acceleration floor</strong><br>
-        <small>Fades out by 2.0 m/s (about 4.5 mph).</small>
-      </label>
-      <output id="startRampReadout" class="start-ramp-readout" for="startRampSlider">0.00 m/s² · Off</output>
-      <input type="range" id="startRampSlider" min="0" max="1" step="0.05" value="0">
-    </div>
-
-    <p class="start-ramp-note">
-      Default: <strong>0.00 m/s² (off)</strong>. Changes are locked while the device reports onroad.
-    </p>
-    <p id="startRampState" class="start-ramp-state">Loading saved setting...</p>
-
-    <div class="toadpilot-actions">
-      <button type="button" id="startRampSaveButton">Save Start Ramp</button>
-      <button type="button" id="startRampRefreshButton">Refresh</button>
-    </div>
-    <div id="startRampMessage" class="toadpilot-message" role="status" aria-live="polite"></div>
   </div>
 
   <div class="separator"></div>
@@ -599,7 +558,8 @@ Tools
   const toadStraightLineSmoothing = document.getElementById("toadStraightLineSmoothing");
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
-  const toadImprovedStopAndGo = document.getElementById("toadImprovedStopAndGo");
+  const toadResponsiveTakeoff = document.getElementById("toadResponsiveTakeoff");
+  const toadSmoothStopFinish = document.getElementById("toadSmoothStopFinish");
   const toadAutomaticTrafficMode = document.getElementById("toadAutomaticTrafficMode");
   const toadMapStopAssist = document.getElementById("toadMapStopAssist");
   const toadExperimentalSteeringResponse = document.getElementById("toadExperimentalSteeringResponse");
@@ -612,11 +572,6 @@ Tools
   const toadResetTuneButton = document.getElementById("toadResetTuneButton");
   const toadMessage = document.getElementById("toadMessage");
   const toadTabs = Array.from(document.querySelectorAll(".toadpilot-tab"));
-  const startRampSlider = document.getElementById("startRampSlider");
-  const startRampReadout = document.getElementById("startRampReadout");
-  const startRampSaveButton = document.getElementById("startRampSaveButton");
-  const startRampRefreshButton = document.getElementById("startRampRefreshButton");
-  const startRampMessage = document.getElementById("startRampMessage");
   const toadConfigControls = [
     toadEnabled,
     toadProfile,
@@ -624,7 +579,8 @@ Tools
     toadStraightLineSmoothing,
     toadLaneCentering,
     toadSmoothLaneTransitions,
-    toadImprovedStopAndGo,
+    toadResponsiveTakeoff,
+    toadSmoothStopFinish,
     toadAutomaticTrafficMode,
     toadMapStopAssist,
     toadExperimentalSteeringResponse,
@@ -641,11 +597,9 @@ Tools
   let toadResetAllowed = false;
   let toadSteeringRequestAllowed = false;
   let toadConfigVersion = null;
-  let startRampDirty = false;
-  let startRampLoaded = false;
-  let startRampLoading = false;
-  let startRampMutating = false;
-  let startRampOnroad = true;
+  let toadLegacyStopGo = true;
+  let toadTrafficModeEntryTime = 1.0;
+  let toadTrafficModeMaxSpeedMph = 30;
 
   function setMapboxStatus(message, isError) {
     mapboxStatus.textContent = message || "";
@@ -692,7 +646,7 @@ Tools
   loadMapboxTokenStatus();
 
   const toadProfileDescriptions = {
-    observe: "Observe keeps stock controller output unchanged while collecting diagnostics.",
+    observe: "Stock steering: added steering assistance is off. Stop/go features operate independently and are not observe-only.",
     adaptive: "Adaptive adds modest curve support and, when separately enabled, a gentle confidence-gated lane-centering correction.",
     full: "Full Existing Authority uses stronger bounded curve and optional lane-centering assistance, while stock Toyota/Panda limits remain unchanged."
   };
@@ -744,66 +698,6 @@ Tools
     toadResetTuneButton.disabled = busy || !toadResetAllowed || !toadLoaded;
   }
 
-  function renderToadObserver(status) {
-    if (!status || Object.keys(status).length === 0) {
-      return "Waiting for observe-only high-authority samples.";
-    }
-    if (status.fresh !== true) {
-      const age = status.age_seconds === null || status.age_seconds === undefined ?
-        "unknown age" : Number(status.age_seconds).toFixed(1) + "s old";
-      return "Stale observer data (" + age + "); waiting for a fresh sample window.";
-    }
-    if (status.schema_version !== 1) {
-      return "Unsupported observer schema " + String(status.schema_version) + ".";
-    }
-    if (status.observe_only !== true || status.applied_to_tune !== false) {
-      return "Observer safety flags are invalid; data hidden.";
-    }
-    if (status.collecting !== true) {
-      return "Observer is not currently collecting.";
-    }
-
-
-    const accepted = status.accepted_samples !== undefined ? status.accepted_samples : 0;
-    const candidates = status.candidate_samples !== undefined ? status.candidate_samples : accepted;
-    const rejected = status.rejected_samples !== undefined ? status.rejected_samples : 0;
-    const directions = status.directions || {};
-    const bins = status.bins || {};
-    const parts = [];
-    parts.push(String(accepted) + " accepted / " + String(candidates) + " candidates");
-    if (rejected) {
-      parts.push(String(rejected) + " rejected");
-    }
-
-    ["left", "right"].forEach(function(direction) {
-      const summary = directions[direction] || {};
-      if (summary.samples && summary.lat_accel_per_steer !== null) {
-        parts.push(direction.charAt(0).toUpperCase() + " " +
-          Number(summary.lat_accel_per_steer).toFixed(3) + " lat-accel/steer (" +
-          String(summary.samples) + ")");
-      }
-    });
-
-    let populatedBins = 0;
-    Object.keys(bins).forEach(function(direction) {
-      Object.keys(bins[direction] || {}).forEach(function(name) {
-        if ((bins[direction][name] || {}).samples > 0) {
-          populatedBins += 1;
-          const bin = bins[direction][name];
-          const slope = bin.lat_accel_per_steer === null ? "n/a" : Number(bin.lat_accel_per_steer).toFixed(3);
-          const spread = bin.sample_ratio_stddev === null ? "n/a" : Number(bin.sample_ratio_stddev).toFixed(3);
-          parts.push(direction.charAt(0).toUpperCase() + " " + name + ": " +
-            slope + " ± " + spread + " (" + String(bin.samples) + ")");
-        }
-      });
-    });
-    if (populatedBins) {
-      parts.push(String(populatedBins) + " populated bins");
-    }
-    parts.push("observe-only; never applied to tune");
-    return parts.join(" · ");
-  }
-
   function renderToadPilot(data, populateConfig) {
     const config = data.config || {};
     const capability = data.capability || {};
@@ -833,8 +727,12 @@ Tools
       toadStraightLineSmoothing.checked = config.straight_line_smoothing !== false;
       toadLaneCentering.checked = config.lane_centering_assist !== false;
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
-      toadImprovedStopAndGo.checked = config.improved_stop_and_go !== false;
+      toadLegacyStopGo = config.improved_stop_and_go === true;
+      toadResponsiveTakeoff.checked = config.responsive_takeoff === true;
+      toadSmoothStopFinish.checked = config.smooth_stop_finish === true;
       toadAutomaticTrafficMode.checked = config.automatic_traffic_mode !== false;
+      toadTrafficModeEntryTime = Number(config.traffic_mode_entry_time || 1.0);
+      toadTrafficModeMaxSpeedMph = Number(config.traffic_mode_max_speed_mph || 30);
       toadMapStopAssist.checked = config.map_stop_assist !== false;
       toadExperimentalSteeringResponse.checked = steeringExperiment.requested === true;
       toadExperimentalMaxTorque.value = String(config.experimental_max_torque || 1500);
@@ -855,7 +753,7 @@ Tools
 
     setToadText("toadFingerprint", capability.fingerprint || "Not detected");
     let effectiveText = data.effective_enabled ?
-      "Enabled · " + (config.profile || "adaptive") : config.enabled ?
+      "Enabled · steering: " + (config.profile === "observe" ? "stock" : (config.profile || "adaptive")) : config.enabled ?
         (vehicleKnown ? "Configured, but unsupported" : "Configured offline · waiting for a supported vehicle") : "Disabled";
     if (toadOnroad) {
       effectiveText += " · settings locked while onroad";
@@ -866,7 +764,7 @@ Tools
     setToadText("toadLateralControl", capability.lateral_control || "unknown");
 
     let stopAndGoText;
-    if (config.improved_stop_and_go !== true) {
+    if (config.responsive_takeoff !== true) {
       stopAndGoText = "Off by setting · Toyota cruise-standstill behavior unchanged";
     } else if (config.enabled !== true) {
       stopAndGoText = "Requested, but Enable TOADPILOT is off";
@@ -880,13 +778,22 @@ Tools
     setToadText("toadStopAndGoState", stopAndGoText);
 
     const liveStopGo = stopGoStatus.fresh === true ? stopGoStatus : null;
+    const stopGoReady = liveStopGo && liveStopGo.supported === true &&
+      liveStopGo.responsive_takeoff_enabled === true && liveStopGo.smooth_stop_finish_enabled === true;
+    setToadText("toadLongitudinalReadiness", stopGoReady ?
+      "Controller confirms: responsive takeoff ON · smooth stop finish ON · not observe-only. " +
+        (liveStopGo.controls_inactive_reason === "openpilot_disabled" ? "Ready; openpilot is disengaged." :
+          "Controller state: " + String(liveStopGo.controls_inactive_reason || liveStopGo.state || "ready").replace(/_/g, " ")) :
+      "Stop/go readiness not confirmed: check Live Status for disabled features, vehicle support, or a missing fresh controller heartbeat.");
+    setToadText("toadTrafficThresholdHelp", "Automatic entry uses " + Number(config.traffic_mode_max_speed_mph || 30) +
+      " mph and " + Number(config.traffic_mode_entry_time || 1) +
+      " s of close, slow traffic; repeated stop/go also qualifies. Exit requires 20 s of sustained free flow at/above the threshold. Speed alone does not command acceleration or braking.");
     const historicalStopGo = stopGoLastRoute.provenance_valid === true ? stopGoLastRoute : null;
     const shownStopGo = liveStopGo || historicalStopGo;
     if (shownStopGo) {
       const prefix = liveStopGo ? "LIVE" : "LAST DRIVE";
       const state = String(shownStopGo.state || "unknown").replace(/_/g, " ").toUpperCase();
-      let liveText = prefix + " · " + state + " · saved ramp " +
-        Number(shownStopGo.configured_accel || 0).toFixed(2) + " m/s²";
+      let liveText = prefix + " · " + state;
       if (shownStopGo.planner_accel !== null && shownStopGo.planner_accel !== undefined &&
           Number.isFinite(Number(shownStopGo.planner_accel))) {
         liveText += " · planner " + Number(shownStopGo.planner_accel).toFixed(2);
@@ -1248,7 +1155,6 @@ Tools
       experimentalText += " · conditional curves enabled";
     }
     setToadText("toadExperimentalState", experimentalText);
-    setToadText("toadObserverStatus", renderToadObserver(data.tune_status));
     document.getElementById("toadLegacyNotice").hidden = !environment.legacy_prototype_enabled;
   }
 
@@ -1266,97 +1172,6 @@ Tools
       throw new Error(body.error || body.details || "HTTP " + response.status);
     }
     return body;
-  }
-
-  function renderStartRampReadout() {
-    const value = Number(startRampSlider.value);
-    startRampReadout.textContent = value.toFixed(2) + " m/s²" + (value === 0 ? " · Off" : "");
-  }
-
-  function setStartRampMessage(message, isError) {
-    startRampMessage.textContent = message || "";
-    startRampMessage.classList.toggle("error", Boolean(isError));
-  }
-
-  function setStartRampBusy(busy) {
-    startRampSlider.disabled = busy || startRampOnroad || !startRampLoaded;
-    startRampSaveButton.disabled = busy || startRampOnroad || !startRampLoaded;
-    startRampRefreshButton.disabled = busy;
-  }
-
-  function renderStartAccelRamp(data, populateSetting) {
-    const environment = data.environment || {};
-    const capability = data.capability || {};
-    startRampLoaded = true;
-    startRampOnroad = environment.onroad === true;
-
-    if (Number.isFinite(Number(data.minimum))) {
-      startRampSlider.min = String(data.minimum);
-    }
-    if (Number.isFinite(Number(data.maximum))) {
-      startRampSlider.max = String(data.maximum);
-    }
-    if (Number.isFinite(Number(data.step))) {
-      startRampSlider.step = String(data.step);
-    }
-    if (populateSetting) {
-      startRampSlider.value = String(Number.isFinite(Number(data.value)) ? Number(data.value) : 0);
-      startRampDirty = false;
-      renderStartRampReadout();
-    }
-
-    const badge = document.getElementById("startRampSupportBadge");
-    const vehicleKnown = capability.vehicle_known === true;
-    badge.classList.toggle("supported", capability.supported === true);
-    badge.classList.toggle("unsupported", vehicleKnown && capability.supported !== true);
-    badge.classList.toggle("offline", !vehicleKnown);
-    badge.textContent = capability.supported === true ? "Supported Camry TSS2 detected" : vehicleKnown ?
-      "Unsupported vehicle · saved value remains inactive" : "No vehicle detected · setting available offline";
-    badge.title = capability.reason || "";
-
-    const savedValue = Number.isFinite(Number(data.value)) ? Number(data.value) : 0;
-    let stateText = savedValue === 0 ? "Saved ramp is off." : "Saved ramp: " + savedValue.toFixed(2) + " m/s².";
-    const runtime = data.runtime || {};
-    if (runtime.fresh === true) {
-      stateText += " Live: " + String(runtime.state || "unknown").replace(/_/g, " ") + ".";
-      if (runtime.last_event && runtime.last_event !== "idle") {
-        stateText += " Last: " + String(runtime.last_event).replace(/_/g, " ");
-        if (runtime.last_detail) {
-          stateText += " (" + String(runtime.last_detail).replace(/_/g, " ") + ")";
-        }
-        stateText += ".";
-      }
-    }
-    if (capability.supported !== true && savedValue > 0) {
-      stateText += " It will remain inactive unless a supported Camry is detected.";
-    }
-    if (startRampOnroad) {
-      stateText += " Settings are locked while onroad.";
-    }
-    document.getElementById("startRampState").textContent = stateText;
-  }
-
-  async function loadStartAccelRamp(populateSetting, announce) {
-    if (startRampLoading || startRampMutating) {
-      return;
-    }
-    startRampLoading = true;
-    setStartRampBusy(true);
-    try {
-      const state = await toadRequest("/start_accel_ramp");
-      // Polling updates status and write locks, but never overwrites an edited slider.
-      renderStartAccelRamp(state, populateSetting === true);
-      if (announce) {
-        setStartRampMessage("Start acceleration ramp status refreshed.", false);
-      }
-    } catch (error) {
-      startRampLoaded = false;
-      startRampOnroad = true;
-      setStartRampMessage("Start acceleration ramp unavailable: " + error.message, true);
-    } finally {
-      startRampLoading = false;
-      setStartRampBusy(false);
-    }
   }
 
   async function loadToadPilot(populateConfig, announce) {
@@ -1394,45 +1209,6 @@ Tools
     });
   });
 
-  startRampSlider.addEventListener("input", () => {
-    startRampDirty = true;
-    renderStartRampReadout();
-    setStartRampMessage("Unsaved start acceleration ramp change.", false);
-  });
-
-  startRampSaveButton.addEventListener("click", async () => {
-    if (startRampLoading || startRampMutating || startRampOnroad || !startRampLoaded) {
-      return;
-    }
-    startRampMutating = true;
-    setStartRampBusy(true);
-    const requestedValue = Number(startRampSlider.value);
-    setStartRampMessage("Saving start acceleration ramp...", false);
-    try {
-      const state = await toadRequest("/start_accel_ramp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: requestedValue })
-      });
-      if (!Number.isFinite(Number(state.value)) || Math.abs(Number(state.value) - requestedValue) > 1e-6) {
-        throw new Error("saved value did not match the slider");
-      }
-      startRampDirty = false;
-      renderStartAccelRamp(state, true);
-      setStartRampMessage(requestedValue === 0 ?
-        "Acceleration floor saved off; guarded stop/go behavior follows its toggle above." :
-        "Start acceleration ramp saved.", false);
-    } catch (error) {
-      startRampDirty = true;
-      setStartRampMessage("Could not save start acceleration ramp: " + error.message, true);
-    } finally {
-      startRampMutating = false;
-      setStartRampBusy(false);
-    }
-  });
-
-  startRampRefreshButton.addEventListener("click", () => loadStartAccelRamp(false, true));
-
   toadSaveButton.addEventListener("click", async () => {
     if (toadLoading || toadMutating || toadOnroad || !toadLoaded) {
       return;
@@ -1449,8 +1225,12 @@ Tools
       experimental_max_torque: Number(toadExperimentalMaxTorque.value),
       lane_centering_assist: toadLaneCentering.checked,
       smooth_lane_transitions: toadSmoothLaneTransitions.checked,
-      improved_stop_and_go: toadImprovedStopAndGo.checked,
+      improved_stop_and_go: toadLegacyStopGo,
+      responsive_takeoff: toadResponsiveTakeoff.checked,
+      smooth_stop_finish: toadSmoothStopFinish.checked,
       automatic_traffic_mode: toadAutomaticTrafficMode.checked,
+      traffic_mode_entry_time: toadTrafficModeEntryTime,
+      traffic_mode_max_speed_mph: toadTrafficModeMaxSpeedMph,
       map_stop_assist: toadMapStopAssist.checked,
       curve_assist_in_experimental: toadExperimentalAssist.checked,
       smart_saturation_warning: toadSmartWarning.checked,
@@ -1522,8 +1302,6 @@ Tools
 
   loadToadPilot(true, false);
   window.setInterval(() => loadToadPilot(false, false), 5000);
-  loadStartAccelRamp(true, false);
-  window.setInterval(() => loadStartAccelRamp(false, false), 5000);
 
   rebootButton.addEventListener('click', () => {
     fetch('/reboot_device', { method: 'POST' })

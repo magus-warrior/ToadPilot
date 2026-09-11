@@ -209,6 +209,37 @@ class TestStartAccelRampControl(unittest.TestCase):
     self.assertEqual(control.long_control_state, LongCtrlState.pid)
     self.assertGreater(output, 0.0)
 
+  def test_traffic_mode_caps_start_accel_ramp_at_breakaway_floor(self):
+    CP = SimpleNamespace(
+      enableGasInterceptor=False,
+      startingState=False,
+      stopAccel=-2.0,
+      startAccel=0.0,
+      longitudinalTuning=SimpleNamespace(kpBP=[0.0], kpV=[0.0], kiBP=[0.0], kiV=[0.0], kf=0.0),
+    )
+    toggles = SimpleNamespace(
+      vEgoStarting=0.25,
+      stoppingDecelRate=0.3,
+      human_acceleration=False,
+      start_accel_ramp=1.0,
+    )
+    CS = SimpleNamespace(
+      vEgo=0.0,
+      aEgo=0.0,
+      brakePressed=False,
+      cruiseState=SimpleNamespace(standstill=True),
+    )
+    control = LongControl(CP)
+
+    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles, traffic_mode=True)
+    CS.cruiseState.standstill = False
+    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles, traffic_mode=True)
+
+    self.assertEqual(control.long_control_state, LongCtrlState.pid)
+    self.assertTrue(control.start_accel_ramp.armed)
+    self.assertTrue(control.start_accel_ramp.started)
+    self.assertAlmostEqual(output, START_ACCEL_BREAKAWAY_FLOOR)
+
   def test_improved_stop_and_go_breaks_stale_camry_standstill_loop(self):
     CP = SimpleNamespace(
       enableGasInterceptor=False,

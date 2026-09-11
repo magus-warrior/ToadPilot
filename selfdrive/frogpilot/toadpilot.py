@@ -96,7 +96,7 @@ TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 7
+TOADPILOT_CONFIG_VERSION = 9
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -127,7 +127,11 @@ class ToadPilotConfig:
   straight_line_smoothing: bool = True
   experimental_max_torque: int = TOADPILOT_EXPERIMENTAL_TORQUE_DEFAULT
   improved_stop_and_go: bool = True
+  responsive_takeoff: bool = True
+  smooth_stop_finish: bool = True
   automatic_traffic_mode: bool = True
+  traffic_mode_entry_time: float = 1.0
+  traffic_mode_max_speed_mph: int = 30
   map_stop_assist: bool = True
   curve_assist_in_experimental: bool = False
   smart_saturation_warning: bool = True
@@ -138,7 +142,7 @@ DEFAULT_TOADPILOT_CONFIG = ToadPilotConfig()
 FAILSAFE_TOADPILOT_CONFIG = ToadPilotConfig(enabled=False, profile="observe", lane_centering_assist=False,
                                             smooth_lane_transitions=False, straight_line_smoothing=False,
                                             improved_stop_and_go=False, automatic_traffic_mode=False,
-                                            map_stop_assist=False)
+                                            map_stop_assist=False, responsive_takeoff=False, smooth_stop_finish=False)
 DEFAULT_TOADPILOT_CONFIG_JSON = json.dumps(asdict(DEFAULT_TOADPILOT_CONFIG), sort_keys=True, separators=(",", ":"))
 _CONFIG_FIELDS = set(asdict(DEFAULT_TOADPILOT_CONFIG))
 _V1_CONFIG_FIELDS = {
@@ -150,6 +154,8 @@ _V3_CONFIG_FIELDS = _V2_CONFIG_FIELDS | {"smooth_lane_transitions"}
 _V4_CONFIG_FIELDS = _V3_CONFIG_FIELDS | {"improved_stop_and_go"}
 _V5_CONFIG_FIELDS = _V4_CONFIG_FIELDS | {"straight_line_smoothing"}
 _V6_CONFIG_FIELDS = _V5_CONFIG_FIELDS | {"experimental_max_torque"}
+_V7_CONFIG_FIELDS = _V6_CONFIG_FIELDS | {"automatic_traffic_mode", "map_stop_assist"}
+_V8_CONFIG_FIELDS = _V7_CONFIG_FIELDS | {"traffic_mode_entry_time", "traffic_mode_max_speed_mph"}
 
 
 def normalize_toadpilot_config(data, base=None, partial=False):
@@ -171,10 +177,20 @@ def normalize_toadpilot_config(data, base=None, partial=False):
     raise ValueError(f"Unknown TOADPILOT profile: {normalized['profile']}")
 
   for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
-                "automatic_traffic_mode", "map_stop_assist",
+                "automatic_traffic_mode", "map_stop_assist", "responsive_takeoff", "smooth_stop_finish",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
     if type(normalized[field]) is not bool:
       raise ValueError(f"TOADPILOT setting '{field}' must be a boolean.")
+
+  entry_time = normalized["traffic_mode_entry_time"]
+  if (isinstance(entry_time, bool) or not isinstance(entry_time, (int, float)) or
+      not math.isfinite(entry_time) or not 0.5 <= entry_time <= 30.0):
+    raise ValueError("TOADPILOT Traffic Mode entry time must be from 0.5 to 30 seconds.")
+  normalized["traffic_mode_entry_time"] = float(entry_time)
+
+  max_speed = normalized["traffic_mode_max_speed_mph"]
+  if type(max_speed) is not int or not 5 <= max_speed <= 60:
+    raise ValueError("TOADPILOT Traffic Mode maximum speed must be from 5 to 60 mph.")
 
   experimental_max_torque = normalized["experimental_max_torque"]
   if (type(experimental_max_torque) is not int or
@@ -197,6 +213,7 @@ def decode_toadpilot_config(raw):
       raw = raw.decode("utf-8")
     data = json.loads(raw)
     if isinstance(data, dict) and type(data.get("version")) is int:
+      source_version = data["version"]
       if data["version"] == 1:
         if set(data) != _V1_CONFIG_FIELDS:
           raise ValueError("Malformed TOADPILOT version 1 configuration.")
@@ -268,6 +285,27 @@ def decode_toadpilot_config(raw):
           "automatic_traffic_mode": True,
           "map_stop_assist": True,
         }
+      elif data["version"] == 7:
+        if set(data) != _V7_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 7 configuration.")
+        data = {
+          **data,
+          "version": TOADPILOT_CONFIG_VERSION,
+          "traffic_mode_entry_time": 1.0,
+          "traffic_mode_max_speed_mph": 30,
+        }
+      elif data["version"] == 8:
+        if set(data) != _V8_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 8 configuration.")
+        data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      if 1 <= source_version <= 6:
+        data = {
+          **data,
+          "traffic_mode_entry_time": 1.0,
+          "traffic_mode_max_speed_mph": 30,
+        }
+      if 1 <= source_version <= 8:
+        data = {**data, "responsive_takeoff": True, "smooth_stop_finish": True}
     if not isinstance(data, dict) or set(data) != _CONFIG_FIELDS:
       raise ValueError("Malformed TOADPILOT configuration.")
     return normalize_toadpilot_config(data)
@@ -368,7 +406,13 @@ def config_from_toggles(toggles):
       "straight_line_smoothing": getattr(toggles, "toadpilot_straight_line_smoothing"),
       "experimental_max_torque": getattr(toggles, "toadpilot_experimental_max_torque"),
       "improved_stop_and_go": getattr(toggles, "toadpilot_improved_stop_and_go"),
+      "responsive_takeoff": getattr(toggles, "toadpilot_responsive_takeoff", False),
+      "smooth_stop_finish": getattr(toggles, "toadpilot_smooth_stop_finish", False),
       "automatic_traffic_mode": getattr(toggles, "toadpilot_automatic_traffic_mode"),
+      # Shared toggle snapshots can briefly lag one schema during a process
+      # restart. These two tuning-only additions have conservative defaults.
+      "traffic_mode_entry_time": getattr(toggles, "toadpilot_traffic_mode_entry_time", 1.0),
+      "traffic_mode_max_speed_mph": getattr(toggles, "toadpilot_traffic_mode_max_speed_mph", 30),
       "map_stop_assist": getattr(toggles, "toadpilot_map_stop_assist"),
       "curve_assist_in_experimental": getattr(toggles, "toadpilot_curve_assist_in_experimental"),
       "smart_saturation_warning": getattr(toggles, "toadpilot_smart_saturation_warning"),

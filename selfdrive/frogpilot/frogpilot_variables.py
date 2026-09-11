@@ -855,8 +855,14 @@ class FrogPilotVariables:
     toggle.toadpilot_smooth_lane_transitions = toadpilot_config.smooth_lane_transitions
     toggle.toadpilot_straight_line_smoothing = toadpilot_config.straight_line_smoothing
     toggle.toadpilot_experimental_max_torque = toadpilot_config.experimental_max_torque
-    toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.improved_stop_and_go
+    toggle.toadpilot_responsive_takeoff = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.responsive_takeoff
+    toggle.toadpilot_smooth_stop_finish = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_stop_finish
+    toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_responsive_takeoff
+    # The independently configured launch boost remains available alongside
+    # responsive brake release. Its existing stop/brake gates remain in LongControl.
     toggle.toadpilot_automatic_traffic_mode = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.automatic_traffic_mode
+    toggle.toadpilot_traffic_mode_entry_time = toadpilot_config.traffic_mode_entry_time
+    toggle.toadpilot_traffic_mode_max_speed_mph = toadpilot_config.traffic_mode_max_speed_mph
     toggle.toadpilot_map_stop_assist = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.map_stop_assist
     toggle.toadpilot_curve_assist_in_experimental = toadpilot_config.curve_assist_in_experimental
     toggle.toadpilot_smart_saturation_warning = toadpilot_config.smart_saturation_warning

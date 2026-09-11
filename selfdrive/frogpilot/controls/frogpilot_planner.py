@@ -105,6 +105,10 @@ class FrogPilotPlanner:
       probability_threshold=getattr(frogpilot_toggles, "lead_detection_probability", 0.5),
     )
     if controlsState.enabled and getattr(frogpilot_toggles, "toadpilot_automatic_traffic_mode", False):
+      self.auto_traffic_mode.set_thresholds(
+        max_speed_mph=getattr(frogpilot_toggles, "toadpilot_traffic_mode_max_speed_mph", 30),
+        entry_time=getattr(frogpilot_toggles, "toadpilot_traffic_mode_entry_time", 1.0),
+      )
       self.auto_traffic_status = self.auto_traffic_mode.update(
         v_ego=v_ego,
         lead_present=auto_lead_present,

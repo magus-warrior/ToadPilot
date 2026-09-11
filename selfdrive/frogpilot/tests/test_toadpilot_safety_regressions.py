@@ -138,7 +138,7 @@ class TestToadPilotConfigV7(unittest.TestCase):
 
     migrated = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(TOADPILOT_CONFIG_VERSION, 7)
+    self.assertEqual(TOADPILOT_CONFIG_VERSION, 9)
     self.assertEqual(migrated.version, TOADPILOT_CONFIG_VERSION)
     self.assertTrue(migrated.enabled)
     self.assertEqual(migrated.profile, "adaptive")
@@ -165,7 +165,7 @@ class TestToadPilotConfigV7(unittest.TestCase):
     malformed_cases = (
       {key: value for key, value in valid_v1.items() if key != "telemetry"},
       {**valid_v1, "unexpected": True},
-      {**valid_v1, "version": 8},
+      {**valid_v1, "version": 9},
       {**valid_v1, "version": True},
       {**valid_v1, "version": 1.0},
     )
