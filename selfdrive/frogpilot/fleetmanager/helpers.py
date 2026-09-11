@@ -886,7 +886,7 @@ def set_toadpilot_config(request_data):
 
   required_fields = {
     "version", "enabled", "profile", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "experimental_max_torque",
-    "improved_stop_and_go", "automatic_traffic_mode", "map_stop_assist",
+    "improved_stop_and_go", "automatic_traffic_mode", "traffic_mode_entry_time", "traffic_mode_max_speed_mph", "map_stop_assist",
     "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
   }
   missing_fields = required_fields - set(request_data)

@@ -641,6 +641,8 @@ Tools
   let toadResetAllowed = false;
   let toadSteeringRequestAllowed = false;
   let toadConfigVersion = null;
+  let toadTrafficModeEntryTime = 1.0;
+  let toadTrafficModeMaxSpeedMph = 30;
   let startRampDirty = false;
   let startRampLoaded = false;
   let startRampLoading = false;
@@ -835,6 +837,8 @@ Tools
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
       toadImprovedStopAndGo.checked = config.improved_stop_and_go !== false;
       toadAutomaticTrafficMode.checked = config.automatic_traffic_mode !== false;
+      toadTrafficModeEntryTime = Number(config.traffic_mode_entry_time || 1.0);
+      toadTrafficModeMaxSpeedMph = Number(config.traffic_mode_max_speed_mph || 30);
       toadMapStopAssist.checked = config.map_stop_assist !== false;
       toadExperimentalSteeringResponse.checked = steeringExperiment.requested === true;
       toadExperimentalMaxTorque.value = String(config.experimental_max_torque || 1500);
@@ -1451,6 +1455,8 @@ Tools
       smooth_lane_transitions: toadSmoothLaneTransitions.checked,
       improved_stop_and_go: toadImprovedStopAndGo.checked,
       automatic_traffic_mode: toadAutomaticTrafficMode.checked,
+      traffic_mode_entry_time: toadTrafficModeEntryTime,
+      traffic_mode_max_speed_mph: toadTrafficModeMaxSpeedMph,
       map_stop_assist: toadMapStopAssist.checked,
       curve_assist_in_experimental: toadExperimentalAssist.checked,
       smart_saturation_warning: toadSmartWarning.checked,

@@ -8,7 +8,8 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, apply_deadzone
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
-from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_END_SPEED,
+from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_BREAKAWAY_FLOOR,
+                                                                        START_ACCEL_RAMP_END_SPEED,
                                                                         START_ACCEL_RAMP_MAX_DURATION,
                                                                         StartAccelRamp)
 from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
@@ -289,7 +290,7 @@ class LongControl:
     }
 
   def update(self, active, CS, a_target, should_stop, accel_limits, frogpilot_toggles, *,
-             forcing_stop=False, inactive_reason="controls_inactive"):
+             forcing_stop=False, inactive_reason="controls_inactive", traffic_mode=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -330,9 +331,15 @@ class LongControl:
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target)
 
+    configured_start_accel = getattr(frogpilot_toggles, "start_accel_ramp", 0.0)
+    if traffic_mode:
+      # Traffic Mode still needs enough initial torque to overcome brake hold,
+      # but its close-following planner must remain in charge after breakaway.
+      configured_start_accel = min(configured_start_accel, START_ACCEL_BREAKAWAY_FLOOR)
+
     output_accel = self.start_accel_ramp.update(
       output_accel,
-      getattr(frogpilot_toggles, "start_accel_ramp", 0.0),
+      configured_start_accel,
       CS.vEgo,
       a_target,
       released_from_stop,

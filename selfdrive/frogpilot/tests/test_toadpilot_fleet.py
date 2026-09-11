@@ -32,6 +32,8 @@ VALID_CONFIG = {
   "experimental_max_torque": 1500,
   "improved_stop_and_go": True,
   "automatic_traffic_mode": True,
+  "traffic_mode_entry_time": 1.0,
+  "traffic_mode_max_speed_mph": 30,
   "map_stop_assist": True,
   "curve_assist_in_experimental": False,
   "smart_saturation_warning": True,

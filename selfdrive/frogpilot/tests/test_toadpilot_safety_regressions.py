@@ -138,7 +138,7 @@ class TestToadPilotConfigV7(unittest.TestCase):
 
     migrated = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(TOADPILOT_CONFIG_VERSION, 7)
+    self.assertEqual(TOADPILOT_CONFIG_VERSION, 8)
     self.assertEqual(migrated.version, TOADPILOT_CONFIG_VERSION)
     self.assertTrue(migrated.enabled)
     self.assertEqual(migrated.profile, "adaptive")

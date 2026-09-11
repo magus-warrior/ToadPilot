@@ -913,6 +913,7 @@ class Controls:
         actuators.accel = self.LoC.update(
           CC.longActive, CS, long_plan.aTarget, should_stop, pid_accel_limits, self.frogpilot_toggles,
           forcing_stop=forcing_stop, inactive_reason=inactive_reason,
+          traffic_mode=bool(self.sm['frogpilotCarState'].trafficMode),
         )
         self._publish_toadpilot_stop_go_status(CS, long_plan.aTarget, actuators.accel, inactive_reason)
 

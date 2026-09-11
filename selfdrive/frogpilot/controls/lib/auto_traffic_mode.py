@@ -92,6 +92,14 @@ class AutoTrafficMode:
     self.stop_armed = False
     self.stop_launches = deque()
 
+  def set_thresholds(self, *, max_speed_mph, entry_time):
+    """Apply validated user thresholds without discarding accumulated evidence."""
+    max_speed_mps = float(max_speed_mph) * 0.44704
+    self.config = AutoTrafficModeConfig(
+      **{**self.config.__dict__, "low_speed": max_speed_mps, "free_flow_speed": max_speed_mps,
+         "lead_entry_time": float(entry_time)}
+    )
+
   def _close_distance(self, v_ego):
     config = self.config
     return min(config.close_lead_max_distance,
@@ -177,7 +185,9 @@ class AutoTrafficMode:
 
       self.free_flow_time = 0.0
     else:
-      free_flow_observed = safe_v_ego >= self.config.free_flow_speed and not close_lead
+      # A nearby vehicle moving with free-flow traffic is not congestion. Only
+      # a nearby slow lead should prevent the exit timer from accumulating.
+      free_flow_observed = safe_v_ego >= self.config.free_flow_speed and not close_slow_lead
       if free_flow_observed:
         self.free_flow_time += observation_dt
       else:
