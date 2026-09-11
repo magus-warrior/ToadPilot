@@ -855,7 +855,13 @@ class FrogPilotVariables:
     toggle.toadpilot_smooth_lane_transitions = toadpilot_config.smooth_lane_transitions
     toggle.toadpilot_straight_line_smoothing = toadpilot_config.straight_line_smoothing
     toggle.toadpilot_experimental_max_torque = toadpilot_config.experimental_max_torque
-    toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.improved_stop_and_go
+    toggle.toadpilot_responsive_takeoff = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.responsive_takeoff
+    toggle.toadpilot_smooth_stop_finish = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_stop_finish
+    toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_responsive_takeoff
+    # Version 9 replaces the legacy forceful launch floor. Turning the new
+    # feature off must not silently resurrect a saved StartAccelRamp=1.00.
+    if toggle.toadpilot_supported and openpilot_longitudinal:
+      toggle.start_accel_ramp = 0.0
     toggle.toadpilot_automatic_traffic_mode = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.automatic_traffic_mode
     toggle.toadpilot_traffic_mode_entry_time = toadpilot_config.traffic_mode_entry_time
     toggle.toadpilot_traffic_mode_max_speed_mph = toadpilot_config.traffic_mode_max_speed_mph

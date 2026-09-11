@@ -701,6 +701,9 @@ class Controls:
       "controller_output_accel": round(float(car_output.accel), 3) if car_output_valid else None,
       "brake_release_active": (bool(getattr(car_output, "toadPilotStopGoReleaseActive", False))
                                if car_output_valid else False),
+      "responsive_takeoff_enabled": getattr(self.frogpilot_toggles, "toadpilot_responsive_takeoff", False) is True,
+      "smooth_stop_finish_enabled": getattr(self.frogpilot_toggles, "toadpilot_smooth_stop_finish", False) is True,
+      "stop_finish_relief": round(float(self.LoC.stop_finish_relief), 3),
       "car_output_valid": car_output_valid,
       "controls_inactive_reason": inactive_reason,
       "diagnostic_trigger": "transition" if transition_publish else "heartbeat",

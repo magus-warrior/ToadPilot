@@ -19,6 +19,7 @@ from openpilot.selfdrive.controls.lib.pid import PIDController
 from opendbc.can.packer import CANPacker
 
 from openpilot.selfdrive.frogpilot.controls.lib.frogpilot_acceleration import get_max_allowed_accel
+from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import StopReleaseLatch
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 SteerControlType = car.CarParams.SteerControlType
@@ -350,6 +351,7 @@ class CarController(CarControllerBase):
     self.prev_accel = 0
     self.previous_long_control_state = LongCtrlState.off
     self.toadpilot_stop_go_release_active = False
+    self.toadpilot_stop_release_latch = StopReleaseLatch()
     # *** end long control state ***
 
     self.packer = CANPacker(dbc_name)
@@ -395,7 +397,15 @@ class CarController(CarControllerBase):
       math.isfinite(float(CS.out.vEgo)) and CS.out.vEgo < TOADPILOT_STOP_RELEASE_MAX_SPEED and
       actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid)
     )
-    released_from_stop = self.previous_long_control_state == LongCtrlState.stopping and stop_go_launch_eligible
+    delayed_release = self.toadpilot_stop_release_latch.update(
+      enabled=(getattr(frogpilot_toggles, "toadpilot_responsive_takeoff", False) is True and
+               self.CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS2 and
+               getattr(self.CP, "autoResumeSng", False) and self.CP.openpilotLongitudinalControl),
+      active=CC.longActive, stopping=stopping, brake_pressed=CS.out.brakePressed,
+      speed=CS.out.vEgo, accel=actuators.accel,
+    )
+    released_from_stop = ((self.previous_long_control_state == LongCtrlState.stopping or delayed_release) and
+                          stop_go_launch_eligible)
     if released_from_stop:
       # A braking-approach integral is stale once the planner has positively
       # released the stop. Clearing it avoids carrying the old stop command

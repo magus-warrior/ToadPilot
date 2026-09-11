@@ -31,6 +31,8 @@ VALID_CONFIG = {
   "straight_line_smoothing": True,
   "experimental_max_torque": 1500,
   "improved_stop_and_go": True,
+  "responsive_takeoff": True,
+  "smooth_stop_finish": True,
   "automatic_traffic_mode": True,
   "traffic_mode_entry_time": 1.0,
   "traffic_mode_max_speed_mph": 30,
@@ -634,9 +636,13 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'id="toadStraightLineSmoothing" checked', response.data)
     self.assertIn(b'straight_line_smoothing: toadStraightLineSmoothing.checked', response.data)
     self.assertIn(b'role="tablist"', response.data)
-    self.assertIn(b'Improved Camry stop-and-go', response.data)
-    self.assertIn(b'id="toadImprovedStopAndGo" checked', response.data)
-    self.assertIn(b'improved_stop_and_go: toadImprovedStopAndGo.checked', response.data)
+    self.assertIn(b'id="toadResponsiveTakeoff" checked', response.data)
+    self.assertIn(b'id="toadSmoothStopFinish" checked', response.data)
+    self.assertIn(b'responsive_takeoff: toadResponsiveTakeoff.checked', response.data)
+    self.assertIn(b'smooth_stop_finish: toadSmoothStopFinish.checked', response.data)
+    self.assertNotIn(b'toadImprovedStopAndGo', response.data)
+    self.assertNotIn(b'startRampSlider', response.data)
+    self.assertNotIn(b'loadStartAccelRamp', response.data)
     self.assertIn(b'id="toadAutomaticTrafficMode" checked', response.data)
     self.assertIn(b'automatic_traffic_mode: toadAutomaticTrafficMode.checked', response.data)
     self.assertIn(b'id="toadMapStopAssist" checked', response.data)
@@ -666,10 +672,7 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn(b'requestOptions.cache = "no-store"', response.data)
     self.assertIn(b'renderToadPilot(state, populateConfig === true)', response.data)
     self.assertIn(b'version: toadConfigVersion', response.data)
-    self.assertIn(b'Camry Start Acceleration Ramp', response.data)
-    self.assertIn(b'id="startRampSlider"', response.data)
-    self.assertIn(b'min="0" max="1" step="0.05" value="0"', response.data)
-    self.assertIn(b'The toggle above controls the guarded stop-release correction.', response.data)
+    self.assertNotIn(b'Camry Start Acceleration Ramp', response.data)
 
   def test_config_route_disables_caching_and_returns_saved_state(self):
     state = {"config": VALID_CONFIG, "effective_enabled": True}

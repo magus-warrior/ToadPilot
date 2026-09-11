@@ -13,6 +13,7 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
                                                                         START_ACCEL_RAMP_MAX_DURATION,
                                                                         StartAccelRamp)
 from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
+from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import smooth_stop_request
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
@@ -135,6 +136,8 @@ class LongControl:
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.v_pid = 0.0
     self.last_output_accel = 0.0
+    self.stop_finish_stock_accel = 0.0
+    self.stop_finish_relief = 0.0
     self.start_accel_ramp = StartAccelRamp()
     self.stop_go_handoff_active = False
     self.stop_go_handoff_elapsed = 0.0
@@ -311,15 +314,32 @@ class LongControl:
     released_from_stop = (previous_long_control_state == LongCtrlState.stopping and
                           self.long_control_state in (LongCtrlState.starting, LongCtrlState.pid) and
                           not self.stop_go_planner_stop_recovered)
+    if self.long_control_state != LongCtrlState.stopping:
+      self.stop_finish_relief = 0.0
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
 
     elif self.long_control_state == LongCtrlState.stopping:
-      output_accel = self.last_output_accel
+      smooth_finish_enabled = (
+        getattr(frogpilot_toggles, "toadpilot_smooth_stop_finish", False) is True and
+        getattr(self.CP, "carFingerprint", None) == TOADPILOT_FINGERPRINT and
+        getattr(self.CP, "openpilotLongitudinalControl", False)
+      )
+      settled_after_relief = (self.stop_finish_relief > 0.0 and
+                              getattr(CS, "standstill", False) and 0.0 <= CS.vEgo <= 0.05)
+      if previous_long_control_state != LongCtrlState.stopping or not smooth_finish_enabled or settled_after_relief:
+        self.stop_finish_stock_accel = self.last_output_accel
+      output_accel = self.stop_finish_stock_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= frogpilot_toggles.stoppingDecelRate * DT_CTRL
+      self.stop_finish_stock_accel = output_accel
+      output_accel = smooth_stop_request(
+        output_accel, self.last_output_accel, a_target, CS.vEgo, CS.aEgo,
+        allowed=smooth_finish_enabled and not CS.brakePressed and not forcing_stop,
+      )
+      self.stop_finish_relief = output_accel - self.stop_finish_stock_accel
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
@@ -332,6 +352,12 @@ class LongControl:
                                      feedforward=a_target)
 
     configured_start_accel = getattr(frogpilot_toggles, "start_accel_ramp", 0.0)
+    if (hasattr(frogpilot_toggles, "toadpilot_responsive_takeoff") and
+        getattr(self.CP, "carFingerprint", None) == TOADPILOT_FINGERPRINT and
+        getattr(self.CP, "openpilotLongitudinalControl", False)):
+      # Version-9 snapshots retire the legacy ramp even if a cached slider
+      # value survives. Explicitly turning the new feature off stays off.
+      configured_start_accel = 0.0
     if traffic_mode:
       # Traffic Mode still needs enough initial torque to overcome brake hold,
       # but its close-following planner must remain in charge after breakaway.

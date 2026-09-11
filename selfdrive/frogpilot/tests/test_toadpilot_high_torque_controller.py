@@ -419,6 +419,27 @@ class TestToadPilotHighTorqueControllerSequence(unittest.TestCase):
     self.assertEqual(output.toadPilotHighTorqueState, "stock")
     self.assertEqual(output.toadPilotHighTorqueHeadroomScale, 0.0)
 
+  def test_responsive_takeoff_catches_positive_request_after_zero_accel_transition(self):
+    self.CP.openpilotLongitudinalControl = True
+    self.CC.longActive = True
+    self.car_state.vEgo = 0.0
+    self.car_state.vEgoRaw = 0.0
+    self.toggles.toadpilot_responsive_takeoff = True
+    self.CC.actuators.longControlState = car.CarControl.Actuators.LongControlState.stopping
+    self.CC.actuators.accel = -1.0
+    self.update()
+    self.CC.actuators.longControlState = car.CarControl.Actuators.LongControlState.pid
+    self.CC.actuators.accel = 0.0
+    self.update()
+    self.controller.prev_accel = -1.0
+    self.controller.long_pid.i = -0.5
+    self.controller.frame = 3
+    self.CC.actuators.accel = 0.12
+    output = self.update()
+    self.assertAlmostEqual(self.controller.prev_accel, -1.0 + TOADPILOT_STOP_RELEASE_WINDUP_LIMIT)
+    self.assertTrue(output.toadPilotStopGoReleaseActive)
+    self.assertAlmostEqual(output.toadPilotLongAccelTarget, 0.12)
+
   def test_confirmed_camry_launch_clears_stale_integral_and_unwinds_only_negative_request_faster(self):
     self.CP.openpilotLongitudinalControl = True
     self.CC.longActive = True

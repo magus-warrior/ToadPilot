@@ -740,12 +740,14 @@ def get_start_accel_ramp_state():
   return {
     "schema_version": 1,
     "value": value,
-    "effective_value": value if capability["supported"] else START_ACCEL_RAMP_DEFAULT,
+    "effective_value": START_ACCEL_RAMP_DEFAULT,
+    "retired": True,
+    "replacement": "responsive_takeoff",
     "default": START_ACCEL_RAMP_DEFAULT,
     "minimum": START_ACCEL_RAMP_MIN,
     "maximum": START_ACCEL_RAMP_MAX,
     "step": START_ACCEL_RAMP_STEP,
-    "enabled": capability["supported"] and value > START_ACCEL_RAMP_DEFAULT,
+    "enabled": False,
     "capability": capability,
     "environment": road_state,
     "runtime": _get_toadpilot_status(TOADPILOT_STOP_GO_STATUS_KEY),
@@ -886,7 +888,7 @@ def set_toadpilot_config(request_data):
 
   required_fields = {
     "version", "enabled", "profile", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "experimental_max_torque",
-    "improved_stop_and_go", "automatic_traffic_mode", "traffic_mode_entry_time", "traffic_mode_max_speed_mph", "map_stop_assist",
+    "improved_stop_and_go", "responsive_takeoff", "smooth_stop_finish", "automatic_traffic_mode", "traffic_mode_entry_time", "traffic_mode_max_speed_mph", "map_stop_assist",
     "curve_assist_in_experimental", "smart_saturation_warning", "telemetry",
   }
   missing_fields = required_fields - set(request_data)
