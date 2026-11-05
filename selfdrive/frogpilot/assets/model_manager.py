@@ -2,20 +2,19 @@
 import json
 import re
 import requests
-import shutil
 import time
 import urllib.parse
 import urllib.request
 
-from pathlib import Path
-
 from openpilot.selfdrive.frogpilot.assets.download_functions import GITLAB_URL, download_file, get_repository_url, handle_error, handle_request_error, verify_download
 from openpilot.selfdrive.frogpilot.frogpilot_utilities import delete_file
-from openpilot.selfdrive.frogpilot.frogpilot_variables import DEFAULT_CLASSIC_MODEL, DEFAULT_MODEL, DEFAULT_TINYGRAD_MODEL, MODELS_PATH, params, params_default, params_memory
+from openpilot.selfdrive.frogpilot.frogpilot_variables import DEFAULT_CLASSIC_MODEL, DEFAULT_MODEL, MODELS_PATH, params, params_default, params_memory
 from openpilot.selfdrive.toad_modeld.artifact import (MODELS, artifact_path, catalog_entry,
                                                     installed as modern_model_installed)
 
 VERSION = "v13"
+# Keep North Dakota as the legacy fallback and explicitly integrated modern models.
+RETAINED_MODELS = {DEFAULT_CLASSIC_MODEL, *MODELS}
 
 CANCEL_DOWNLOAD_PARAM = "CancelModelDownload"
 DOWNLOAD_PROGRESS_PARAM = "ModelDownloadProgress"
@@ -33,7 +32,8 @@ class ModelManager:
   def fetch_models(url):
     try:
       with urllib.request.urlopen(url, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))["models"]
+        return [entry for entry in json.loads(response.read().decode("utf-8"))["models"]
+                if entry["id"] in RETAINED_MODELS]
     except Exception as error:
       handle_request_error(error, None, None, None, None)
       return []
@@ -91,6 +91,9 @@ class ModelManager:
       self.downloading_model = False
 
   def download_model(self, model_to_download):
+    if model_to_download not in RETAINED_MODELS:
+      handle_error(None, "Model removed from this installation", "Model is not retained", MODEL_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, params_memory)
+      return
     if model_to_download in MODELS:
       if not modern_model_installed(model_to_download):
         handle_error(None, "Pinned model runtime is not installed", "Install matching model runtime first", MODEL_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, params_memory)
@@ -136,24 +139,9 @@ class ModelManager:
 
   @staticmethod
   def copy_default_model():
+    # North Dakota is retained in /data/models. The bundled classic artifact is
+    # WD-40, so it must never be copied under North Dakota's name.
     ModelManager.copy_modern_model()
-    classic_default_model_path = MODELS_PATH / f"{DEFAULT_CLASSIC_MODEL}.thneed"
-    source_path = Path(__file__).parents[2] / "classic_modeld/models/supercombo.thneed"
-    if source_path.is_file() and not classic_default_model_path.is_file():
-      shutil.copyfile(source_path, classic_default_model_path)
-      print(f"Copied the classic default model from {source_path} to {classic_default_model_path}")
-
-    default_model_path = MODELS_PATH / f"{DEFAULT_MODEL}.thneed"
-    source_path = Path(__file__).parents[2] / "modeld/models/supercombo.thneed"
-    if source_path.is_file() and not default_model_path.is_file():
-      shutil.copyfile(source_path, default_model_path)
-      print(f"Copied the default model from {source_path} to {default_model_path}")
-
-    tingrad_default_model_path = MODELS_PATH / f"{DEFAULT_TINYGRAD_MODEL}.pkl"
-    source_path = Path(__file__).parents[2] / "tinygrad_modeld/models/supercombo_tinygrad.pkl"
-    if source_path.is_file() and not tingrad_default_model_path.is_file():
-      shutil.copyfile(source_path, tingrad_default_model_path)
-      print(f"Copied the default tinygrad model from {source_path} to {tingrad_default_model_path}")
 
   def check_models(self, boot_run, repo_url):
     available_models = set(self.available_models) - {DEFAULT_MODEL, DEFAULT_CLASSIC_MODEL}
@@ -206,7 +194,7 @@ class ModelManager:
       self.download_all_models()
 
   def update_model_params(self, model_info, repo_url):
-    model_info = [entry for entry in model_info if entry['id'] not in MODELS]
+    model_info = [entry for entry in model_info if entry['id'] == DEFAULT_CLASSIC_MODEL]
     self.copy_modern_model()
     model_info.extend(catalog_entry(model_id) for model_id in MODELS if modern_model_installed(model_id))
     self.available_models = [model["id"] for model in model_info]

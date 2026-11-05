@@ -50,8 +50,8 @@ ERROR_LOGS_PATH = Path("/data/error_logs")
 MAPD_PATH = Path("/data/media/0/osm/mapd")
 MAPS_PATH = Path("/data/media/0/osm/offline")
 
-DEFAULT_CLASSIC_MODEL = "wd-40"
-DEFAULT_CLASSIC_MODEL_NAME = "WD-40 (Default) 👀📡"
+DEFAULT_CLASSIC_MODEL = "north-dakota"
+DEFAULT_CLASSIC_MODEL_NAME = "North Dakota (Fallback) 👀📡"
 DEFAULT_CLASSIC_MODEL_VERSION = "v2"
 
 DEFAULT_MODEL = "national-public-radio"

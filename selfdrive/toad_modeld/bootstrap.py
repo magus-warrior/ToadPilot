@@ -4,7 +4,8 @@ import sys
 import hashlib
 import json
 
-from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODELS, installed
+from openpilot.selfdrive.toad_modeld.artifact import (MODEL_ID, MODELS, V23_REFERENCE_REVISION,
+                                                   DEEP_RL3_V2_REFERENCE_REVISION, installed)
 
 
 def configure_runtime(model_id=MODEL_ID):
@@ -22,9 +23,9 @@ def configure_runtime(model_id=MODEL_ID):
   os.environ['GMMU'] = '0'
   sys.path.insert(0, str(runtime))
 
-  if MODELS[model_id]['version'] == 'v11':
+  if MODELS[model_id]['revision'] in {V23_REFERENCE_REVISION, DEEP_RL3_V2_REFERENCE_REVISION}:
     # AGNOS 10.1 uses glibc 2.31, where these POSIX symbols live in
-    # libpthread. The v23 runtime assumes glibc >= 2.34's merged libc.
+    # libpthread. These runtimes assume glibc >= 2.34's merged libc.
     # Resolve the existing ABI from its proper library; keep GPU code intact.
     import ctypes
     import ctypes.util

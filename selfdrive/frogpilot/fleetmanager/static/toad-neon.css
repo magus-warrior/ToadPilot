@@ -1,21 +1,37 @@
-/* Dark, stationary neon accents: no flashing or animated backgrounds. */
-html.dark-mode { color-scheme: dark; --toad-rainbow: linear-gradient(100deg,#ff4c97,#ffb547,#c8ff5a,#46f5d2,#51b5ff,#be80ff); }
-#htmlElement.dark-mode body { background: radial-gradient(ellipse at top left,#19213b 0,transparent 48%),#080b14; color:#edf2ff; min-height:100vh; }
-#htmlElement.dark-mode .navbar { background:#0b1020 !important; border-bottom:3px solid transparent; border-image:var(--toad-rainbow) 1; box-shadow:0 4px 28px #51b5ff20; }
-#htmlElement.dark-mode .navbar-brand { color:#f4f7ff; font-weight:750; letter-spacing:.04em; }
-#htmlElement.dark-mode .nav-link { color:#cbd7f2; }
-#htmlElement.dark-mode .nav-link:hover { color:#46f5d2; }
-#htmlElement.dark-mode h1, #htmlElement.dark-mode h2, #htmlElement.dark-mode h3 { color:#f4f7ff; background:transparent; }
-#htmlElement.dark-mode .toadpilot-panel { background:#0e1525; border:1px solid #354366; box-shadow:0 12px 35px #0005; border-radius:16px; }
+/* Rainbow Road colors, with a quiet, stationary star field. */
+html.dark-mode {
+  color-scheme: dark;
+  --toad-rainbow: linear-gradient(100deg,#ff3653 0%,#ff8a1f 14%,#ffe23f 28%,#43e85b 43%,#21dcff 57%,#4666ff 71%,#ad46ff 86%,#ff43c7 100%);
+}
+#htmlElement.dark-mode body {
+  background:
+    radial-gradient(circle at 28px 42px,#f7f4ff55 0 1px,transparent 1.5px) 0 0 / 187px 223px,
+    radial-gradient(circle at 103px 121px,#21dcff40 0 1px,transparent 1.5px) 0 0 / 293px 271px,
+    radial-gradient(ellipse at top left,#321254 0,transparent 52%),
+    radial-gradient(ellipse at bottom right,#101b46 0,transparent 48%),#090619;
+  color:#f0ebff;
+  min-height:100vh;
+}
+#htmlElement.dark-mode .navbar { background:#100a24 !important; border-bottom:4px solid transparent; border-image:var(--toad-rainbow) 1; box-shadow:0 4px 28px #ad46ff28; }
+#htmlElement.dark-mode .navbar-brand { color:#f7f4ff; font-weight:750; letter-spacing:.04em; }
+#htmlElement.dark-mode .nav-link { color:#ded1f7; }
+#htmlElement.dark-mode .nav-link:hover { color:#21dcff; }
+#htmlElement.dark-mode h1, #htmlElement.dark-mode h2, #htmlElement.dark-mode h3 { color:#f7f4ff; background:transparent; }
+#htmlElement.dark-mode .toadpilot-panel { background:#151027; border:1px solid #57427b; box-shadow:0 12px 35px #0005,0 0 28px #ad46ff14; border-radius:16px; }
 #htmlElement.dark-mode .toadpilot-heading h1 { background:var(--toad-rainbow); background-clip:text; -webkit-background-clip:text; color:transparent; }
-#htmlElement.dark-mode .toadpilot-field, #htmlElement.dark-mode .toadpilot-check, #htmlElement.dark-mode .toadpilot-status-grid > * { background:#131d30; border-color:#354366; }
-#htmlElement.dark-mode small, #htmlElement.dark-mode .uk-text-muted { color:#b6c3dd !important; }
-#htmlElement.dark-mode a { color:#83d7ff; }
-#htmlElement.dark-mode button, #htmlElement.dark-mode .uk-button, #htmlElement.dark-mode input, #htmlElement.dark-mode select { background:#131d30; color:#f4f7ff; border:1px solid #526584; border-radius:8px; }
-#htmlElement.dark-mode input[type=checkbox] { accent-color:#46f5d2; width:22px; height:22px; flex-shrink:0; }
-#htmlElement.dark-mode .toadpilot-tab[aria-selected=true], #htmlElement.dark-mode .uk-button-primary { background:#203454; color:#e9ffff; border-color:#46f5d2; box-shadow:0 0 15px #46f5d21a; }
-#htmlElement.dark-mode button:hover { border-color:#be80ff; }
-#htmlElement.dark-mode :focus-visible { outline:3px solid #ffcf73; outline-offset:4px; }
-#htmlElement.dark-mode .uk-table { color:#edf2ff; }
-#htmlElement.dark-mode .uk-table-striped tbody tr:nth-of-type(odd) { background:#131d30; }
+#htmlElement.dark-mode .toadpilot-field, #htmlElement.dark-mode .toadpilot-check, #htmlElement.dark-mode .toadpilot-status-grid > * { background:#1d1533; border-color:#57427b; }
+#htmlElement.dark-mode small, #htmlElement.dark-mode .uk-text-muted { color:#c6b8df !important; }
+#htmlElement.dark-mode a { color:#75e8ff; }
+#htmlElement.dark-mode button, #htmlElement.dark-mode .uk-button, #htmlElement.dark-mode input, #htmlElement.dark-mode select { background:#1d1533; color:#f7f4ff; border:1px solid #75608f; border-radius:8px; }
+#htmlElement.dark-mode input[type=checkbox] { accent-color:#43e85b; width:22px; height:22px; flex-shrink:0; }
+#htmlElement.dark-mode .toadpilot-tab[aria-selected=true], #htmlElement.dark-mode .uk-button-primary {
+  background:linear-gradient(#23153c,#23153c) padding-box,var(--toad-rainbow) border-box;
+  border:2px solid transparent;
+  color:#f7f4ff;
+  box-shadow:0 0 18px #ad46ff24;
+}
+#htmlElement.dark-mode button:hover { border-color:#ff43c7; }
+#htmlElement.dark-mode :focus-visible { outline:3px solid #ffe23f; outline-offset:4px; }
+#htmlElement.dark-mode .uk-table { color:#f0ebff; }
+#htmlElement.dark-mode .uk-table-striped tbody tr:nth-of-type(odd) { background:#1d1533; }
 @media (max-width:600px) { #htmlElement.dark-mode .navbar-brand img { width:52px; height:52px; } }

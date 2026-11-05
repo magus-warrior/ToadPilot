@@ -4,7 +4,7 @@ import unittest
 
 from cereal import log
 from openpilot.selfdrive.toad_modeld.action import combine_longitudinal, convert_action, convert_plan_action
-from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODEL_VERSION
+from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODEL_VERSION, MODELS
 from openpilot.system.manager.process_config import run_classic_modeld, run_new_modeld, run_tinygrad_modeld, run_toad_modeld
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
@@ -90,9 +90,7 @@ class TestModernModel(unittest.TestCase):
       ('north-dakota', 'v2', True, False, 0),
       ('national-public-radio', 'v6', False, False, 1),
       ('not-too-shabby', 'v7', False, True, 2),
-      (MODEL_ID, MODEL_VERSION, False, False, 3),
-      ("toad-pop-v2", "v11", False, False, 3),
-      ("toad-south-carolina", "v11", False, False, 3),
+      *((mid, spec['version'], False, False, 3) for mid, spec in MODELS.items()),
     ):
       toggles = SimpleNamespace(model=name, model_version=version)
       for started in (False, True):

@@ -1,14 +1,15 @@
-/* ToadPilot Neon: offroad surfaces and button accents. Alert/video painting stays native. */
+/* Rainbow Road palette: jewel-bright accents over deep space purple. */
 SettingsWindow, OffroadHome, Sidebar, FrogPilotSettingsWindow {
-  background-color: #080b14;
-  color: #f4f7ff;
+  background-color: #090619;
+  color: #f7f4ff;
 }
 QPushButton {
-  color: #f4f7ff;
-  border: 2px solid #354366;
+  color: #f7f4ff;
+  border: 2px solid #57427b;
   border-bottom: 4px solid qlineargradient(x1:0, y1:0, x2:1, y2:0,
-    stop:0 #ff4c97, stop:0.2 #ffb547, stop:0.4 #c8ff5a,
-    stop:0.6 #46f5d2, stop:0.8 #51b5ff, stop:1 #be80ff);
+    stop:0 #ff3653, stop:0.14 #ff8a1f, stop:0.28 #ffe23f,
+    stop:0.43 #43e85b, stop:0.57 #21dcff, stop:0.71 #4666ff,
+    stop:0.86 #ad46ff, stop:1 #ff43c7);
 }
-QPushButton:pressed { border-color: #46f5d2; }
-QPushButton:disabled { color: #9ca7bd; border-color: #354366; }
+QPushButton:pressed { border-color: #21dcff; }
+QPushButton:disabled { color: #a69bbd; border-color: #57427b; }

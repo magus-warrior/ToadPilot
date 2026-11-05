@@ -12,33 +12,33 @@
     "alpha": 255
   },
   "Path": {
-    "red": 70,
-    "green": 245,
-    "blue": 210,
-    "alpha": 255
-  },
-  "PathEdge": {
-    "red": 190,
-    "green": 128,
+    "red": 33,
+    "green": 220,
     "blue": 255,
     "alpha": 255
   },
+  "PathEdge": {
+    "red": 255,
+    "green": 67,
+    "blue": 199,
+    "alpha": 255
+  },
   "Sidebar1": {
-    "red": 81,
-    "green": 181,
+    "red": 70,
+    "green": 102,
     "blue": 255,
     "alpha": 255
   },
   "Sidebar2": {
-    "red": 190,
-    "green": 128,
+    "red": 173,
+    "green": 70,
     "blue": 255,
     "alpha": 255
   },
   "Sidebar3": {
     "red": 255,
-    "green": 76,
-    "blue": 151,
+    "green": 67,
+    "blue": 199,
     "alpha": 255
   }
 }

@@ -48,9 +48,16 @@ class ModelState:
     with artifact_path(model_id).open('rb') as model:
       self.artifact = pickle.load(model) if model.peek(1)[:1] == b'\x80' else load_oob(model)
     artifact = self.artifact
+    # June artifacts sample image history in the compiled warp; newer ones do
+    # it in the policy. Only the explicitly pinned June model may omit the tag.
+    self.image_history_pipeline = MODELS[model_id].get('image_history_pipeline', 'policy')
+    artifact_pipeline = artifact.get('image_history_pipeline',
+                                     'warp' if self.image_history_pipeline == 'warp' else None)
     if (artifact['format_version'] != 1 or artifact['model_type'] not in ('supercombo', 'vision_policy') or
-        artifact['behavior_version'] != MODELS[model_id]['version'] or artifact['image_history_pipeline'] != 'policy'):
+        artifact['behavior_version'] != MODELS[model_id]['version'] or artifact_pipeline != self.image_history_pipeline):
       raise ValueError('Unsupported pinned model artifact')
+    self.warp_input_keys = (('img_q', 'big_img_q', 'tfm', 'big_tfm') if self.image_history_pipeline == 'warp'
+                           else artifact['warp_input_keys'])
     self.width, self.height = width, height
     if (width, height) not in artifact:
       raise ValueError(f'No compiled camera warp for {width}x{height}')
@@ -100,8 +107,14 @@ class ModelState:
       self.arrays['action_t'][:] = action_t
     self.arrays['tfm'][:] = transform
     self.arrays['big_tfm'][:] = wide_transform
-    warped = self.warp(**{k: self.queues[k] for k in self.artifact['warp_input_keys']}, frame=frame, big_frame=wide_frame)
-    raw_outputs = self.run_policy(**{k: self.queues[k] for k in self.artifact['policy_input_keys']}, warped=warped)
+    warped = self.warp(**{k: self.queues[k] for k in self.warp_input_keys}, frame=frame, big_frame=wide_frame)
+    policy_inputs = {k: self.queues[k] for k in self.artifact['policy_input_keys']}
+    if self.image_history_pipeline == 'warp':
+      # d97100bd's compiled warp returns the two already-sampled image stacks.
+      img, big_img = warped
+      raw_outputs = self.run_policy(**policy_inputs, img=img, big_img=big_img)
+    else:
+      raw_outputs = self.run_policy(**policy_inputs, warped=warped)
     names = ['vision', 'policy'] if self.split else ['model']
     if len(raw_outputs) != len(names):
       raise ValueError('Unexpected inference output count')
