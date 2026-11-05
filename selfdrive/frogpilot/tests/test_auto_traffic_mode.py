@@ -82,7 +82,7 @@ class TestAutoTrafficMode(unittest.TestCase):
     self.update(controller, duration=1.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
     self.assertTrue(controller.active)
 
-    status = self.update(controller, duration=20.0, v_ego=13.5)
+    status = self.update(controller, duration=2.0, v_ego=13.5)
     self.assertFalse(status.active)
     self.assertTrue(status.changed)
     self.assertEqual(status.reason, "free_flow")
@@ -116,7 +116,8 @@ class TestAutoTrafficMode(unittest.TestCase):
     controller = AutoTrafficMode()
     for cycle in range(2):
       self.update(controller, duration=1.0, v_ego=0.0)
-      status = self.update(controller, duration=DT, v_ego=2.5)
+      status = self.update(controller, duration=DT, v_ego=2.5,
+                           lead_present=True, lead_distance=10.0, lead_speed=2.5)
       if cycle == 0:
         self.assertFalse(status.active)
         self.assertEqual(status.stop_launch_cycles, 1)
@@ -147,22 +148,22 @@ class TestAutoTrafficMode(unittest.TestCase):
     self.assertFalse(status.active)
     self.assertEqual(status.stop_launch_cycles, 1)
 
-  def test_exit_requires_sustained_free_flow_without_close_lead(self):
+  def test_exit_dwell_resets_when_low_speed_traffic_returns(self):
     controller = AutoTrafficMode()
     self.update(controller, duration=6.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
     self.assertTrue(controller.active)
 
-    status = self.update(controller, duration=19.5, v_ego=19.0)
+    status = self.update(controller, duration=1.5, v_ego=19.0)
     self.assertTrue(status.active)
-    self.assertGreater(status.free_flow_time, 19.0)
+    self.assertGreater(status.free_flow_time, 1.0)
 
     # Even a brief nearby slow lead restarts the exit timer.
-    status = self.update(controller, duration=0.5, v_ego=19.0, lead_present=True,
+    status = self.update(controller, duration=0.5, v_ego=5.0, lead_present=True,
                          lead_distance=20.0, lead_speed=10.0)
     self.assertTrue(status.active)
     self.assertEqual(status.free_flow_time, 0.0)
 
-    status = self.update(controller, duration=20.0, v_ego=19.0)
+    status = self.update(controller, duration=2.0, v_ego=19.0)
     self.assertFalse(status.active)
     self.assertTrue(status.changed)
     self.assertEqual(status.reason, "free_flow")
@@ -173,11 +174,59 @@ class TestAutoTrafficMode(unittest.TestCase):
     self.update(controller, duration=6.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
     self.assertTrue(controller.active)
 
-    status = self.update(controller, duration=20.0, v_ego=19.0, lead_present=True,
+    status = self.update(controller, duration=2.0, v_ego=19.0, lead_present=True,
                          lead_distance=20.0, lead_speed=18.0)
     self.assertFalse(status.active)
     self.assertTrue(status.changed)
     self.assertEqual(status.reason, "free_flow")
+
+  def test_empty_road_releases_below_speed_threshold(self):
+    for speed in (0.0, 2.0, 10.0):
+      controller = AutoTrafficMode()
+      self.update(controller, duration=6.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+      self.assertTrue(self.update(controller, duration=1.95, v_ego=speed).active)
+      status = self.update(controller, v_ego=speed)
+      self.assertFalse(status.active)
+      self.assertTrue(status.changed)
+      self.assertFalse(self.update(controller, duration=10.0, v_ego=speed).active)
+
+  def test_speed_exit_takes_precedence_over_slow_lead(self):
+    controller = AutoTrafficMode()
+    controller.set_thresholds(max_speed_mph=30, entry_time=1.0)
+    self.update(controller, duration=1.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+    status = self.update(controller, duration=2.0, v_ego=13.5,
+                         lead_present=True, lead_distance=20.0, lead_speed=10.0)
+    self.assertFalse(status.active)
+    self.assertTrue(status.changed)
+
+  def test_exact_speed_cutoff_cannot_reactivate_with_close_lead(self):
+    controller = AutoTrafficMode()
+    controller.set_thresholds(max_speed_mph=30, entry_time=1.0)
+    self.update(controller, duration=1.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+    for _ in range(3):
+      status = self.update(controller, duration=2.0, v_ego=controller.config.free_flow_speed,
+                           lead_present=True, lead_distance=20.0, lead_speed=10.0)
+      self.assertFalse(status.active)
+
+  def test_short_lead_dropout_does_not_release_active_mode(self):
+    controller = AutoTrafficMode()
+    self.update(controller, duration=6.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+    self.assertTrue(self.update(controller, duration=1.0).active)
+    status = self.update(controller, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+    self.assertTrue(status.active)
+    self.assertEqual(status.free_flow_time, 0.0)
+
+  def test_empty_road_stop_cycles_do_not_activate(self):
+    controller = AutoTrafficMode()
+    for _ in range(4):
+      self.update(controller, duration=1.0, v_ego=0.0)
+      self.assertFalse(self.update(controller, v_ego=2.5).active)
+
+  def test_invalid_speed_cannot_release_active_traffic(self):
+    controller = AutoTrafficMode()
+    self.update(controller, duration=6.0, lead_present=True, lead_distance=18.0, lead_speed=4.0)
+    for speed in (math.nan, math.inf, True):
+      self.assertTrue(self.update(controller, duration=3.0, v_ego=speed).active)
 
   def test_invalid_sensor_values_cannot_activate(self):
     controller = AutoTrafficMode()

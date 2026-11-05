@@ -8,8 +8,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, apply_deadzone
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
-from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_BREAKAWAY_FLOOR,
-                                                                        START_ACCEL_RAMP_END_SPEED,
+from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_END_SPEED,
                                                                         START_ACCEL_RAMP_MAX_DURATION,
                                                                         StartAccelRamp)
 from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
@@ -352,10 +351,9 @@ class LongControl:
                                      feedforward=a_target)
 
     configured_start_accel = getattr(frogpilot_toggles, "start_accel_ramp", 0.0)
-    if traffic_mode:
-      # Traffic Mode still needs enough initial torque to overcome brake hold,
-      # but its close-following planner must remain in charge after breakaway.
-      configured_start_accel = min(configured_start_accel, START_ACCEL_BREAKAWAY_FLOOR)
+    # Honor the configured launch floor in Traffic Mode too. StartAccelRamp
+    # bounds it to a confirmed release, positive plan, low speed, and two seconds;
+    # capping it here silently defeats higher settings during stop-and-go.
 
     output_accel = self.start_accel_ramp.update(
       output_accel,

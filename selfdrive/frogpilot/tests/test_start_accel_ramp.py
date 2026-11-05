@@ -209,7 +209,7 @@ class TestStartAccelRampControl(unittest.TestCase):
     self.assertEqual(control.long_control_state, LongCtrlState.pid)
     self.assertGreater(output, 0.0)
 
-  def test_traffic_mode_caps_start_accel_ramp_at_breakaway_floor(self):
+  def test_traffic_mode_honors_configured_start_accel_ramp(self):
     CP = SimpleNamespace(
       enableGasInterceptor=False,
       startingState=False,
@@ -229,16 +229,30 @@ class TestStartAccelRampControl(unittest.TestCase):
       brakePressed=False,
       cruiseState=SimpleNamespace(standstill=True),
     )
-    control = LongControl(CP)
+    for traffic_mode in (False, True):
+      for configured in (0.0, 0.55, 1.0):
+        with self.subTest(traffic_mode=traffic_mode, configured=configured):
+          control = LongControl(CP)
+          toggles.start_accel_ramp = configured
+          CS.vEgo = 0.0
+          CS.brakePressed = False
+          CS.cruiseState.standstill = True
+          control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles, traffic_mode=traffic_mode)
+          CS.cruiseState.standstill = False
+          output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles, traffic_mode=traffic_mode)
+          self.assertEqual(control.long_control_state, LongCtrlState.pid)
+          self.assertEqual(control.start_accel_ramp.started, configured > 0.0)
+          self.assertAlmostEqual(output, configured)
 
-    control.update(True, CS, 0.0, True, (-3.0, 2.0), toggles, traffic_mode=True)
-    CS.cruiseState.standstill = False
-    output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles, traffic_mode=True)
+          # At half the assist's speed range the configured floor has halved.
+          CS.vEgo = 1.0
+          output = control.update(True, CS, 0.3, False, (-3.0, 2.0), toggles, traffic_mode=traffic_mode)
+          self.assertAlmostEqual(output, configured / 2)
 
-    self.assertEqual(control.long_control_state, LongCtrlState.pid)
-    self.assertTrue(control.start_accel_ramp.armed)
-    self.assertTrue(control.start_accel_ramp.started)
-    self.assertAlmostEqual(output, START_ACCEL_BREAKAWAY_FLOOR)
+          # A new planner stop cancels even the higher Traffic Mode floor.
+          output = control.update(True, CS, 0.3, True, (-3.0, 2.0), toggles, traffic_mode=traffic_mode)
+          self.assertLessEqual(output, 0.0)
+          self.assertFalse(control.start_accel_ramp.armed)
 
   def test_improved_stop_and_go_breaks_stale_camry_standstill_loop(self):
     CP = SimpleNamespace(

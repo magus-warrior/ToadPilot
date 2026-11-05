@@ -37,7 +37,7 @@ class AutoTrafficModeConfig:
 
   lead_entry_time: float = 6.0            # s
   intersection_entry_time: float = 4.5    # s
-  free_flow_exit_time: float = 20.0       # s
+  free_flow_exit_time: float = 2.0       # s
   evidence_decay_rate: float = 0.5        # evidence seconds lost per second
 
   stopped_speed: float = 0.3              # m/s
@@ -73,8 +73,8 @@ class AutoTrafficMode:
   deterministic.
 
   A nearby, slow lead at low ego speed must persist before activation. Two
-  genuine stop-to-launch cycles within a rolling window are an independent
-  congestion signal. Navigation intersection data can only strengthen the
+  genuine stop-to-launch cycles within a rolling window can strengthen
+  congestion evidence only while a slow nearby lead is currently present. Navigation intersection data can only strengthen the
   first signal; it cannot activate Traffic Mode on its own.
   """
   def __init__(self, config=None):
@@ -154,7 +154,8 @@ class AutoTrafficMode:
     close_lead = bool(lead_present and valid_ego_speed and valid_lead_distance and
                       lead_distance <= self._close_distance(safe_v_ego))
     close_slow_lead = bool(close_lead and valid_lead_speed and lead_speed <= self.config.slow_lead_speed)
-    congestion_observed = safe_v_ego <= self.config.low_speed and close_slow_lead
+    congestion_observed = (safe_v_ego <= self.config.low_speed and
+                           safe_v_ego < self.config.free_flow_speed and close_slow_lead)
 
     if congestion_observed:
       self.congestion_time = min(self.config.lead_entry_time, self.congestion_time + observation_dt)
@@ -173,7 +174,7 @@ class AutoTrafficMode:
       required_time = (self.config.intersection_entry_time if approaching_intersection
                        else self.config.lead_entry_time)
       repeated_stop_and_go = len(self.stop_launches) >= self.config.stop_launches_required
-      if repeated_stop_and_go:
+      if repeated_stop_and_go and congestion_observed:
         self.active = True
         self.activation_reason = "repeated_stop_and_go"
         changed = True
@@ -185,14 +186,14 @@ class AutoTrafficMode:
 
       self.free_flow_time = 0.0
     else:
-      # A nearby vehicle moving with free-flow traffic is not congestion. Only
-      # a nearby slow lead should prevent the exit timer from accumulating.
-      free_flow_observed = safe_v_ego >= self.config.free_flow_speed and not close_slow_lead
+      # Speed takes precedence above the configured threshold. Below it,
+      # loss of a nearby lead also releases the profile after a short dwell.
+      # Invalid speed must never count as observed free flow.
+      free_flow_observed = valid_ego_speed and (safe_v_ego >= self.config.free_flow_speed or not close_lead)
       if free_flow_observed:
         self.free_flow_time += observation_dt
       else:
-        # Exit requires one uninterrupted free-flow interval. This deliberately
-        # favors staying in the gentler profile over mode chatter.
+        # A brief lead dropout or speed spike must not change profiles.
         self.free_flow_time = 0.0
 
       if self.free_flow_time + 1e-9 >= self.config.free_flow_exit_time:
@@ -201,6 +202,8 @@ class AutoTrafficMode:
         self.congestion_time = 0.0
         self.free_flow_time = 0.0
         self.stop_launches.clear()
+        self.stop_armed = False
+        self.stopped_time = 0.0
         changed = True
         transition_reason = "free_flow"
 

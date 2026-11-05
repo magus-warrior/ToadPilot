@@ -14,7 +14,9 @@ class ConditionalExperimentalMode:
 
     self.curve_detected = False
     self.experimental_mode = False
+    self.slow_lead_detected = False
     self.stop_light_detected = False
+    self.status_value = 0
 
   def update(self, carState, frogpilotCarState, frogpilotNavigation, v_ego, frogpilot_toggles):
     if frogpilot_toggles.experimental_mode_via_press:
@@ -22,14 +24,23 @@ class ConditionalExperimentalMode:
     else:
       self.status_value = 0
 
-    if self.status_value not in {1, 2} and not carState.standstill:
-      self.update_conditions(frogpilotCarState, v_ego, frogpilot_toggles)
-      self.experimental_mode = self.check_conditions(carState, frogpilotNavigation, v_ego, frogpilot_toggles)
-      params_memory.put_int("CEStatus", self.status_value if self.experimental_mode else 0)
-    else:
-      self.experimental_mode = self.status_value == 2 or carState.standstill and self.experimental_mode and self.frogpilot_planner.model_stopped
-      self.stop_light_detected &= self.status_value not in {1, 2}
+    if self.status_value in {1, 2}:
+      self.experimental_mode = self.status_value == 2
+      self.stop_light_detected = False
       self.stop_light_filter.x = 0
+      return
+
+    # Keep observations current while stopped. Freezing the lead filter here
+    # carries a stopped-lead condition into launch and can re-enter experimental
+    # mode after the model has already released the stop.
+    self.update_conditions(frogpilotCarState, v_ego, frogpilot_toggles)
+    if carState.standstill:
+      # Observation refresh must not itself cancel a model stop or initiate a
+      # new automatic mode at standstill.
+      self.experimental_mode = self.experimental_mode and self.frogpilot_planner.model_stopped
+    else:
+      self.experimental_mode = self.check_conditions(carState, frogpilotNavigation, v_ego, frogpilot_toggles)
+    params_memory.put_int("CEStatus", self.status_value if self.experimental_mode else 0)
 
   def check_conditions(self, carState, frogpilotNavigation, v_ego, frogpilot_toggles):
     below_speed = frogpilot_toggles.conditional_limit > v_ego >= 1 and not self.frogpilot_planner.frogpilot_following.following_lead
