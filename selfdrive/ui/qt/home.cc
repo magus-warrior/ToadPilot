@@ -159,6 +159,7 @@ OffroadHome::OffroadHome(QWidget* parent) : QFrame(parent) {
   auto *abrasaxLogo = new QLabel;
   abrasaxLogo->setPixmap(QPixmap("../frogpilot/fleetmanager/static/abrasax-logo.png").scaled(510, 170, Qt::KeepAspectRatio, Qt::SmoothTransformation));
   abrasaxLogo->setAlignment(Qt::AlignCenter);
+  abrasaxLogo->setStyleSheet("background: white; border-radius: 16px; padding: 12px;");
   main_layout->addWidget(abrasaxLogo);
 
   // main content

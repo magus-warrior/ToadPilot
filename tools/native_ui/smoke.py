@@ -37,8 +37,11 @@ def main():
       for key, value in values.items():
         if value is not None:
           clone.put(key, value)
+    panel = os.getenv('ABRASAX_PREVIEW_PANEL', 'offroad')
+    if panel not in ('offroad', 'models', 'gas'):
+      raise ValueError('Unknown preview panel')
     env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software',
-               ABRASAX_SCREENSHOT=str(ROOT / '.native-preview/offroad.png'))
+               ABRASAX_SCREENSHOT=str(ROOT / f'.native-preview/{panel}.png'))
     screenshot = Path(env['ABRASAX_SCREENSHOT'])
     screenshot.unlink(missing_ok=True)
     with (ROOT / '.native-preview/offroad.log').open('wb') as log:

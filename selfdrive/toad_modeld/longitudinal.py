@@ -10,9 +10,15 @@ from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 
 
-def coordination_enabled(toggles, experimental):
+ACCEL_LEARNING_MIN_SPEED = 10 * CV.MPH_TO_MS
+
+
+def coordination_enabled(toggles, experimental, v_ego):
+  # Preserve the existing blended planner through stop/go and hybrid launch.
+  # The override learner cannot contribute below this speed anyway.
   return (experimental and is_modern_model(toggles) and
-          getattr(toggles, 'toadpilot_modern_longitudinal', False) is True)
+          getattr(toggles, 'toadpilot_modern_longitudinal', False) is True and
+          math.isfinite(v_ego) and v_ego >= ACCEL_LEARNING_MIN_SPEED)
 
 
 class AccelBoost:
@@ -23,7 +29,7 @@ class AccelBoost:
     self.boost_eligible = False
 
   def update(self, enabled, gas_pressed, v_ego, model_accel, mpc_accel, cruise_accel, dt):
-    speed_scale = float(np.interp(v_ego, [10 * CV.MPH_TO_MS, 20 * CV.MPH_TO_MS], [0.0, 1.0]))
+    speed_scale = float(np.interp(v_ego, [ACCEL_LEARNING_MIN_SPEED, 2 * ACCEL_LEARNING_MIN_SPEED], [0.0, 1.0]))
     boost_scale = speed_scale * float(np.interp(model_accel, [-1.0, -0.5, 5.0], [0.0, 1.0, 1.0], right=0.0))
     model_limited = model_accel + self.total_boost * boost_scale < min(mpc_accel, cruise_accel) - 0.1
     if not enabled or not gas_pressed:

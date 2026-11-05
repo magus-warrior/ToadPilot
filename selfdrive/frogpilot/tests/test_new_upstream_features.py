@@ -193,6 +193,33 @@ def test_boost_requires_override_is_bounded_and_never_raises_lead_limit():
   assert accel == -2 and source == 'lead0'
 
 
+@pytest.mark.parametrize('speed', [0., .1, 1., 1.99])
+def test_acceleration_learning_does_not_change_hybrid_launch_boost(speed):
+  from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import StartAccelRamp
+
+  outputs = []
+  for learning in (False, True):
+    coordinator = LongitudinalCoordinator()
+    coordinator.boost.total_boost = .2  # Already learned the largest allowed adjustment.
+    ramp = StartAccelRamp()
+    action = NS(desiredAcceleration=.3, longitudinalValid=True, shouldStop=False)
+    accel, stop, _ = coordinator_step(coordinator, v_ego=speed, v_cruise=10.,
+      action=action, mpc_accel=.4, boost_enabled=learning)
+    # The actual downstream hybrid launch floor, using the device's saved setting.
+    output = ramp.update(accel, 1., speed, accel, True, True, stop, False, False)
+    outputs.append((accel, stop, output))
+    assert output >= accel
+    assert ramp.started == (not stop)
+    # A model stop must cancel the launch even with the learned maximum present.
+    action.shouldStop = True
+    stopped_accel, must_stop, _ = coordinator_step(coordinator, v_ego=speed, v_cruise=10.,
+      action=action, mpc_accel=.4, boost_enabled=learning)
+    assert must_stop
+    assert ramp.update(stopped_accel, 1., speed, stopped_accel, False, True, must_stop, False, False) == stopped_accel
+    assert not ramp.started
+  assert outputs[0] == outputs[1]
+
+
 def test_hill_correction_is_transient_bounded_and_resets_missing_attitude():
   hill = HillCompensation(.01)
   hill.update([0, .1, 0])
@@ -268,6 +295,33 @@ def test_real_planner_solver_update_publish_and_switch_off():
   sm['controlsState'].experimentalMode = False
   planner.update(False, sm, toggles)
   assert planner.mpc.mode == 'acc' and planner.coordinated_output is None
+
+
+@pytest.mark.parametrize('speed', [0., .1, 1., 1.99, 4.4])
+def test_real_planner_learning_keeps_existing_low_speed_path(speed):
+  from openpilot.selfdrive.modeld.constants import ModelConstants
+
+  outputs = []
+  for learning in (False, True):
+    fixture, sm, toggles = planner_fixture()
+    planner = type(fixture)(fixture.CP, init_v=speed)
+    sm['carState'].vEgo = speed
+    sm['modelV2'].position.x = (np.array(ModelConstants.T_IDXS) * speed).tolist()
+    sm['modelV2'].velocity.x = [speed] * 33
+    sm['modelV2'].action.desiredAcceleration = .3
+    toggles.toadpilot_modern_longitudinal = learning
+    toggles.toadpilot_accel_boost = learning
+    pm = Mock()
+    samples = []
+    for _ in range(10):
+      planner.update(False, sm, toggles)
+      planner.publish(False, False, sm, pm, toggles)
+      plan = pm.send.call_args.args[1].longitudinalPlan
+      assert planner.mpc.mode == 'blended'
+      assert planner.coordinated_output is None
+      samples.append((plan.aTarget, plan.shouldStop))
+    outputs.append(samples)
+  assert outputs[0] == outputs[1]
 
 
 def test_full_delay_learner_reaches_confident_estimate_from_delayed_signal():

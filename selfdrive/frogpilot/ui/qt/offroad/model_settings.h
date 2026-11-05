@@ -3,6 +3,7 @@
 #include <set>
 
 #include "selfdrive/frogpilot/ui/qt/offroad/frogpilot_settings.h"
+#include "selfdrive/ui/qt/offroad/toadpilot_api.h"
 
 class FrogPilotModelPanel : public FrogPilotListWidget {
   Q_OBJECT
@@ -15,19 +16,28 @@ signals:
 
 protected:
   void showEvent(QShowEvent *event) override;
+  void hideEvent(QHideEvent *event) override;
 
 private:
   void updateModelLabels(FrogPilotListWidget *labelsList);
   void updateState(const UIState &s);
   void updateToggles();
+  void loadInstalledModels(bool choose);
+  void queueModelReboot(const QString &id, const QString &name);
+  void refreshModelReboot();
+  ToadPilotApi modelApi{this};
+  bool modelRequestPending = false;
+  bool rebootPending = false;
+  bool rebootStatusPending = false;
+  QTimer rebootTimer;
 
-  bool allModelsDownloaded;
-  bool allModelsDownloading;
-  bool cancellingDownload;
-  bool finalizingDownload;
-  bool modelDownloading;
-  bool noModelsDownloaded;
-  bool started;
+  bool allModelsDownloaded = false;
+  bool allModelsDownloading = false;
+  bool cancellingDownload = false;
+  bool finalizingDownload = false;
+  bool modelDownloading = false;
+  bool noModelsDownloaded = false;
+  bool started = false;
 
   int tuningLevel;
 

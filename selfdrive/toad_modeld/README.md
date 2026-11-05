@@ -127,13 +127,15 @@ on). The new settings remain behind the existing supported-Camry/master gates.
   keyed by vehicle parameters and selected model and need new route evidence.
   The confidence-window peak index includes the minimum-lag offset; flat/nonfinite
   inputs and sampling gaps are rejected. This differs from the upstream adapter.
-* **Modern longitudinal coordination**: all registered v11/v15 models in
-  Experimental Mode use separate model, cruise and lead-plan candidates, choosing
+* **Modern longitudinal coordination**: registered v11/v15 models in
+  Experimental Mode at or above 10 mph use separate model, cruise and lead-plan candidates, choosing
   the lowest acceleration and retaining every stop request. Cruise jerk follows
   comma v0.11.2. The fork's current compiled MPC, cruise obstacle, following policy,
   acceleration limits, throttle gating and controller remain in use. It is not a
   full replacement with upstream openpilot's planner. Turning it off restores the
-  previous blended-MPC path. Missing/invalid modern actions invalidate the plan.
+  previous blended-MPC path. Below 10 mph that original path is always retained
+  to preserve hybrid launch / stop-go behavior. Missing/invalid modern actions
+  invalidate the coordinated plan.
 * **Learn from accelerator overrides**: optional with modern coordination. Uses
   upstream v0.11.2's bounded boost (0.025 m/s² per second, 0.05 per override, 0.2
   total); requires prior evidence that the model was limiting acceleration. Clears

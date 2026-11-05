@@ -38,13 +38,19 @@ DialogBase::DialogBase(QWidget *parent) : QDialog(parent) {
 
 bool DialogBase::eventFilter(QObject *o, QEvent *e) {
   if (o == parent() && e->type() == QEvent::Hide) {
+    if (qEnvironmentVariableIsSet("ABRASAX_UI_PREVIEW")) fprintf(stderr, "Preview dialog rejected because parent hid\n");
     reject();
   }
   return QDialog::eventFilter(o, e);
 }
 
 int DialogBase::exec() {
-  setMainWindow(this);
+  if (qEnvironmentVariableIsSet("ABRASAX_UI_PREVIEW")) {
+    resize(2160, 1080);
+    show();
+  } else {
+    setMainWindow(this);
+  }
   return QDialog::exec();
 }
 
@@ -346,6 +352,7 @@ MultiOptionDialog::MultiOptionDialog(const QString &prompt_text, const QStringLi
 
 QString MultiOptionDialog::getSelection(const QString &prompt_text, const QStringList &l, const QString &current, QWidget *parent) {
   MultiOptionDialog d = MultiOptionDialog(prompt_text, l, current, parent);
+  if (qEnvironmentVariableIsSet("ABRASAX_UI_PREVIEW")) fprintf(stderr, "Preview entering model dialog, %d rows\n", l.size());
   if (d.exec()) {
     return d.selection;
   }

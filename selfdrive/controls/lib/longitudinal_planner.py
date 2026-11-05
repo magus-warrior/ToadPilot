@@ -227,7 +227,7 @@ class LongitudinalPlanner:
     return x, v, a, j, throttle_prob
 
   def update(self, radarless_model, sm, frogpilot_toggles):
-    coordinated = coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode)
+    coordinated = coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode, sm['carState'].vEgo)
     was_coordinated = self.coordinated_output is not None
     self.coordinated_output = None
     self.coordinated_valid = True
@@ -374,7 +374,7 @@ class LongitudinalPlanner:
                                                   action_t=action_t, vEgoStopping=frogpilot_toggles.vEgoStopping)
     longitudinalPlan.aTarget = a_target
     longitudinalPlan.shouldStop = should_stop
-    if coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode):
+    if coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode, sm['carState'].vEgo):
       if self.coordinated_valid and self.coordinated_output is not None:
         longitudinalPlan.aTarget, longitudinalPlan.shouldStop, longitudinalPlan.longitudinalPlanSource = self.coordinated_output
       else:

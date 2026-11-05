@@ -61,7 +61,7 @@ void Sidebar::updateIcons() {
 
 void Sidebar::updateIcon(QLabel *&label, QMovie *&gif, const QString &gifPath, const QRect &btnRect, const QString &pngPath, bool &isGif) {
   QString selectedGifPath = gifPath;
-  if (util::random_int(1, 100 * UI_FREQ) == 100 * UI_FREQ && btnRect == home_btn && isRandomEvents) {
+  if (!gifPath.isEmpty() && util::random_int(1, 100 * UI_FREQ) == 100 * UI_FREQ && btnRect == home_btn && isRandomEvents) {
     selectedGifPath = randomEventGifPath;
   }
 
@@ -95,10 +95,18 @@ void Sidebar::updateIcon(QLabel *&label, QMovie *&gif, const QString &gifPath, c
     }
   } else {
     if (btnRect == home_btn) {
-      home_img = loadPixmap(homePngPath, btnRect.size());
+      home_img = QPixmap(btnRect.size());
+      home_img.fill(Qt::transparent);
+      QPainter logoPainter(&home_img);
+      logoPainter.setRenderHint(QPainter::Antialiasing);
+      logoPainter.setPen(Qt::NoPen);
+      logoPainter.setBrush(Qt::white);
+      logoPainter.drawRoundedRect(home_img.rect().adjusted(0, 40, 0, -40), 12, 12);
+      auto logo = loadPixmap(pngPath, QSize(160, 80));
+      logoPainter.drawPixmap((180 - logo.width()) / 2, (180 - logo.height()) / 2, logo);
       flag_img = loadPixmap(flagPngPath, btnRect.size());
     } else {
-      settings_img = loadPixmap(settingsPngPath, btnRect.size(), Qt::IgnoreAspectRatio);
+      settings_img = loadPixmap(pngPath, btnRect.size(), Qt::IgnoreAspectRatio);
     }
 
     isGif = false;

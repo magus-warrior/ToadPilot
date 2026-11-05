@@ -1,5 +1,7 @@
 #pragma once
 
+#include "selfdrive/ui/qt/offroad/toadpilot_api.h"
+
 #include <set>
 
 #include "selfdrive/frogpilot/ui/qt/offroad/frogpilot_settings.h"
@@ -21,6 +23,12 @@ private:
   void updateMetric(bool metric, bool bootRun);
   void updateState(const UIState &s);
   void updateToggles();
+  void refreshAccelerationLearning();
+  ToadPilotApi learningApi{this};
+  ButtonControl *learningButton;
+  bool learningEnabled = false;
+  bool learningStateKnown = false;
+  bool learningRequestPending = false;
 
   bool customPersonalityOpen;
   bool hasDashSpeedLimits;

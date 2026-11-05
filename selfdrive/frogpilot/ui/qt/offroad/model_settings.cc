@@ -1,4 +1,6 @@
 #include "selfdrive/frogpilot/ui/qt/offroad/model_settings.h"
+#include <QJsonArray>
+#include "common/timing.h"
 
 FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : FrogPilotListWidget(parent), parent(parent) {
   QStackedLayout *modelLayout = new QStackedLayout();
@@ -23,7 +25,7 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
     {"ModelRandomizer", tr("Model Randomizer"), tr("Driving models are chosen at random each drive and feedback prompts are used to find the model that best suits your needs."), ""},
     {"ManageBlacklistedModels", tr("Manage Model Blacklist"), tr("Add or remove models from the <b>Model Randomizer</b>'s blacklist list."), ""},
     {"ManageScores", tr("Manage Model Ratings"), tr("Reset or view the saved ratings for the driving models."), ""},
-    {"SelectModel", tr("Select Driving Model"), tr("Select the active driving model."), ""}
+    {"SelectModel", tr("Select Driving Model"), tr("Select an installed model. Offroad changes apply next drive. While driving, confirm a reboot manually or by switching cruise off; reboot waits until all driving control is inactive."), ""}
   };
 
   for (const auto &[param, title, desc, icon] : modelToggles) {
@@ -190,30 +192,16 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
       modelToggle = manageScoresBtn;
     } else if (param == "SelectModel") {
       selectModelBtn = new ButtonControl(title, tr("SELECT"), desc);
+      selectModelBtn->setObjectName("installedModelSelector");
       QObject::connect(selectModelBtn, &ButtonControl::clicked, [this]() {
-        QStringList selectableModels;
-        for (const QString &file : modelDir.entryList(QDir::Files)) {
-          QString modelName = modelFileToNameMap.value(QFileInfo(file).baseName());
-          if (!modelName.isEmpty() && !modelName.contains("(Default)")) {
-            selectableModels.append(modelName);
-          }
+        if (rebootPending) {
+          modelApi.request("/toadpilot/model-reboot", {{"cancel", true}}, true, [this](const QJsonObject &, const QString &error) {
+            if (!error.isEmpty() && isVisible()) ConfirmationDialog::alert(error, this);
+            refreshModelReboot();
+          });
+          return;
         }
-        selectableModels.sort();
-        selectableModels.prepend(modelFileToNameMap.value(QString::fromStdString(params_default.get("Model"))));
-
-        QString modelToSelect = MultiOptionDialog::getSelection(tr("Select a model - 🗺️ = Navigation | 📡 = Radar | 👀 = VOACC"), selectableModels, currentModel, this);
-        if (!modelToSelect.isEmpty()) {
-          currentModel = modelToSelect;
-
-          params.put("Model", modelFileToNameMap.key(modelToSelect).toStdString());
-
-          if (started) {
-            if (FrogPilotConfirmationDialog::toggleReboot(this)) {
-              Hardware::reboot();
-            }
-          }
-          selectModelBtn->setValue(modelToSelect);
-        }
+        loadInstalledModels(true);
       });
       modelToggle = selectModelBtn;
 
@@ -247,18 +235,22 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
 
   QObject::connect(parent, &FrogPilotSettingsWindow::closeParentToggle, [modelLayout, modelPanel] {modelLayout->setCurrentWidget(modelPanel);});
   QObject::connect(uiState(), &UIState::uiUpdate, this, &FrogPilotModelPanel::updateState);
+  rebootTimer.setInterval(1000);
+  QObject::connect(&rebootTimer, &QTimer::timeout, this, &FrogPilotModelPanel::refreshModelReboot);
 }
 
 void FrogPilotModelPanel::showEvent(QShowEvent *event) {
-  UIState *s = s;
+  UIState *s = uiState();
 
   frogpilotToggleLevels = parent->frogpilotToggleLevels;
   tuningLevel = parent->tuningLevel;
 
   availableModels = QString::fromStdString(params.get("AvailableModels")).split(",");
-  availableModels.sort();
   availableModelNames = QString::fromStdString(params.get("AvailableModelNames")).split(",");
-  availableModelNames.sort();
+
+  modelFileToNameMap.clear();
+  modelFileToNameMapProcessed.clear();
+  deletableModels.clear();
 
   int size = qMin(availableModels.size(), availableModelNames.size());
   for (int i = 0; i < size; ++i) {
@@ -284,6 +276,9 @@ void FrogPilotModelPanel::showEvent(QShowEvent *event) {
 
   currentModel = modelFileToNameMap.value(QString::fromStdString(params.get("Model")));
   selectModelBtn->setValue(currentModel);
+  loadInstalledModels(false);
+  refreshModelReboot();
+  rebootTimer.start();
 
   bool parked = !s->scene.started || s->scene.parked;
 
@@ -346,8 +341,125 @@ void FrogPilotModelPanel::updateState(const UIState &s) {
   downloadModelBtn->setVisibleButton(1, !modelDownloading);
 
   started = s.scene.started;
+  selectModelBtn->setEnabled(!modelRequestPending);
 
   parent->keepScreenOn = allModelsDownloading || modelDownloading;
+}
+
+void FrogPilotModelPanel::loadInstalledModels(bool choose) {
+  if (qEnvironmentVariableIsSet("ABRASAX_UI_PREVIEW")) fprintf(stderr, "models request choose=%d pending=%d visible=%d\n", choose, modelRequestPending, isVisible());
+  if (modelRequestPending) return;
+  modelRequestPending = true;
+  selectModelBtn->setEnabled(false);
+  modelApi.request("/toadpilot/models", {}, false, [this, choose](const QJsonObject &data, const QString &error) {
+    modelRequestPending = false;
+    const bool offroad = data.value("environment").toObject().value("offroad_confirmed").toBool();
+    if (qEnvironmentVariableIsSet("ABRASAX_UI_PREVIEW")) fprintf(stderr, "models response choose=%d offroad=%d visible=%d error=%s\n", choose, offroad, isVisible(), qPrintable(error));
+    const bool onroad = data.value("environment").toObject().value("onroad").toBool();
+    selectModelBtn->setEnabled(offroad || onroad);
+    if (!error.isEmpty()) {
+      selectModelBtn->setValue(tr("Unavailable"));
+      // Allow a retry after a transient failure; the server still checks road state.
+      selectModelBtn->setEnabled(true);
+      if (choose && isVisible()) ConfirmationDialog::alert(error, this);
+      return;
+    }
+    QMap<QString, QString> nameToId;
+    QString selectedName;
+    const QString selected = data.value("selected").toString();
+    for (const auto &value : data.value("models").toArray()) {
+      auto model = value.toObject();
+      if (model.value("id").toString() == selected) selectedName = model.value("name").toString();
+      if (model.value("installed").toBool()) nameToId[model.value("name").toString()] = model.value("id").toString();
+    }
+    currentModel = selectedName.isEmpty() ? selected : selectedName;
+    selectModelBtn->setValue(currentModel);
+    if (!choose || !(offroad || onroad) || !isVisible() || rebootPending) return;
+    // FrogPilot's full-screen dialog sets the Wayland rotation and uses touch-sized rows.
+    const QString name = MultiOptionDialog::getSelection(tr("Select an installed driving model"), nameToId.keys(), currentModel, this);
+    if (name.isEmpty() || !nameToId.contains(name) || !isVisible()) return;
+    const QString id = nameToId.value(name);
+    if (uiState()->scene.started || onroad) {
+      queueModelReboot(id, name);
+      return;
+    }
+    modelRequestPending = true;
+    selectModelBtn->setEnabled(false);
+    selectModelBtn->setValue(tr("Saving…"));
+    modelApi.request("/toadpilot/models", {{"model", id}}, true, [this, id, name](const QJsonObject &saved, const QString &saveError) {
+      modelRequestPending = false;
+      selectModelBtn->setEnabled(!uiState()->scene.started);
+      if (!saveError.isEmpty() || saved.value("selected").toString() != id) {
+        selectModelBtn->setValue(tr("Not confirmed"));
+        if (isVisible()) ConfirmationDialog::alert(saveError.isEmpty() ? tr("Model selection was not confirmed.") : saveError, this);
+        return;
+      }
+      currentModel = name;
+      selectModelBtn->setValue(name);
+      // The backend also disables randomization when a model is explicitly chosen.
+      static_cast<ParamControl *>(toggles["ModelRandomizer"])->refresh();
+      updateToggles();
+    });
+  });
+}
+
+void FrogPilotModelPanel::hideEvent(QHideEvent *event) {
+  rebootTimer.stop();
+  FrogPilotListWidget::hideEvent(event);
+}
+
+void FrogPilotModelPanel::queueModelReboot(const QString &id, const QString &name) {
+  ConfirmationDialog dialog(tr("Reboot with %1?\n\nTap Reboot, or switch cruise off to confirm automatically. Reboot waits for cruise, steering control and acceleration control to be inactive. Cancel keeps the current model.").arg(name),
+                            tr("Reboot"), tr("Cancel"), false, this, true);
+  QTimer watcher(&dialog);
+  watcher.setInterval(100);
+  uint64_t readySince = 0;
+  QObject::connect(&watcher, &QTimer::timeout, &dialog, [&dialog, &readySince] {
+    auto &sm = *uiState()->sm;
+    const uint64_t now = nanos_since_boot();
+    bool fresh = true;
+    for (const char *service : {"carState", "carControl", "controlsState"}) {
+      const uint64_t received = sm.rcv_time(service);
+      const uint64_t timestamp = sm[service].getLogMonoTime();
+      fresh &= sm.alive(service) && sm.valid(service) && received <= now && now - received < 500000000ULL &&
+               timestamp <= now && now - timestamp < 500000000ULL;
+    }
+    bool ready = false;
+    if (fresh) {
+      const auto command = sm["carControl"].getCarControl();
+      ready = !sm["carState"].getCarState().getCruiseState().getEnabled() &&
+              !sm["controlsState"].getControlsState().getEnabled() &&
+              !command.getEnabled() && !command.getLatActive() && !command.getLongActive();
+    }
+    if (!ready) readySince = 0;
+    else if (!readySince) readySince = now;
+    else if (now - readySince >= 1000000000ULL) dialog.accept();
+  });
+  watcher.start();
+  if (!dialog.exec()) return;
+  modelRequestPending = true;
+  selectModelBtn->setEnabled(false);
+  modelApi.request("/toadpilot/model-reboot", {{"model", id}}, true, [this](const QJsonObject &state, const QString &error) {
+    modelRequestPending = false;
+    if (!error.isEmpty() && isVisible()) ConfirmationDialog::alert(error, this);
+    rebootPending = state.value("pending").toBool();
+    refreshModelReboot();
+  });
+}
+
+void FrogPilotModelPanel::refreshModelReboot() {
+  if (rebootStatusPending) return;
+  rebootStatusPending = true;
+  modelApi.request("/toadpilot/model-reboot", {}, false, [this](const QJsonObject &state, const QString &error) {
+    rebootStatusPending = false;
+    if (!error.isEmpty()) return;
+    const bool wasPending = rebootPending;
+    rebootPending = state.value("pending").toBool();
+    selectModelBtn->setText(rebootPending ? tr("CANCEL") : tr("SELECT"));
+    if (rebootPending || state.value("state").toString() == "rebooting")
+      selectModelBtn->setValue(state.value("message").toString());
+    else if (wasPending) loadInstalledModels(false);
+  });
 }
 
 void FrogPilotModelPanel::updateModelLabels(FrogPilotListWidget *labelsList) {

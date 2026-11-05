@@ -403,6 +403,30 @@ def diagnostics_page():
   return render_template('diagnostics.html')
 
 
+@app.route('/toadpilot/model-reboot', methods=['GET', 'POST'])
+def model_reboot_route():
+  from openpilot.selfdrive.frogpilot.model_reboot import coordinator
+  control = coordinator()
+  try:
+    if request.method == 'GET':
+      result = control.status()
+    else:
+      data = request.get_json(silent=True)
+      if not isinstance(data, dict):
+        raise ValueError('Expected a model reboot request.')
+      if set(data) == {'cancel'} and data['cancel'] is True:
+        result = control.cancel()
+      elif set(data) == {'model'}:
+        result = control.submit(data['model'])
+      else:
+        raise ValueError('Choose a model or cancel the pending request.')
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+  except ValueError as error:
+    return jsonify(error=str(error)), 400
+
+
 @app.route('/toadpilot/trips')
 def toadpilot_trips_route():
   from openpilot.selfdrive.frogpilot.diagnostics import list_trips

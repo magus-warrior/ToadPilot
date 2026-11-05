@@ -14,7 +14,6 @@
 #include "selfdrive/ui/qt/widgets/prime.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 #include "selfdrive/ui/qt/widgets/ssh_keys.h"
-#include "selfdrive/ui/qt/offroad/toadpilot_panel.h"
 
 #include "selfdrive/frogpilot/ui/qt/offroad/frogpilot_settings.h"
 
@@ -457,7 +456,6 @@ SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
     {tr("Toggles"), toggles},
     {tr("Software"), new SoftwarePanel(this)},
     {tr("FrogPilot"), frogpilotSettingsWindow},
-    {tr("ToadPilot"), new ToadPilotPanel(this)},
   };
 
   nav_btns = new QButtonGroup(this);

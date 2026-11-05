@@ -6,6 +6,28 @@ FrogPilotLongitudinalPanel::FrogPilotLongitudinalPanel(FrogPilotSettingsWindow *
 
   FrogPilotListWidget *longitudinalList = new FrogPilotListWidget(this);
 
+  learningButton = new ButtonControl(tr("Learn From Accelerator Overrides"), tr("LOADING"),
+    tr("Experimental: learn a small acceleration adjustment when you press the gas because the driving model is holding back. "
+       "Active above 10 mph with a supported model in Experimental Mode. Enables model/cruise/lead coordination; lead and stop requests still limit acceleration. "
+       "The hybrid launch boost setting is separate. Changes apply on the next drive."));
+  learningButton->setEnabled(false);
+  longitudinalList->addItem(learningButton);
+  QObject::connect(learningButton, &ButtonControl::clicked, this, [this] {
+    if (learningRequestPending || uiState()->scene.started) return;
+    if (!learningStateKnown) { refreshAccelerationLearning(); return; }
+    learningRequestPending = true;
+    learningButton->setEnabled(false);
+    learningButton->setValue(tr("Saving…"));
+    learningApi.setAccelerationLearning(!learningEnabled, [this](const QJsonObject &, const QString &error) {
+      learningRequestPending = false;
+      if (!error.isEmpty() && isVisible()) ConfirmationDialog::alert(error, this);
+      refreshAccelerationLearning();
+    });
+  });
+  QObject::connect(uiState(), &UIState::offroadTransition, this, [this](bool offroad) {
+    learningButton->setEnabled(offroad && !learningRequestPending);
+  });
+
   ScrollView *longitudinalPanel = new ScrollView(longitudinalList, this);
 
   longitudinalLayout->addWidget(longitudinalPanel);
@@ -594,6 +616,7 @@ FrogPilotLongitudinalPanel::FrogPilotLongitudinalPanel(FrogPilotSettingsWindow *
 }
 
 void FrogPilotLongitudinalPanel::showEvent(QShowEvent *event) {
+  refreshAccelerationLearning();
   frogpilotToggleLevels = parent->frogpilotToggleLevels;
   hasDashSpeedLimits = parent->hasDashSpeedLimits;
   hasPCMCruise = parent->hasPCMCruise;
@@ -604,6 +627,29 @@ void FrogPilotLongitudinalPanel::showEvent(QShowEvent *event) {
   tuningLevel = parent->tuningLevel;
 
   updateToggles();
+}
+
+void FrogPilotLongitudinalPanel::refreshAccelerationLearning() {
+  if (learningRequestPending) return;
+  learningRequestPending = true;
+  learningButton->setEnabled(false);
+  learningApi.request("/toadpilot", {}, false, [this](const QJsonObject &state, const QString &error) {
+    learningRequestPending = false;
+    if (!error.isEmpty()) {
+      learningStateKnown = false;
+      learningButton->setValue(tr("Unavailable"));
+      learningButton->setText(tr("RETRY"));
+      // Retry refresh rather than toggling an unknown state.
+      learningButton->setEnabled(!uiState()->scene.started);
+      return;
+    }
+    const auto config = state.value("config").toObject();
+    learningStateKnown = true;
+    learningEnabled = config.value("accel_boost").toBool() && config.value("modern_longitudinal").toBool();
+    learningButton->setValue(learningEnabled ? tr("On") : tr("Off"));
+    learningButton->setText(learningEnabled ? tr("DISABLE") : tr("ENABLE"));
+    learningButton->setEnabled(state.value("environment").toObject().value("offroad_confirmed").toBool() && !uiState()->scene.started);
+  });
 }
 
 void FrogPilotLongitudinalPanel::updateMetric(bool metric, bool bootRun) {
