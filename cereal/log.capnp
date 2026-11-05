@@ -2263,6 +2263,20 @@ struct Microphone {
   filteredSoundPressureWeightedDb @2 :Float32;
 }
 
+
+# Additive local backport of comma's lateral-delay estimate.
+struct LiveDelayData {
+  lateralDelay @0 :Float32;
+  validBlocks @1 :Int32;
+  status @2 :Status;
+  lateralDelayEstimate @3 :Float32;
+  points @4 :List(Float32);
+  lateralDelayEstimateStd @5 :Float32;
+  calPerc @6 :Int8;
+  version @7 :UInt32;
+  enum Status { unestimated @0; estimated @1; invalid @2; }
+}
+
 struct Event {
   logMonoTime @0 :UInt64;  # nanoseconds
   valid @67 :Bool = true;
@@ -2314,6 +2328,7 @@ struct Event {
     liveLocationKalman @72 :LiveLocationKalman;
     modelV2 @75 :ModelDataV2;
     drivingModelData @128 :DrivingModelData;
+    liveDelay @129 :LiveDelayData;
     driverStateV2 @92 :DriverStateV2;
 
     # camera stuff, each camera state has a matching encode idx

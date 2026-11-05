@@ -398,6 +398,29 @@ Tools
     <section class="toadpilot-tab-panel" id="toadPanelResearch" role="tabpanel" aria-labelledby="toadTabResearch" hidden>
       <div class="toadpilot-config-grid">
 
+      <p id="toadDelayStatus" role="status"></p>
+      <p>Optional upgrades below start off. Save while parked; changes apply on the next drive.</p>
+      <label class="toadpilot-check" for="toadLiveSteeringDelay">
+        <span><strong>Live steering-delay learning</strong><br><small>Learns steering response during qualified driving. Pop V2, South Carolina and RDF4 use a confident estimate; otherwise the vehicle default remains in use.</small></span>
+        <input type="checkbox" id="toadLiveSteeringDelay">
+      </label>
+      <label class="toadpilot-check" for="toadModernLongitudinal">
+        <span><strong>Modern longitudinal coordination</strong><br><small>Pop V2, South Carolina and RDF4: coordinates model, cruise and lead-car requests using newer upstream logic. Requires Experimental Mode. Keeps this fork’s existing lead solver and limits.</small></span>
+        <input type="checkbox" id="toadModernLongitudinal">
+      </label>
+      <label class="toadpilot-check" for="toadAccelBoost">
+        <span><strong>Learn from accelerator overrides</strong><br><small>With Modern longitudinal coordination, repeated accelerator overrides can add up to 0.2 m/s² to mild model requests. Resets on disengagement; lead and cruise limits still apply.</small></span>
+        <input type="checkbox" id="toadAccelBoost">
+      </label>
+      <label class="toadpilot-check" for="toadHillCompensation">
+        <span><strong>Toyota hill-response compensation</strong><br><small>Camry: anticipates changes in road slope to improve acceleration tracking. Inactive during stop holding and pedal overrides.</small></span>
+        <input type="checkbox" id="toadHillCompensation">
+      </label>
+      <label class="toadpilot-check" for="toadCameraTimingChecks">
+        <span><strong>Camera timing checks</strong><br><small>Pop V2, South Carolina and RDF4: rejects stale or unsynchronized camera frames. This may disengage assistance if camera timing is faulty.</small></span>
+        <input type="checkbox" id="toadCameraTimingChecks">
+      </label>
+      <p>Camera drivers and Panda firmware remain the matched versions for this installation. Driver monitoring is unchanged.</p>
       <label class="toadpilot-check" for="toadExperimentalSteeringResponse">
         <span><strong>Experimental Camry authority</strong><br><small>Closed-course research only, default off. Exact, non-forced Camry TSS2 identification and reboot are required. The Panda hard ceiling remains 1700, with stock EPS-error, real-time, and release limits. The controller uses the selected cap below and slows only the extra rise above 1500.</small></span>
         <input type="checkbox" id="toadExperimentalSteeringResponse">
@@ -563,6 +586,11 @@ Tools
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
   const toadResponsiveTakeoff = document.getElementById("toadResponsiveTakeoff");
+  const toadLiveSteeringDelay = document.getElementById("toadLiveSteeringDelay");
+  const toadModernLongitudinal = document.getElementById("toadModernLongitudinal");
+  const toadAccelBoost = document.getElementById("toadAccelBoost");
+  const toadHillCompensation = document.getElementById("toadHillCompensation");
+  const toadCameraTimingChecks = document.getElementById("toadCameraTimingChecks");
   const toadSmoothBraking = document.getElementById("toadSmoothBraking");
   const toadSmoothStopFinish = document.getElementById("toadSmoothStopFinish");
   const toadAutomaticTrafficMode = document.getElementById("toadAutomaticTrafficMode");
@@ -586,6 +614,11 @@ Tools
     toadSmoothLaneTransitions,
     toadResponsiveTakeoff,
     toadSmoothStopFinish,
+    toadLiveSteeringDelay,
+    toadModernLongitudinal,
+    toadAccelBoost,
+    toadHillCompensation,
+    toadCameraTimingChecks,
     toadSmoothBraking,
     toadAutomaticTrafficMode,
     toadMapStopAssist,
@@ -717,6 +750,11 @@ Tools
     const torqueStatus = data.torque_status || {};
     const torqueLastRoute = data.torque_last_route || {};
     const environment = data.environment || {};
+    const delay = data.steering_delay || {};
+    setToadText("toadDelayStatus", !config.live_steering_delay ? "Steering-delay learning: off" :
+      delay.status === "estimated" && environment.onroad ? "Learned steering delay: " + formatToadNumber(delay.delay * 1000, 0) + " ms" :
+      delay.status && environment.onroad ? "Steering-delay learning: " + delay.progress + "% — vehicle default in use" :
+      "Steering-delay learning: waiting for a supported model and qualified driving");
     const steeringExperiment = data.steering_experiment || {};
     toadLoaded = true;
     // Only a positive onroad signal locks writes. A disconnected device with no
@@ -735,6 +773,11 @@ Tools
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
       toadLegacyStopGo = config.improved_stop_and_go === true;
       toadResponsiveTakeoff.checked = config.responsive_takeoff === true;
+      toadLiveSteeringDelay.checked = config.live_steering_delay === true;
+      toadModernLongitudinal.checked = config.modern_longitudinal === true;
+      toadAccelBoost.checked = config.accel_boost === true;
+      toadHillCompensation.checked = config.hill_compensation === true;
+      toadCameraTimingChecks.checked = config.camera_timing_checks === true;
       toadSmoothBraking.checked = config.smooth_braking === true;
       toadSmoothStopFinish.checked = config.smooth_stop_finish === true;
       toadAutomaticTrafficMode.checked = config.automatic_traffic_mode !== false;
@@ -1235,6 +1278,11 @@ Tools
       improved_stop_and_go: toadLegacyStopGo,
       responsive_takeoff: toadResponsiveTakeoff.checked,
       smooth_stop_finish: toadSmoothStopFinish.checked,
+      live_steering_delay: toadLiveSteeringDelay.checked,
+      modern_longitudinal: toadModernLongitudinal.checked,
+      accel_boost: toadAccelBoost.checked,
+      hill_compensation: toadHillCompensation.checked,
+      camera_timing_checks: toadCameraTimingChecks.checked,
       smooth_braking: toadSmoothBraking.checked,
       automatic_traffic_mode: toadAutomaticTrafficMode.checked,
       traffic_mode_entry_time: toadTrafficModeEntryTime,

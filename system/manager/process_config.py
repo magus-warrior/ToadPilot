@@ -61,6 +61,10 @@ def run_tinygrad_modeld(started, params, CP: car.CarParams, classic_model, tinyg
 def run_toad_modeld(started, params, CP: car.CarParams, classic_model, tinygrad_model, frogpilot_toggles) -> bool:
   return started and is_modern_model(frogpilot_toggles)
 
+def run_toad_lagd(started, params, CP, classic_model, tinygrad_model, frogpilot_toggles):
+  return (started and is_modern_model(frogpilot_toggles) and
+          getattr(frogpilot_toggles, "toadpilot_live_steering_delay", False) is True)
+
 procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
@@ -117,6 +121,7 @@ procs = [
   PythonProcess("frogpilot_process", "selfdrive.frogpilot.frogpilot_process", always_run),
   PythonProcess("mapd", "selfdrive.frogpilot.navigation.mapd", always_run),
   NativeProcess("tinygrad_modeld", "selfdrive/tinygrad_modeld", ["./tinygrad_modeld"], run_tinygrad_modeld),
+  PythonProcess("toad_lagd", "selfdrive.toad_modeld.lagd", run_toad_lagd),
   NativeProcess("toad_modeld", ".", ["python", "-m", "selfdrive.toad_modeld.modeld"], run_toad_modeld),
 ]
 

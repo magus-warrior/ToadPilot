@@ -76,3 +76,63 @@ passes immediately. It bypasses low speed, stopping, positive acceleration,
 manual brake/gas, inactive controls and invalid input. **Smooth stop finish**
 remains the separate near-standstill feature. Both are Camry TSS2 features and
 can be disabled in Tools; they do not change model weights or actuator limits.
+
+## Optional software backports (configuration v11)
+
+Tools → Research exposes five independent settings, all initially off. Existing
+v10 choices migrate unchanged. Smooth braking retains its saved setting (default
+on). The new settings remain behind the existing supported-Camry/master gates.
+
+* **Live steering-delay learning**: adapts comma v0.11.2's masked correlation and
+  block averaging to this fork's calibrated `liveLocationKalman` yaw. Requires
+  calibrated, healthy localization, active unsaturated steering without override,
+  speed above 50 mph, useful curvature variation, and recovery after interruptions.
+  Modern models use only fresh, confident estimates in 0.15–0.65 seconds; invalid
+  or unavailable estimates return gradually to the original vehicle delay.
+  Delay changes are bounded to 0.005 seconds per model frame. Cached values are
+  keyed by vehicle parameters and selected model and need new route evidence.
+  The confidence-window peak index includes the minimum-lag offset; flat/nonfinite
+  inputs and sampling gaps are rejected. This differs from the upstream adapter.
+* **Modern longitudinal coordination**: Pop V2, South Carolina and RDF4 in
+  Experimental Mode use separate model, cruise and lead-plan candidates, choosing
+  the lowest acceleration and retaining every stop request. Cruise jerk follows
+  comma v0.11.2. The fork's current compiled MPC, cruise obstacle, following policy,
+  acceleration limits, throttle gating and controller remain in use. It is not a
+  full replacement with upstream openpilot's planner. Turning it off restores the
+  previous blended-MPC path. Missing/invalid modern actions invalidate the plan.
+* **Learn from accelerator overrides**: optional with modern coordination. Uses
+  upstream v0.11.2's bounded boost (0.025 m/s² per second, 0.05 per override, 0.2
+  total); requires prior evidence that the model was limiting acceleration. Clears
+  on disengagement, disabled operation, braking or a model stop. Lead/cruise
+  candidates still constrain acceleration; no freeway speed floor is introduced.
+* **Toyota hill-response compensation**: ports the transient pitch feedforward
+  from opendbc `d1bd15ecb18e273e4af740dbbfb7def555828668`. Adds at most ±1.5 m/s²
+  to PID feedforward with existing final command limits. Inactive during stopping,
+  pedal overrides or missing/invalid attitude. Filters initialize from the first
+  valid attitude to avoid a startup pulse. Steering authority is unchanged.
+* **Camera timing checks**: a local guard for modern models, not a camera-driver
+  port. Rejects repeated frames, timestamps older than 200 ms or in the future,
+  and road/wide synchronization error above 10 ms. Invalid input marks model and
+  odometry publications invalid; normal validity requirements remain in place.
+
+Sources (MIT; copyright/license in repository LICENSE):
+
+* https://github.com/commaai/openpilot/blob/v0.11.2/openpilot/selfdrive/locationd/lagd.py
+* https://github.com/commaai/openpilot/blob/v0.11.2/openpilot/selfdrive/controls/lib/longitudinal_planner.py
+* https://github.com/commaai/openpilot/blob/v0.11.2/openpilot/selfdrive/controls/lib/accel_boost.py
+* https://github.com/commaai/opendbc/blob/d1bd15ecb18e273e4af740dbbfb7def555828668/opendbc/car/toyota/carcontroller.py
+
+### Hardware scope and validation limits
+
+The installed C3 Lite still uses AGNOS 10.1, its matched Panda firmware and native
+camera executable. This release checkout omits the camera C++ implementation and
+uses a customized Toyota/Panda pairing. A newer OS/firmware/camera migration needs
+matching build artifacts and hardware integration tests; runtime toggles cannot
+provide that. No other vehicle fingerprints or firmware acceptance rules were
+changed. Driver-monitoring processes/configuration are unchanged, as requested.
+
+Tests exercise settings migration, bounded learning, estimator recovery, real
+longitudinal solver updates and Toyota controller calls, and camera rejection.
+Camera shadow runs publish no control/model/odometry messages and are offroad.
+Passing these checks does not establish road behavior, eliminate Experimental
+Mode slowdowns or certify equivalence to the latest complete upstream release.

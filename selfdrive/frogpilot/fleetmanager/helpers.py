@@ -839,6 +839,7 @@ def _get_toadpilot_steering_experiment(capability, road_state):
 
 
 def get_toadpilot_state():
+  from openpilot.selfdrive.toad_modeld.delay import read_status
   config = read_toadpilot_config(params)
   capability = _get_toadpilot_capability()
   road_state = _get_toadpilot_road_state()
@@ -849,6 +850,7 @@ def get_toadpilot_state():
     "learner": _get_toadpilot_learner(),
     "runtime": _get_toadpilot_status(TOADPILOT_STATUS_KEY),
     "steering_status": _get_toadpilot_status(TOADPILOT_STEERING_STATUS_KEY),
+    "steering_delay": read_status(),
     "stop_go_status": _get_toadpilot_status(TOADPILOT_STOP_GO_STATUS_KEY),
     "stop_go_last_route": _get_toadpilot_last_stop_go_route(),
     "navigation_status": _get_toadpilot_status(TOADPILOT_NAVIGATION_STATUS_KEY),

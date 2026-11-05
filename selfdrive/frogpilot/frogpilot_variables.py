@@ -860,6 +860,11 @@ class FrogPilotVariables:
     toggle.toadpilot_experimental_max_torque = toadpilot_config.experimental_max_torque
     toggle.toadpilot_responsive_takeoff = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.responsive_takeoff
     toggle.toadpilot_smooth_braking = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_braking
+    toggle.toadpilot_live_steering_delay = toggle.toadpilot_enabled and toadpilot_config.live_steering_delay
+    toggle.toadpilot_modern_longitudinal = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.modern_longitudinal
+    toggle.toadpilot_accel_boost = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.accel_boost
+    toggle.toadpilot_hill_compensation = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.hill_compensation
+    toggle.toadpilot_camera_timing_checks = toggle.toadpilot_enabled and toadpilot_config.camera_timing_checks
     toggle.toadpilot_smooth_stop_finish = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_stop_finish
     toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_responsive_takeoff
     # The independently configured launch boost remains available alongside

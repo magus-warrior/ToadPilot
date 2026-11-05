@@ -5,6 +5,7 @@ from collections import deque
 
 from cereal import car
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.selfdrive.car.toyota.hill_compensation import HillCompensation
 from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car import carlog, apply_meas_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance, create_gas_interceptor_command, make_can_msg, rate_limit
@@ -346,6 +347,7 @@ class CarController(CarControllerBase):
 
     self.aego = FirstOrderFilter(0.0, 0.25, DT_CTRL * 3)
     self.pitch = FirstOrderFilter(0, 0.5, DT_CTRL)
+    self.hill_compensation = HillCompensation(DT_CTRL)
 
     self.accel = 0
     self.prev_accel = 0
@@ -416,6 +418,7 @@ class CarController(CarControllerBase):
       self.toadpilot_stop_go_release_active = False
     self.previous_long_control_state = actuators.longControlState
 
+    self.hill_compensation.update(CC.orientationNED)
     if len(CC.orientationNED) == 3:
       self.pitch.update(CC.orientationNED[1])
 
@@ -703,6 +706,10 @@ class CarController(CarControllerBase):
           self.long_pid.i -= ACCEL_PID_UNWIND * float(np.sign(self.long_pid.i))
 
           error_future = pcm_accel_cmd - a_ego_future
+          pcm_accel_cmd += self.hill_compensation.correction(
+            getattr(frogpilot_toggles, 'toadpilot_hill_compensation', False) is True and
+            self.CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS2 and not stopping and
+            not CS.out.gasPressed and not CS.out.brakePressed)
           pcm_accel_cmd = self.long_pid.update(error_future,
                                                speed=CS.out.vEgo,
                                                feedforward=pcm_accel_cmd,

@@ -18,6 +18,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 from openpilot.selfdrive.toad_modeld.action import combine_longitudinal
+from openpilot.selfdrive.toad_modeld.longitudinal import LongitudinalCoordinator, coordination_enabled
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
 A_CRUISE_MIN = -1.2
@@ -183,6 +184,9 @@ class LongitudinalPlanner:
     self.dt = dt
     self.allow_throttle = True
 
+    self.coordinator = LongitudinalCoordinator()
+    self.coordinated_output = None
+    self.coordinated_valid = True
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.v_model_error = 0.0
@@ -223,7 +227,11 @@ class LongitudinalPlanner:
     return x, v, a, j, throttle_prob
 
   def update(self, radarless_model, sm, frogpilot_toggles):
-    self.mpc.mode = 'blended' if sm['controlsState'].experimentalMode else 'acc'
+    coordinated = coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode)
+    was_coordinated = self.coordinated_output is not None
+    self.coordinated_output = None
+    self.coordinated_valid = True
+    self.mpc.mode = 'blended' if sm['controlsState'].experimentalMode and not coordinated else 'acc'
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -245,7 +253,7 @@ class LongitudinalPlanner:
     # No change cost when user is controlling the speed, or when standstill
     prev_accel_constraint = not (reset_state or sm['carState'].standstill)
 
-    if self.mpc.mode == 'acc':
+    if not sm['controlsState'].experimentalMode:
       accel_limits = [sm['frogpilotPlan'].minAcceleration, sm['frogpilotPlan'].maxAcceleration]
       steer_angle_without_offset = sm['carState'].steeringAngleDeg - sm['liveParameters'].angleOffsetDeg
       accel_limits_turns = limit_accel_in_turns(v_ego, steer_angle_without_offset, accel_limits, self.CP)
@@ -317,6 +325,26 @@ class LongitudinalPlanner:
     # Interpolate 0.05 seconds and save as starting point for next iteration
     a_prev = self.a_desired
     self.a_desired = float(interp(self.dt, CONTROL_N_T_IDX, self.a_desired_trajectory))
+    if coordinated:
+      if not was_coordinated:
+        self.coordinator.reset(a_prev)
+      elif reset_state:
+        self.coordinator.cruise_accel = a_prev
+      mpc_accel, mpc_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
+                                              action_t=self.CP.longitudinalActuatorDelay + DT_MDL,
+                                              vEgoStopping=frogpilot_toggles.vEgoStopping)
+      try:
+        self.coordinated_output = self.coordinator.update(
+          mpc_accel=mpc_accel, mpc_stop=mpc_stop, mpc_source=self.mpc.source, action=sm['modelV2'].action,
+          v_ego=v_ego, v_cruise=v_cruise, minimum=self.model_accel_limits[0], maximum=self.model_accel_limits[1],
+          dt=self.dt, boost_enabled=getattr(frogpilot_toggles, 'toadpilot_accel_boost', False) is True,
+          enabled=sm['controlsState'].enabled and v_cruise_initialized and not force_slow_decel,
+          gas_pressed=sm['carState'].gasPressed, brake_pressed=sm['carState'].brakePressed)
+        self.a_desired = self.coordinated_output[0]
+      except ValueError:
+        self.coordinated_valid = False
+    else:
+      self.coordinator.reset(self.a_desired)
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.a_desired + a_prev) / 2.0
 
   def publish(self, classic_model, radarless_model, sm, pm, frogpilot_toggles):
@@ -346,7 +374,12 @@ class LongitudinalPlanner:
                                                   action_t=action_t, vEgoStopping=frogpilot_toggles.vEgoStopping)
     longitudinalPlan.aTarget = a_target
     longitudinalPlan.shouldStop = should_stop
-    if is_modern_model(frogpilot_toggles) and sm['controlsState'].experimentalMode:
+    if coordination_enabled(frogpilot_toggles, sm['controlsState'].experimentalMode):
+      if self.coordinated_valid and self.coordinated_output is not None:
+        longitudinalPlan.aTarget, longitudinalPlan.shouldStop, longitudinalPlan.longitudinalPlanSource = self.coordinated_output
+      else:
+        plan_send.valid = False
+    elif is_modern_model(frogpilot_toggles) and sm['controlsState'].experimentalMode:
       try:
         a_target, should_stop = combine_longitudinal(
           a_target, should_stop, sm['modelV2'].action, *self.model_accel_limits)

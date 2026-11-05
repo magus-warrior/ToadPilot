@@ -8,6 +8,8 @@ import numpy as np
 
 from openpilot.selfdrive.toad_modeld.bootstrap import configure_runtime
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model, MODEL_ID, MODELS
+from openpilot.selfdrive.toad_modeld.delay import DelaySelector
+from openpilot.selfdrive.toad_modeld.camera_timing import CameraTiming
 from openpilot.selfdrive.toad_modeld.action import action_from_outputs, LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS
 
 from cereal import car, log
@@ -46,10 +48,14 @@ class FrameMeta:
       self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
 
-def main(shadow=False, max_frames=0, model_id=None):
+def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
   frogpilot_toggles = get_frogpilot_toggles()
+  if check_camera_timing and not shadow:
+    raise ValueError('Camera timing override is only for shadow validation')
   if shadow:
     model_id = model_id or MODEL_ID
+    if check_camera_timing:
+      frogpilot_toggles.toadpilot_camera_timing_checks = True
   else:
     if not is_modern_model(frogpilot_toggles):
       raise RuntimeError('Modern model process started for a different selected model')
@@ -109,10 +115,11 @@ def main(shadow=False, max_frames=0, model_id=None):
   completed_frames = 0
   shadow_timings = []
   shadow_drops = 0
+  shadow_camera_rejections = 0
 
   # messaging
   pm = ShadowPublisher() if shadow else PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
-  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "frogpilotPlan"])
+  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "frogpilotPlan", "liveDelay"])
 
   publish_state = PublishState()
   params = Params()
@@ -138,9 +145,8 @@ def main(shadow=False, max_frames=0, model_id=None):
     CP = msg.as_builder()
   cloudlog.info("tinygrad_modeld got CarParams: %s", CP.carName)
 
-  # This fork has no liveDelay service. Use its vehicle actuator delay; the
-  # model smoothing and frame/action delays are added explicitly below.
-  steer_delay = CP.steerActuatorDelay
+  delay_selector = DelaySelector(CP.steerActuatorDelay)
+  camera_timing = CameraTiming()
 
   DH = DesireHelper()
 
@@ -177,7 +183,12 @@ def main(shadow=False, max_frames=0, model_id=None):
       buf_extra = buf_main
       meta_extra = meta_main
 
+    camera_valid = camera_timing.update(meta_main.timestamp_sof, meta_main.timestamp_eof,
+                                        meta_extra.timestamp_sof, meta_extra.timestamp_eof, time.monotonic_ns())
     sm.update(0)
+    steer_delay = delay_selector.update(
+      getattr(frogpilot_toggles, 'toadpilot_live_steering_delay', False) is True, sm['liveDelay'],
+      sm.valid['liveDelay'] and sm.alive['liveDelay'], time.monotonic() - sm.logMonoTime['liveDelay'] * 1e-9)
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
@@ -219,7 +230,9 @@ def main(shadow=False, max_frames=0, model_id=None):
     if shadow:
       shadow_timings.append(model_execution_time * 1000)
       shadow_drops += vipc_dropped_frames
+      shadow_camera_rejections += int(not camera_valid)
 
+    inputs_valid = live_calib_seen and (not getattr(frogpilot_toggles, 'toadpilot_camera_timing_checks', False) or camera_valid)
     if model_output is not None and not dropped_frame:
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
@@ -230,7 +243,7 @@ def main(shadow=False, max_frames=0, model_id=None):
                                               shouldStop=should_stop, longitudinalValid=True)
       fill_model_msg(drivingdata_send, modelv2_send, model_output, previous_action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
-                     frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen)
+                     frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, inputs_valid)
 
       desire_state = modelv2_send.modelV2.meta.desireState
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
@@ -243,7 +256,7 @@ def main(shadow=False, max_frames=0, model_id=None):
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 
-      fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
+      fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, inputs_valid)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
@@ -255,10 +268,13 @@ def main(shadow=False, max_frames=0, model_id=None):
     # Update FrogPilot parameters
     if sm['frogpilotPlan'].togglesUpdated:
       frogpilot_toggles = get_frogpilot_toggles()
+      if shadow and check_camera_timing:
+        frogpilot_toggles.toadpilot_camera_timing_checks = True
 
 
   if shadow:
     print(json.dumps(dict(frames=completed_frames, dropped_camera_frames=shadow_drops,
+                          camera_timing_rejections=shadow_camera_rejections,
                           latency_ms={name: float(np.percentile(shadow_timings, p)) for name, p in [('p50', 50), ('p95', 95), ('max', 100)]},
                           published_controls=False)), flush=True)
 
@@ -266,9 +282,10 @@ def main(shadow=False, max_frames=0, model_id=None):
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--shadow', action='store_true')
+  parser.add_argument('--check-camera-timing', action='store_true')
   parser.add_argument('--max-frames', type=int, default=0)
   parser.add_argument("--model", choices=MODELS, help="Model override for shadow validation only")
   args = parser.parse_args()
   if args.model and not args.shadow:
     parser.error("--model is available only with --shadow")
-  main(shadow=args.shadow, max_frames=args.max_frames, model_id=args.model)
+  main(shadow=args.shadow, max_frames=args.max_frames, model_id=args.model, check_camera_timing=args.check_camera_timing)
