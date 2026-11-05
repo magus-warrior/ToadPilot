@@ -1,0 +1,138 @@
+South Carolina / FrogPilot Fork Audit
+Date: 2026-11-05
+
+Repository: /data/openpilot
+Vehicle: 2022 Toyota Camry Hybrid XSE
+Device: C3 Lite
+Selected model: South Carolina v11
+
+1. Fork version and missing October 31 update
+
+The fork identifies as FrogPilot v0.9.7 in common/version.h. The current branch is ToadPilot. It does not contain FrogPilot's October 31, 2026 commit 7d6345f; it is based on the earlier v0.9.7 codebase with custom ToadPilot additions.
+
+Relevant missing upstream changes include:
+
+- Curve Speed Controller V4 rewrite
+- Camera speed-limit sign reader
+- Gentler slowdown/deceleration profiles
+- Updated Conditional Experimental Mode lead/stop logic
+- Stock-value fallback when Acceleration and Braking is disabled
+- Several Always-On Lateral, speed-limit, NNFF, and UI fixes
+- New Pond/data-sharing infrastructure
+
+Most of these are unrelated to South Carolina's core model-control path and should not be ported blindly.
+
+2. South Carolina control authority
+
+South Carolina does not directly command vehicle actuators. It supplies desired curvature, planned position/velocity/acceleration/orientation, lead predictions, a derived stop request, and metadata.
+
+The path is:
+
+1. South Carolina v11 emits a 33-point plan.
+2. selfdrive/toad_modeld/action.py converts the plan into curvature, acceleration, and a stop prediction.
+3. selfdrive/toad_modeld/fill_model_msg.py publishes the plan and derived action.
+4. Steering passes through controlsd.py, ToadPilot smoothing/centering gates, curvature-rate limiting, lateral control, Toyota CAN conversion, and Panda safety.
+5. Longitudinal output passes through MPC, optional modern longitudinal coordination, LongControl PID/state logic, the Toyota controller, and Panda safety.
+
+Modern longitudinal coordination is enabled on the device, so South Carolina acceleration and stop predictions participate in Experimental Mode. They do not bypass MPC or LongControl.
+
+3. Existing custom longitudinal changes
+
+- MPC remains active and receives FrogPilot jerk/following settings.
+- Modern coordination compares MPC, cruise, and South Carolina model acceleration and chooses the lowest candidate while preserving stop requests.
+- Cruise acceleration uses a speed-dependent jerk ramp.
+- Optional accelerator override learning adds bounded boost: 0.025 m/s2 per second, 0.05 m/s2 per override, and 0.2 m/s2 total maximum.
+- South Carolina acceleration is exponentially smoothed over 0.3 seconds.
+- Mild brake-release acceleration changes are limited while stronger braking passes immediately.
+- Near-standstill stop finish smoothing eases final deceleration.
+- Stop-and-go includes Toyota-specific stale-standstill bypass, bounded launch ramp, planner-stop grace period, brake/invalid-input cancellation, and a two-second launch-ramp timeout.
+
+Relevant files:
+
+- selfdrive/toad_modeld/longitudinal.py
+- selfdrive/toad_modeld/action.py
+- selfdrive/controls/lib/longitudinal_planner.py
+- selfdrive/controls/lib/longcontrol.py
+- selfdrive/frogpilot/controls/lib/start_accel_ramp.py
+
+4. Possible conflicts or unnecessary overrides
+
+No confirmed South Carolina-specific conflict was found.
+
+Potentially overlapping layers are South Carolina acceleration, MPC acceleration, cruise jerk, FrogPilot jerk/following profiles, Traffic Mode, Conditional Experimental Mode, map-stop forcing, curve/speed-limit controls, and LongControl smoothing/launch logic.
+
+selfdrive/frogpilot/controls/frogpilot_planner.py continuously publishes FrogPilot jerk and acceleration settings. These still influence MPC even when South Carolina is active. This is not necessarily harmful, but South Carolina is not the sole longitudinal authority.
+
+The map-stop controller is appropriately conservative: it produces constraints and never directly commands acceleration.
+
+5. Relevance of latest FrogPilot improvements
+
+Already addressed locally:
+
+- Conditional Experimental Mode standstill refresh
+- Stop/restart hysteresis
+- Toyota stale-standstill handling
+- Brake-release smoothing
+- Launch-ramp bounding
+- Model timing validation
+- Modern-model acceleration coordination
+
+Not equivalent to upstream:
+
+- Curve Speed Controller V4 is not present.
+- New gentler slowdown profiles are not present as an upstream port.
+- October 31 stock fallback behavior is not clearly reproduced; FrogPilot jerk/acceleration values continue through frogpilotPlan.
+- October 31 Conditional Experimental Mode prediction logic is only partially represented.
+
+Do not blindly port these changes while South Carolina is performing well. Use isolated shadow/replay comparison first.
+
+6. Comparison with North Dakota V2, Pop V2, and Regret Driven
+
+North Dakota V2 uses the classic 33-point plan path. Pop V2 and South Carolina use the v11 plan path. Regret Driven uses the v15 direct-action path.
+
+Pop V2 and South Carolina are correctly identified as v11 and use:
+
+- 33 plan points
+- 0-10 second quadratic time indices
+- 15-value plan rows
+- 0.1-second lateral smoothing
+- 0.3-second longitudinal smoothing
+- actuator-delay-based action horizon
+
+Regret Driven divides curvature by max(1, vEgo)^2 and directly smooths acceleration. North Dakota uses the classic planner timing path.
+
+No confirmed Pop/South Carolina unit-conversion error was found.
+
+One area worth replay validation is stop timing. South Carolina's derived shouldStop depends primarily on the first plan speed and derived raw acceleration, while MPC independently computes its own stop decision. This is not an immediate safety gap, but it makes model-stop timing more dependent on the first plan sample than on the full stopping trajectory.
+
+7. Timing and bottlenecks
+
+The modern model process runs inference synchronously, measures execution time, suppresses publication for dropped camera frames, checks camera synchronization, and invalidates model output when configured timing checks fail.
+
+Relevant files:
+
+- selfdrive/toad_modeld/modeld.py
+- selfdrive/toad_modeld/camera_timing.py
+- selfdrive/toad_modeld/fill_model_msg.py
+
+No archived drive JSONL contained model execution time, solver timing, or frame-drop telemetry. Therefore there is no evidence of actual inference spikes in the available logs.
+
+Theoretical bottleneck: repeated inference longer than approximately 50 ms can cause dropped frames and withheld model messages at 20 Hz. Measure modelExecutionTime, frameDropPerc, processingDelay, and solverExecutionTime before changing code.
+
+8. Prioritized recommendations
+
+Priority 0: Preserve the current South Carolina control path. Keep South Carolina v11, modern coordination, Toyota stop-and-go handling, smoothing gates, and the pinned artifact/runtime.
+
+Priority 1: Collect real timing telemetry: modelV2.modelExecutionTime, modelV2.frameDropPerc, longitudinalPlan.processingDelay, longitudinalPlan.solverExecutionTime, model action acceleration, MPC acceleration/source, and final LongControl acceleration.
+
+Priority 2: Replay South Carolina around early deceleration, stop lights, stopped leads, stop-and-go restart, and stop-request transitions. Compare model stop, MPC stop, planner stop, and final LongControl state.
+
+Priority 3: Verify that disabling FrogPilot Acceleration and Braking restores stock jerk, acceleration, braking, and lead behavior. Current code suggests FrogPilot planner values may continue influencing MPC.
+
+Priority 4: Evaluate Curve Speed Controller V4 and October 31 Conditional Experimental Mode changes only in replay/shadow mode.
+
+Overall assessment: South Carolina integration is structurally sound, correctly scaled, and heavily guarded. The confirmed risks are interaction complexity and insufficient live timing telemetry, not an obvious South Carolina model-conversion defect.
+
+Read-only regression result: 79 targeted tests passed.
+
+Repository action: existing worktree changes were committed and pushed as c131d25b, "Refine traffic mode and stop restart handling". No new code changes were made for this audit.
