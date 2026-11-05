@@ -1,0 +1,143 @@
+{% extends "layout.html" %}
+{% block title %}Diagnostics{% endblock %}
+{% block main %}
+<style>
+  .diagnostics { max-width:1200px; margin:24px auto; text-align:left; }
+  .health-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin:24px 0; }
+  .health-card,.trip-card { padding:20px; border:1px solid #57427b; border-radius:16px; background:#171023; }
+  .health-card span { display:block; font-size:13px; color:#b9a9d0; text-transform:uppercase; letter-spacing:.08em; }
+  .health-card strong { display:block; margin-top:10px; font-size:25px; color:#f7f4ff; }
+  .trip-card { margin:16px 0; display:flex; gap:16px; flex-wrap:wrap; justify-content:space-between; align-items:center; }
+  .trip-card p { margin:6px 0; color:#c9bed9; }
+  .trip-actions { display:flex; gap:12px; }
+  #trace-chart { width:100%; height:320px; background:#100c1c; border-radius:16px; }
+  #trip-detail[hidden] { display:none; }
+  .diagnostics a { color:#57e4ff; }
+</style>
+<div class="diagnostics">
+  <p style="color:#c1a8e2;letter-spacing:.15em">TOADPILOT / DIAGNOSTICS</p>
+  <h1>See how your drive went.</h1>
+  <p id="health-state" role="status">Connecting to your device…</p>
+  <div class="health-grid">
+    <div class="health-card"><span>Driving model</span><strong id="health-model">—</strong></div>
+    <div class="health-card"><span>Model time</span><strong id="health-model-ms">—</strong></div>
+    <div class="health-card"><span>Dropped camera frames</span><strong id="health-drops">—</strong></div>
+    <div class="health-card"><span>CPU temperature</span><strong id="health-temp">—</strong></div>
+    <div class="health-card"><span>Memory used</span><strong id="health-memory">—</strong></div>
+    <div class="health-card"><span>CPU average</span><strong id="health-cpu">—</strong></div>
+  </div>
+  <h2>Recent trips</h2>
+  <p>Compact local recordings retain speed, steering requests and outputs, acceleration, model timing, and driver input. Older segments are removed automatically. Recordings use a 32 MiB budget.</p>
+  <p>Driver steering inputs and high steering requests are observations; they do not by themselves identify a fault or a required takeover.</p>
+  <div id="trips" aria-live="polite">Loading recordings…</div>
+  <section id="trip-detail" hidden>
+    <h2 id="trip-title">Trip trace</h2>
+    <label for="trace-channel">Show</label>
+    <select id="trace-channel" class="uk-select" style="max-width:340px">
+      <option value="accel">Acceleration · m/s²</option>
+      <option value="steer">Steering · normalized</option>
+      <option value="speed">Speed · km/h</option>
+      <option value="model">Model time · ms</option>
+    </select>
+    <p id="trace-legend"></p>
+    <canvas id="trace-chart" role="img" aria-label="Recorded trip values over elapsed time"></canvas>
+    <p id="trace-description"></p>
+  </section>
+  <p><a href="/tools">Driving settings</a> · <a href="/">Fleet Manager home</a></p>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let busy = false, timer, trace = [];
+  async function read(path) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(path, {cache:'no-store', signal:controller.signal});
+      if (!response.ok) throw new Error('Device request failed');
+      return await response.json();
+    } finally { clearTimeout(timeout); }
+  }
+  function number(value, unit, digits=0) { return Number.isFinite(value) ? value.toFixed(digits) + unit : '—'; }
+  async function refresh() {
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const [health, history] = await Promise.all([read('/toadpilot/health'), read('/toadpilot/trips')]);
+      $('health-state').textContent = !health.fresh ? 'Waiting for fresh diagnostics.' :
+        health.error ? 'Recording unavailable: ' + health.error :
+        !health.recording_enabled ? 'Trip recording is disabled in Controller diagnostics.' :
+        health.recording ? 'Recording this drive locally.' :
+        health.onroad ? 'Waiting for valid driving data.' : 'Offroad · recorder ready for your next drive.';
+      $('health-model').textContent = health.model || '—';
+      $('health-model-ms').textContent = health.fresh ? number(health.model_ms, ' ms', 1) : '—';
+      $('health-drops').textContent = health.fresh ? number(health.frame_drop_percent, '%', 1) : '—';
+      $('health-temp').textContent = health.fresh ? number(health.max_cpu_temp_c, '°C') : '—';
+      $('health-memory').textContent = health.fresh ? number(health.memory_percent, '%') : '—';
+      const cpu = health.cpu_percent || [];
+      $('health-cpu').textContent = health.fresh && cpu.length ? number(cpu.reduce((a,b)=>a+b,0)/cpu.length, '%') : '—';
+      const list = $('trips'); list.replaceChildren();
+      for (const trip of history.trips) {
+        const card = document.createElement('article'); card.className = 'trip-card';
+        const info = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = new Date(trip.started_at * 1000).toLocaleString() + ' · ' + trip.model;
+        const stats = document.createElement('p');
+        const duration = Math.max(0, (trip.completed_at || trip.started_at) - trip.started_at);
+        stats.textContent = number(duration / 60, ' min', 1) + ' · ' + trip.samples + ' samples · ' +
+          trip.override_events + ' steering input events · peak model ' + number(trip.peak_model_ms, ' ms', 1);
+        info.append(title, stats);
+        const actions = document.createElement('div'); actions.className = 'trip-actions';
+        const view = document.createElement('button'); view.className = 'uk-button uk-button-default'; view.textContent = 'View trace';
+        view.addEventListener('click', async () => {
+          view.disabled = true;
+          try {
+            const data = await read('/toadpilot/trips/' + encodeURIComponent(trip.id));
+            trace = data.samples; $('trip-detail').hidden = false; $('trip-title').textContent = title.textContent;
+            draw(); $('trip-detail').scrollIntoView({behavior:'smooth',block:'start'});
+          } catch (_) { $('health-state').textContent = 'Could not load that trip recording.'; }
+          finally { view.disabled = false; }
+        });
+        const download = document.createElement('a'); download.textContent = 'Download';
+        download.href = '/toadpilot/trips/' + encodeURIComponent(trip.id) + '/download';
+        actions.append(view,download); card.append(info,actions); list.append(card);
+      }
+      if (!history.trips.length) list.textContent = 'Your first completed drive will appear here.';
+    } catch (_) { $('health-state').textContent = 'Device connection unavailable. Retrying…'; }
+    finally { busy = false; }
+  }
+  function draw() {
+    const groups = {accel:[['requested_accel','Requested','#ff43c7'],['output_accel','Controller output','#21dcff'],['accel','Measured','#ffe23f']],
+      steer:[['requested_steer','Requested','#ff43c7'],['output_steer','Controller output','#21dcff']],
+      speed:[['speed','Vehicle speed','#21dcff']],model:[['model_ms','Model time','#ffe23f']]};
+    const mode = $('trace-channel').value, series = groups[mode], scale = mode === 'speed' ? 3.6 : 1;
+    const canvas = $('trace-chart'), ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = 320;
+    canvas.width = w * ratio; canvas.height = h * ratio;
+    const ctx = canvas.getContext('2d'); ctx.scale(ratio,ratio);
+    const vals = trace.flatMap(row => series.map(([key])=>Number.isFinite(row[key])?row[key]*scale:null)).filter(v=>v!==null);
+    if (!vals.length) { $('trace-description').textContent = 'No valid samples for this channel.'; return; }
+    let low = Math.min(...vals,0), high = Math.max(...vals,1);
+    const pad = (high-low)*.08; low-=pad; high+=pad;
+    const first = trace[0].mono, elapsed = Math.max(1,trace[trace.length-1].mono-first);
+    ctx.strokeStyle='#493955'; ctx.fillStyle='#c9bed9'; ctx.font='13px sans-serif';
+    for(let i=0;i<=4;i++) { const y=20+i*(h-50)/4; ctx.beginPath();ctx.moveTo(50,y);ctx.lineTo(w-16,y);ctx.stroke();ctx.fillText((high-(high-low)*i/4).toFixed(1),5,y+4); }
+    for(const [key,,color] of series) {
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();let begun=false;
+      for(const row of trace) {
+        if(!Number.isFinite(row[key])) {begun=false;continue;}
+        const x=50+(row.mono-first)/elapsed*(w-66), y=20+(high-row[key]*scale)/(high-low)*(h-50);
+        if(begun)ctx.lineTo(x,y);else ctx.moveTo(x,y);begun=true;
+      } ctx.stroke();
+    }
+    ctx.fillText('0:00',50,h-8);ctx.fillText(number(elapsed/60,' min',1),w-85,h-8);
+    $('trace-legend').textContent = series.map(([,label])=>label).join(' · ');
+    $('trace-description').textContent = trace.length + ' plotted samples across ' + number(elapsed,' seconds',1) + '. Peak and event totals above use every recorded sample.';
+  }
+  $('trace-channel').addEventListener('change',draw);
+  window.addEventListener('resize',()=>{if(trace.length)draw();});
+  document.addEventListener('visibilitychange',()=>{clearInterval(timer);if(!document.hidden){refresh();timer=setInterval(refresh,5000);}});
+  refresh();timer=setInterval(refresh,5000);
+})();
+</script>
+{% endblock %}

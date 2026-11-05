@@ -1,0 +1,2646 @@
+{
+  "repository": "MrXelious/FrogPilot",
+  "commit": "834a37e6b5b881e7af2866ca30f8202a8f376774",
+  "files": [
+    {
+      "path": "cereal/messaging/bridge.cc",
+      "sha": "8619c1e22640bb5c989b832439fd67bf38d533c6",
+      "size": 2504
+    },
+    {
+      "path": "cereal/messaging/messaging.h",
+      "sha": "f3850130e655e2c71f9944d86ba046719097f6a5",
+      "size": 3582
+    },
+    {
+      "path": "cereal/messaging/socketmaster.cc",
+      "sha": "cd697b1f51ed20275b06406f37f39a3b3883b401",
+      "size": 5997
+    },
+    {
+      "path": "common/clutil.cc",
+      "sha": "ee43ef36d59840d3889075c6c811ab4a62327679",
+      "size": 9054
+    },
+    {
+      "path": "common/clutil.h",
+      "sha": "c8bd2cd38f4078a44e96705d0611e734d9e6283a",
+      "size": 1051
+    },
+    {
+      "path": "common/gpio.cc",
+      "sha": "dd7ba34b6d3fc3354c8fd32edb87d4b024117c70",
+      "size": 2253
+    },
+    {
+      "path": "common/gpio.h",
+      "sha": "89cdedd66c9ce82491a2071505e80412cf450839",
+      "size": 1068
+    },
+    {
+      "path": "common/i2c.cc",
+      "sha": "3d6c79efc5384bec4164161c4af71d1340b5f3b6",
+      "size": 1900
+    },
+    {
+      "path": "common/i2c.h",
+      "sha": "ca0d4635b890c921d9b4f60407c04602bd18e6f0",
+      "size": 376
+    },
+    {
+      "path": "common/mat.h",
+      "sha": "8e10d619717ba3b443afcda8a2de5c16e448af6a",
+      "size": 1677
+    },
+    {
+      "path": "common/params.cc",
+      "sha": "2c1b32c0aa45e7e1ef23bf006f1f39c8b6fbe356",
+      "size": 24594
+    },
+    {
+      "path": "common/params.h",
+      "sha": "472d39e94ddb6c718ce27007de0da738f1479a91",
+      "size": 2757
+    },
+    {
+      "path": "common/prefix.h",
+      "sha": "11d0bc10661e06ac6c762bdc909e69a143d61cb0",
+      "size": 1113
+    },
+    {
+      "path": "common/queue.h",
+      "sha": "b3558b11a47f491b8b89023698de650eee758187",
+      "size": 892
+    },
+    {
+      "path": "common/ratekeeper.cc",
+      "sha": "7e63815168d1e8839e80107f9605261aeb3c0a6d",
+      "size": 1041
+    },
+    {
+      "path": "common/ratekeeper.h",
+      "sha": "e7323c6ec3428e75b735bcb5c0ce0603c0559006",
+      "size": 520
+    },
+    {
+      "path": "common/swaglog.cc",
+      "sha": "7864a6355a6030239c9d06451ec38ad5d3e506fd",
+      "size": 4451
+    },
+    {
+      "path": "common/swaglog.h",
+      "sha": "06d45b1d981af0da1ed426b8d56f488413a0a03e",
+      "size": 3309
+    },
+    {
+      "path": "common/tests/test_params.cc",
+      "sha": "f8d6c79f552a2b3e62e412af3f1e94712b7b0710",
+      "size": 774
+    },
+    {
+      "path": "common/tests/test_runner.cc",
+      "sha": "62bf7476a189964c2443a0b32caf34fdaf4778d0",
+      "size": 54
+    },
+    {
+      "path": "common/tests/test_swaglog.cc",
+      "sha": "09bc4c3795fd5e2cf46cba20e00121253450b017",
+      "size": 2649
+    },
+    {
+      "path": "common/tests/test_util.cc",
+      "sha": "de87fa3e0642ed3a9f25b63be1cb2f5d98267c3c",
+      "size": 4300
+    },
+    {
+      "path": "common/timing.h",
+      "sha": "83f55e0c4009f5b20f70f2fa3fc6ba73a1e752ab",
+      "size": 1237
+    },
+    {
+      "path": "common/transformations/coordinates.cc",
+      "sha": "5b00b53a4f4928c5e4ea224519d3fd4359a47611",
+      "size": 2881
+    },
+    {
+      "path": "common/transformations/orientation.cc",
+      "sha": "00888c3a92608039f6b7d1bbf8ed79e5ca39482a",
+      "size": 4624
+    },
+    {
+      "path": "common/util.cc",
+      "sha": "4e766c92585eb26c6c08d59e0ff5d9171ccdc234",
+      "size": 7164
+    },
+    {
+      "path": "common/util.h",
+      "sha": "a8a5adf5e96cae137085a344afb8447af2b01798",
+      "size": 5099
+    },
+    {
+      "path": "common/watchdog.cc",
+      "sha": "3483ad21c2c608b7d36ec22e20952a0094f3c050",
+      "size": 331
+    },
+    {
+      "path": "common/watchdog.h",
+      "sha": "12dd2ca0355f09a95dc8fabe3f7c15bcf251e8a6",
+      "size": 67
+    },
+    {
+      "path": "msgq_repo/msgq/event.cc",
+      "sha": "be782e3b881132010c7fae7a08881dce7c8cfe1e",
+      "size": 6475
+    },
+    {
+      "path": "msgq_repo/msgq/event.h",
+      "sha": "c638b6b4ea9b81d2249e518a68f15734f9f3df06",
+      "size": 1243
+    },
+    {
+      "path": "msgq_repo/msgq/impl_fake.cc",
+      "sha": "a7607206f4654f538064ca979f02caf7b8b1f431",
+      "size": 202
+    },
+    {
+      "path": "msgq_repo/msgq/impl_fake.h",
+      "sha": "2c3b74dc9a637d8bab8653286781746ca8f9ebd5",
+      "size": 1712
+    },
+    {
+      "path": "msgq_repo/msgq/impl_msgq.cc",
+      "sha": "b23991351f9d102a60f706242610a5e11052172a",
+      "size": 3967
+    },
+    {
+      "path": "msgq_repo/msgq/impl_msgq.h",
+      "sha": "4d9db1850ff939a32d32d137fe704150e224f78c",
+      "size": 1501
+    },
+    {
+      "path": "msgq_repo/msgq/impl_zmq.cc",
+      "sha": "434888eb8f9c392f28fbbb53d926040836fa304e",
+      "size": 3684
+    },
+    {
+      "path": "msgq_repo/msgq/impl_zmq.h",
+      "sha": "718196e3068ea92b68b569f2baadee520eb21e9a",
+      "size": 1467
+    },
+    {
+      "path": "msgq_repo/msgq/ipc.cc",
+      "sha": "f620f46fadf13b70e502fac25f465f0ab189ee3e",
+      "size": 2500
+    },
+    {
+      "path": "msgq_repo/msgq/ipc.h",
+      "sha": "1f0e3e06b5bc792cb968d0644fdd32405076007e",
+      "size": 1878
+    },
+    {
+      "path": "msgq_repo/msgq/logger/logger.h",
+      "sha": "03336f8fff52e27d470bfcceb193196548fa6c8b",
+      "size": 586
+    },
+    {
+      "path": "msgq_repo/msgq/msgq.cc",
+      "sha": "fed2959bd3b734d6fdf4b78c126d13c7cf134a76",
+      "size": 12260
+    },
+    {
+      "path": "msgq_repo/msgq/msgq.h",
+      "sha": "94e18494423baafa8953fa5806e244a8ac12d582",
+      "size": 1950
+    },
+    {
+      "path": "msgq_repo/msgq/msgq_tests.cc",
+      "sha": "02f17917a58adcaa189f08b92bf268c32dda8f7f",
+      "size": 10149
+    },
+    {
+      "path": "msgq_repo/msgq/test_runner.cc",
+      "sha": "62bf7476a189964c2443a0b32caf34fdaf4778d0",
+      "size": 54
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/test_runner.cc",
+      "sha": "62bf7476a189964c2443a0b32caf34fdaf4778d0",
+      "size": 54
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionbuf.cc",
+      "sha": "fe7e5db9cc8451b60284fdbf6e5caf09ca12cd86",
+      "size": 906
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionbuf.h",
+      "sha": "6b678a00419208bb2cdf837a860e26ba659237e3",
+      "size": 1320
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionbuf_cl.cc",
+      "sha": "db7df00dc1b373d2365c9b93eab03d850426b31b",
+      "size": 2300
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionbuf_ion.cc",
+      "sha": "13be154914004a240eb22b3cce40df4dbcab434a",
+      "size": 4709
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc.cc",
+      "sha": "48e13c27d959d742587906143eafe9fd046493ff",
+      "size": 2737
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc.h",
+      "sha": "224f129c911bf371a50cdf6d074dffb5b79a28d6",
+      "size": 533
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc_client.cc",
+      "sha": "9b24da296db9ca5ce52311a6660bf3b8ab11b227",
+      "size": 4196
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc_client.h",
+      "sha": "e4abdc5de3fe62dd83396a142796c193e41cf42b",
+      "size": 832
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc_server.cc",
+      "sha": "611d10b2060955dd70292be89e05e7a8d02cd968",
+      "size": 6097
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc_server.h",
+      "sha": "feacc4d10d3309f3e2b62774d892cfbffc1050cd",
+      "size": 1264
+    },
+    {
+      "path": "msgq_repo/msgq/visionipc/visionipc_tests.cc",
+      "sha": "8c4e7fa3fcced53fab99bfe6466682de069017c6",
+      "size": 4470
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/maps_settings.cc",
+      "sha": "c4edafd301d6709fe031277e6ea0d34a393a1fac",
+      "size": 10798
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/maps_settings.h",
+      "sha": "3b0969b85bc0e4659949fcc8e03058a06578900d",
+      "size": 1066
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/navigation_functions.cc",
+      "sha": "98ed67041aad14801aa700ae102dd6a5151bca4d",
+      "size": 2131
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/navigation_functions.h",
+      "sha": "ef484a7e6e0670467934cf64a7a68b6de141dbea",
+      "size": 8437
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/navigation_settings.cc",
+      "sha": "25d82b79c6cc0685b34df45eff7aa1cf4f1f505b",
+      "size": 8646
+    },
+    {
+      "path": "selfdrive/frogpilot/navigation/ui/navigation_settings.h",
+      "sha": "dacd48e092f7357b6fed64e645d74d60701b46ce",
+      "size": 1145
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/blocking_queue.h",
+      "sha": "81ca4d5c2e3eb495da5e3bd155c3f6ed675d1474",
+      "size": 2010
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/omx_encoder.cc",
+      "sha": "68f2cbc14371558d1863a74ff64656eb664469a0",
+      "size": 19793
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/omx_encoder.h",
+      "sha": "be1ca55c55053191d71c2e111464ca880e118eb3",
+      "size": 1835
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Audio.h",
+      "sha": "0d455766c5004849dfc2b96b8085518551bee37d",
+      "size": 77117
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Component.h",
+      "sha": "d5956405e20a1c92b4519a3ee33dba0a7fac6477",
+      "size": 23869
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_ContentPipe.h",
+      "sha": "5f6310c28a38a27373ce47f4a1353de8a3e6d830",
+      "size": 9223
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Core.h",
+      "sha": "52d211f0dc38463c62baf37083576bb9d39e8c58",
+      "size": 70034
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_CoreExt.h",
+      "sha": "3ec14b05f323a616a456aba1a9e95583ea3edaad",
+      "size": 2593
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_IVCommon.h",
+      "sha": "ec717565a09929a097d49cc5827f857556c52e59",
+      "size": 33141
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Image.h",
+      "sha": "a6d4666c035dd9e9a15c7156192d174b02ba2d4d",
+      "size": 13267
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Index.h",
+      "sha": "a1f17487d3c1e7132dfd115593bbd508e921fcc8",
+      "size": 17977
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_IndexExt.h",
+      "sha": "3db7da0a431f828e2370f2827fb7031398deffdd",
+      "size": 4239
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Other.h",
+      "sha": "caf7f3844808442ab8d0dd9dd52fa68e014adf95",
+      "size": 17932
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_QCOMExtns.h",
+      "sha": "20917932be1b157f1f7dd196bacc63820babfe27",
+      "size": 67453
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Skype_VideoExtensions.h",
+      "sha": "5cc832930f18017b6f36a5b8d8f3401074741cd9",
+      "size": 4729
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Types.h",
+      "sha": "3b9fab4fc2e057fda1e9ce19cab6e7c3cc495c16",
+      "size": 12542
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_Video.h",
+      "sha": "64dbe87b4329d103152f27057412ec34428f7acd",
+      "size": 44945
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/openmax/include/OMX_VideoExt.h",
+      "sha": "5bf6fd487864053158129d765bf524c853d9c846",
+      "size": 5628
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/screenrecorder.cc",
+      "sha": "57a2e8f811632ea9068d97ea482dea602f930fb6",
+      "size": 4578
+    },
+    {
+      "path": "selfdrive/frogpilot/screenrecorder/screenrecorder.h",
+      "sha": "f1d0ad73bef00fec5327b97d91b91914a4e961cc",
+      "size": 1022
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/data_settings.cc",
+      "sha": "ca7da0a1aa023a6a1559f3ed261d5f0bc44c584b",
+      "size": 20833
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/data_settings.h",
+      "sha": "8d491738be57055b9f420f64a01ae2d229c63137",
+      "size": 287
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/device_settings.cc",
+      "sha": "b62ef848cd041829b25c33bb57502c999f13d269",
+      "size": 10639
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/device_settings.h",
+      "sha": "07b4fcfb99712774d06b023e2f8ff9631b3c0c87",
+      "size": 894
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/frogpilot_settings.cc",
+      "sha": "3cb8c6d30d328877eecfa88cb4ce15d922c18189",
+      "size": 15618
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/frogpilot_settings.h",
+      "sha": "d2f0a6dc02738f7df8d6d007454addae60b14fd9",
+      "size": 1759
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/lateral_settings.cc",
+      "sha": "f6783e8bce733ba880ffa680879c67c8873ea9f2",
+      "size": 21908
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/lateral_settings.h",
+      "sha": "ef546a63f81d27c23b3ecc62ee3c182f4b366323",
+      "size": 1606
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/longitudinal_settings.cc",
+      "sha": "9c0f1b0c059b1a0e193c2acc5482e214b0ed6deb",
+      "size": 62794
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/longitudinal_settings.h",
+      "sha": "6a0bb8cb5bb2e226760f522cdaa08d3348986026",
+      "size": 3209
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/model_settings.cc",
+      "sha": "187b9ed29f3e919e2dba610c4125e4fb96b8a60f",
+      "size": 17271
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/model_settings.h",
+      "sha": "5e76b230976bdd4a84b579dc94b16822502fad6a",
+      "size": 1358
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/sounds_settings.cc",
+      "sha": "4104cf3a4a82cdcdde87000695a90ac1c8f02005",
+      "size": 9067
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/sounds_settings.h",
+      "sha": "01542e05b277ab1a1e130ea8d52c20044163a0b9",
+      "size": 1044
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/theme_settings.cc",
+      "sha": "f767ff0c9b95d3c520d0a247b7691a2533dd645c",
+      "size": 34967
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/theme_settings.h",
+      "sha": "4a8e96a53a793e746d2d3b144aecd44ff2b3b012",
+      "size": 1855
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/utilities.cc",
+      "sha": "dc215e35142c144c33765b2b69e413c6d8cbe2c6",
+      "size": 4698
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/utilities.h",
+      "sha": "cce68517fe74fa984b598af40190b395a1443d93",
+      "size": 340
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/vehicle_settings.cc",
+      "sha": "19939a469730c9625377620dd3e0cb30064b5315",
+      "size": 14569
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/vehicle_settings.h",
+      "sha": "5f54a74f6a34cd23b4564c033fad81ca758ee774",
+      "size": 1309
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/visual_settings.cc",
+      "sha": "475ca2fc8a01a62f6da1c22030b251732476c975",
+      "size": 28704
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/visual_settings.h",
+      "sha": "317fbc4814baf752fece19a7c3cd98e58d31ce5d",
+      "size": 1930
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/wheel_settings.cc",
+      "sha": "196beee548d75107895cb651fcc78fb13b0226c5",
+      "size": 3461
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/offroad/wheel_settings.h",
+      "sha": "0caa8bb4893c4bf4d6498015d1376c4e81382ebd",
+      "size": 545
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/drive_stats.cc",
+      "sha": "bcae769226db2a8a3336fef6b3b3b78c8984c46d",
+      "size": 4203
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/drive_stats.h",
+      "sha": "d1d0e7bbbdf8b59242ce57ecea718756d33c57d4",
+      "size": 881
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/frogpilot_controls.cc",
+      "sha": "d95cac41f0574ad0aa75abe0191837753f5eec28",
+      "size": 1575
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/frogpilot_controls.h",
+      "sha": "df89854a0b603995f0eea6ae416cd0c70b5004e3",
+      "size": 17932
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/model_reviewer.cc",
+      "sha": "ca644d29d508ea69884153020c117df9116f3ec3",
+      "size": 8723
+    },
+    {
+      "path": "selfdrive/frogpilot/ui/qt/widgets/model_reviewer.h",
+      "sha": "f3593d2c00da94c595ba717361b2bd5188879e21",
+      "size": 1182
+    },
+    {
+      "path": "selfdrive/ui/installer/installer.cc",
+      "sha": "d43ed37ae8aa92b8454a5dcea102bbf68c334870",
+      "size": 6080
+    },
+    {
+      "path": "selfdrive/ui/installer/installer.h",
+      "sha": "de3af0ff3950216ce261001b2a77e152037a5332",
+      "size": 489
+    },
+    {
+      "path": "selfdrive/ui/main.cc",
+      "sha": "4903a3db3dcc07aa250828c974ec796cc12a8301",
+      "size": 802
+    },
+    {
+      "path": "selfdrive/ui/mui.cc",
+      "sha": "98029ee3114d4fe451dad6a02cfbecd55ed4f329",
+      "size": 1460
+    },
+    {
+      "path": "selfdrive/ui/qt/api.cc",
+      "sha": "6889b40e51518b66c55e6085fab77f373beaa8b7",
+      "size": 4299
+    },
+    {
+      "path": "selfdrive/ui/qt/api.h",
+      "sha": "ad64d7e7228320291737b339c17bc6b5a9376da5",
+      "size": 1065
+    },
+    {
+      "path": "selfdrive/ui/qt/body.cc",
+      "sha": "e01adbe06378114d221e1041208fbcb1f2a3ef10",
+      "size": 4201
+    },
+    {
+      "path": "selfdrive/ui/qt/body.h",
+      "sha": "567a54d49befd50376ae807611835c380ae831b8",
+      "size": 670
+    },
+    {
+      "path": "selfdrive/ui/qt/home.cc",
+      "sha": "211ea6d4d8d9c18630a2545b6189c1ec4cd6a285",
+      "size": 8885
+    },
+    {
+      "path": "selfdrive/ui/qt/home.h",
+      "sha": "b400b20b158725b279c829b3097680d10f28ad34",
+      "size": 1755
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map.cc",
+      "sha": "5e46a0c7c3b9ecee21ebffd5ac7bb1ee75b765e7",
+      "size": 17659
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map.h",
+      "sha": "a15aa4031fa30b99baf3ce7d8621a7db08eb4122",
+      "size": 2287
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_eta.cc",
+      "sha": "0eb77e36ce6773b60b726b9f9f3bdf1d672b35a0",
+      "size": 2329
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_eta.h",
+      "sha": "6e59837de3d746115781bf11f3c383c4f961c039",
+      "size": 498
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_helpers.cc",
+      "sha": "16923f7a435c1b3cbe45af190fb96e1d977c4b18",
+      "size": 5042
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_helpers.h",
+      "sha": "45509abf2df2e2c2b1c15d1647757a9b49b13910",
+      "size": 1570
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_instructions.cc",
+      "sha": "ba8cb356bd1651d296ab1d56b0aa31115581d1eb",
+      "size": 4883
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_instructions.h",
+      "sha": "06a943d27fb0a80b6e23148034c411e7b6bdecfd",
+      "size": 1007
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_panel.cc",
+      "sha": "ff19f6c25ab3881b494145679c435bb09cc1e3dd",
+      "size": 1744
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_panel.h",
+      "sha": "4e1af240fedcc1439b7fb66199f07a71c32be302",
+      "size": 452
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_settings.cc",
+      "sha": "5ed352c7c360ce6c9973d97c76c333bfa53fd144",
+      "size": 13960
+    },
+    {
+      "path": "selfdrive/ui/qt/maps/map_settings.h",
+      "sha": "1a963367a93b9496ae9ada9f364be7e687b7f4bd",
+      "size": 2687
+    },
+    {
+      "path": "selfdrive/ui/qt/network/networking.cc",
+      "sha": "5cda79ddff2ab8f363a1335dd915f6659f740324",
+      "size": 14067
+    },
+    {
+      "path": "selfdrive/ui/qt/network/networking.h",
+      "sha": "c7327b602b2939ac479431e66b616f0c0a9cf7ee",
+      "size": 2340
+    },
+    {
+      "path": "selfdrive/ui/qt/network/networkmanager.h",
+      "sha": "8bdeaf3bbd068c86d123c4fa0ab4de1fcd047652",
+      "size": 2509
+    },
+    {
+      "path": "selfdrive/ui/qt/network/wifi_manager.cc",
+      "sha": "717da47096913ef4ef93cb7525cbb99f3a6bd08b",
+      "size": 19978
+    },
+    {
+      "path": "selfdrive/ui/qt/network/wifi_manager.h",
+      "sha": "09445ea0b15f7b120d9f900916d136205d848513",
+      "size": 3335
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/driverview.cc",
+      "sha": "df9bb246510cfb9c0c4d9be4a45a2b3f990112ff",
+      "size": 2668
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/driverview.h",
+      "sha": "155e4ede32073d3fdbb1c2c9137c2524f7e7526d",
+      "size": 373
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/experimental_mode.cc",
+      "sha": "b99220c1d183698e6305856fa86f33dad4806bc9",
+      "size": 2492
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/experimental_mode.h",
+      "sha": "bfb7638bbec4b3cadab10ccb2c333d5b2522459e",
+      "size": 601
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/onboarding.cc",
+      "sha": "b1219055fd07aec4c9ad1ddb09dfdee99e38b830",
+      "size": 7029
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/onboarding.h",
+      "sha": "a1b6895ba087d00dde96d7c032af4775cc6d4dfa",
+      "size": 2268
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/settings.cc",
+      "sha": "2a3e036ce96a2b14b8f8e3ca8a62ebdaf15e62df",
+      "size": 23501
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/settings.h",
+      "sha": "71ad4ea586a9a589d1a1243b79a5d642ad3a521a",
+      "size": 2810
+    },
+    {
+      "path": "selfdrive/ui/qt/offroad/software_settings.cc",
+      "sha": "7eaf8d1dc71fab71895d5ff0c682f08cef6d7081",
+      "size": 7367
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/alerts.cc",
+      "sha": "9cfb1fa7cac3486defe4c9c5b5b8f4852eda8e07",
+      "size": 5516
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/alerts.h",
+      "sha": "7219e5ed56da4a41670681525e8e97769716e72c",
+      "size": 1302
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/annotated_camera.cc",
+      "sha": "3d3464c5e58fd00f687a01d5968ea3b0168420e3",
+      "size": 55186
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/annotated_camera.h",
+      "sha": "a4e46e489fc493a84b5b5303f30f8b914e85d271",
+      "size": 5554
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/buttons.cc",
+      "sha": "0f3bb2eabe5d15fabd70a93f3cd5d97c4e393e75",
+      "size": 9065
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/buttons.h",
+      "sha": "8362b27f097733941aa48464a214bca1d13fee3f",
+      "size": 2013
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/onroad_home.cc",
+      "sha": "03f9822f4a360aa9efbd24d112000e5f8516352f",
+      "size": 12994
+    },
+    {
+      "path": "selfdrive/ui/qt/onroad/onroad_home.h",
+      "sha": "f6b2dd088fdb1a6d3d096e9c1c0d60fdff75e3c2",
+      "size": 1490
+    },
+    {
+      "path": "selfdrive/ui/qt/qt_window.cc",
+      "sha": "8d3d7cf72e400f1fdb5bb2fb59c29cee918b150c",
+      "size": 1125
+    },
+    {
+      "path": "selfdrive/ui/qt/qt_window.h",
+      "sha": "6f16e00957485ca74a1e5b303b905f4418e2f3ba",
+      "size": 375
+    },
+    {
+      "path": "selfdrive/ui/qt/request_repeater.cc",
+      "sha": "7aa731898c978fefa0047eb56367cbca0a17ee40",
+      "size": 1016
+    },
+    {
+      "path": "selfdrive/ui/qt/request_repeater.h",
+      "sha": "c0e27582736138efb3fd2b6de04eb2ef2cfe9d5d",
+      "size": 356
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/reset.cc",
+      "sha": "c9e0525784aa7a944d6b0c8a2048b325df657bbe",
+      "size": 3620
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/reset.h",
+      "sha": "8bf368e3e8af4dc09fe5b05a1789b86b570b72cc",
+      "size": 511
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/setup.cc",
+      "sha": "aff9b015b3a40deebd2b2c472a03ab39e2183438",
+      "size": 14688
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/setup.h",
+      "sha": "ee5cc854831cf87257a7862795eb1eadc29a998f",
+      "size": 694
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/updater.cc",
+      "sha": "ed47590aa32501eb6d384891140eff3ad9686389",
+      "size": 5241
+    },
+    {
+      "path": "selfdrive/ui/qt/setup/updater.h",
+      "sha": "ce46c0aabd089a0e62e5a550e4607033f9498455",
+      "size": 595
+    },
+    {
+      "path": "selfdrive/ui/qt/sidebar.cc",
+      "sha": "34c878ad74a1c688a5cb63ac5e650d933006ff9f",
+      "size": 12386
+    },
+    {
+      "path": "selfdrive/ui/qt/sidebar.h",
+      "sha": "6fa7bac1dca31350cfc301ebea9e0fd373cbae60",
+      "size": 3287
+    },
+    {
+      "path": "selfdrive/ui/qt/spinner.cc",
+      "sha": "7ca2f1a70ca77d05f261a01b10185b4908899c3a",
+      "size": 3355
+    },
+    {
+      "path": "selfdrive/ui/qt/spinner.h",
+      "sha": "43d90a75b010364808d30e545c1bc62303264201",
+      "size": 691
+    },
+    {
+      "path": "selfdrive/ui/qt/text.cc",
+      "sha": "21ec5eedcf6be4ca57069e23e0e3da2743c5ffe5",
+      "size": 1742
+    },
+    {
+      "path": "selfdrive/ui/qt/util.cc",
+      "sha": "4ae77c74e42b25b51003c1dad434ba98ad5715ba",
+      "size": 8246
+    },
+    {
+      "path": "selfdrive/ui/qt/util.h",
+      "sha": "2aae97b8602d3ee5f9fa89eded10625c0c69432a",
+      "size": 1710
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/cameraview.cc",
+      "sha": "914b04b65444459d52a609e1c70879a4bb58370e",
+      "size": 14993
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/cameraview.h",
+      "sha": "85ec49873579dc4ecf845fc9d89b358aa38b1970",
+      "size": 2861
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/controls.cc",
+      "sha": "40dda971f51e6f233efc9ddbd5c28cba4d61aa4c",
+      "size": 4387
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/controls.h",
+      "sha": "aa304e0df68feebdc2cd16e60365b2a7b28c9189",
+      "size": 7533
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/input.cc",
+      "sha": "14bab39340adf38ed1f17ea7df96856e1620f18c",
+      "size": 11320
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/input.h",
+      "sha": "ba18272e50bad3689adf0a2ad942a8732ee3f5b4",
+      "size": 2235
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/keyboard.cc",
+      "sha": "370e9a53ccb62f9eec480d177c68023c4535f9ae",
+      "size": 5183
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/keyboard.h",
+      "sha": "efc02d075d99ab2648c1646dc9da805e32abda60",
+      "size": 701
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/offroad_alerts.cc",
+      "sha": "a952a2a9b6a0316e4c752eda5e1eb5dd855417de",
+      "size": 4852
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/offroad_alerts.h",
+      "sha": "abeafd2256c365f935c227e1909b060cde65f546",
+      "size": 789
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/prime.cc",
+      "sha": "2621612f67f43205a7a9bfc22acf3127ad2c21d8",
+      "size": 9182
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/prime.h",
+      "sha": "63341c4ceae8d993129afb6b85fc5075d7e6aaec",
+      "size": 1332
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/scrollview.cc",
+      "sha": "978bf83a63b1709f8ad470449f3516def5b5835b",
+      "size": 1720
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/scrollview.h",
+      "sha": "024331aa39dd2e672fe9218e222213db325c86cf",
+      "size": 226
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/ssh_keys.cc",
+      "sha": "1b116643a54a6a24555e035597e03e167be7af2b",
+      "size": 2148
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/ssh_keys.h",
+      "sha": "3542aa88044a3ca900e2919d7483ba0b2de0c6b5",
+      "size": 681
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/toggle.cc",
+      "sha": "1236d25ddd19a4a516ae79746ef64c7e45fbddad",
+      "size": 2228
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/toggle.h",
+      "sha": "e7263a008fa1831739dd2845b2d175411a1999f5",
+      "size": 932
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/wifi.cc",
+      "sha": "0b41e7580f9eb6c6bd25c40a95003ac735fc577d",
+      "size": 4606
+    },
+    {
+      "path": "selfdrive/ui/qt/widgets/wifi.h",
+      "sha": "30278c1b0131e473cabd4b9203609a307b5c5953",
+      "size": 437
+    },
+    {
+      "path": "selfdrive/ui/qt/window.cc",
+      "sha": "52c4107189401f548066445cb64f50490a629b47",
+      "size": 3580
+    },
+    {
+      "path": "selfdrive/ui/qt/window.h",
+      "sha": "f1389c29f7a809b939cc25189a28717f7c9d7785",
+      "size": 620
+    },
+    {
+      "path": "selfdrive/ui/tests/playsound.cc",
+      "sha": "6487d0479038c2d2128e0b868c283917736ae224",
+      "size": 741
+    },
+    {
+      "path": "selfdrive/ui/tests/test_runner.cc",
+      "sha": "ac63139d178a89f1d8f834fe59b964d6234c11c3",
+      "size": 689
+    },
+    {
+      "path": "selfdrive/ui/tests/test_translations.cc",
+      "sha": "fcefc5784fee7a4701680e82a476ddaf4386e97e",
+      "size": 1519
+    },
+    {
+      "path": "selfdrive/ui/tests/ui_snapshot.cc",
+      "sha": "14e0fab835fc461bcbd0dfd623dcacea27bff10e",
+      "size": 1916
+    },
+    {
+      "path": "selfdrive/ui/tests/ui_snapshot.h",
+      "sha": "b4699f6af58c084a97a80e8264805386bac916f1",
+      "size": 100
+    },
+    {
+      "path": "selfdrive/ui/ui.cc",
+      "sha": "f1681cccc8aae0af42dac3fb4c068ec5f730cff4",
+      "size": 31597
+    },
+    {
+      "path": "selfdrive/ui/ui.h",
+      "sha": "c9fad4db259e54f3c47ab0093ac06dc24dcf8b51",
+      "size": 10687
+    },
+    {
+      "path": "selfdrive/ui/watch3.cc",
+      "sha": "ec35c29b6b4c55ee26c429fba1776121429bece6",
+      "size": 905
+    },
+    {
+      "path": "system/hardware/base.h",
+      "sha": "ca24633a182a91dd4d07f6689409efd489e4f36c",
+      "size": 1105
+    },
+    {
+      "path": "system/hardware/hw.h",
+      "sha": "394807ccb574beab872b8ebf47f625e4e36acb16",
+      "size": 1300
+    },
+    {
+      "path": "system/hardware/pc/hardware.h",
+      "sha": "5dea184ca6db91a3aa10e8bce570c4ad02bbbac8",
+      "size": 776
+    },
+    {
+      "path": "system/hardware/tici/hardware.h",
+      "sha": "f1d1f1e717ed88404775b24093dc069a29ab6df5",
+      "size": 3845
+    },
+    {
+      "path": "third_party/acados/acados_template/c_templates_tera/acados_sim_solver.in.h",
+      "sha": "59aee62f49fd3f0c2d53b6a255456a5ef6f3a130",
+      "size": 4532
+    },
+    {
+      "path": "third_party/acados/acados_template/c_templates_tera/acados_solver.in.h",
+      "sha": "5cf38aa8c8ff3bda76a541605419d48392e8e2fd",
+      "size": 11811
+    },
+    {
+      "path": "third_party/acados/acados_template/c_templates_tera/constraints.in.h",
+      "sha": "d71ce5cc221f1be4be3495ca53777c191c429cdf",
+      "size": 5322
+    },
+    {
+      "path": "third_party/acados/acados_template/c_templates_tera/cost.in.h",
+      "sha": "45eb09c12e2b3b2ef6a9e3c95d4bcff1be8841fb",
+      "size": 12719
+    },
+    {
+      "path": "third_party/acados/acados_template/c_templates_tera/model.in.h",
+      "sha": "e5059df9ffa90b4627adc8351abacac03c4961ce",
+      "size": 10649
+    },
+    {
+      "path": "third_party/acados/acados_template/custom_update_templates/custom_update_function_zoro_template.in.h",
+      "sha": "9611ea210c957841c8e04dad5f2a75ec56587a5e",
+      "size": 2049
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_common.h",
+      "sha": "2a9a974f99b0d200bdfa517a56481de8c725de48",
+      "size": 4905
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_daqp.h",
+      "sha": "b262089b4ffe0ef16523f8640c216a8ffd5aec81",
+      "size": 3485
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_hpipm.h",
+      "sha": "136279d666144fdf0dc123ad19a6904ed1e1cd98",
+      "size": 2985
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_ooqp.h",
+      "sha": "d051cb15f70281f00c27669b227a76010efa18a2",
+      "size": 3751
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_qore.h",
+      "sha": "392e472918d613ab2bf031b28e15e01ff8687773",
+      "size": 4254
+    },
+    {
+      "path": "third_party/acados/include/acados/dense_qp/dense_qp_qpoases.h",
+      "sha": "0e13d3ef64ef6e318725ffe544db9032f0c48dba",
+      "size": 4462
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_common.h",
+      "sha": "ba97db9768424576b34fcbd2681ee658642273f0",
+      "size": 16287
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_constraints_bgh.h",
+      "sha": "9dbf16f6dc2df33952b5ea7b48e208b2c0e6a39d",
+      "size": 8659
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_constraints_bgp.h",
+      "sha": "eb05edf7a6bf2d9f828381634598438466475891",
+      "size": 7659
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_constraints_common.h",
+      "sha": "bb73c468deb377171a2ed703191b242015cdecfc",
+      "size": 4823
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_cost_common.h",
+      "sha": "eb4056403648c649305a1a2627d31fa4bad0f41a",
+      "size": 4515
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_cost_conl.h",
+      "sha": "2eb3f5d127a7a994fdc325e1fe78b43927e772e5",
+      "size": 7458
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_cost_external.h",
+      "sha": "78958270ded651bcf562b47acaa3e892e0fc2131",
+      "size": 6834
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_cost_ls.h",
+      "sha": "801e9a5b87b2d6307479bdd88a0144653f4d2407",
+      "size": 9498
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_cost_nls.h",
+      "sha": "5ec68cf580a3e865802872ad4ca9506bf5074894",
+      "size": 7498
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_dynamics_common.h",
+      "sha": "43fe71b12fcfbc85146999739fb7fc6a09cb4de7",
+      "size": 5072
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_dynamics_cont.h",
+      "sha": "3afdc9f4ed83f2c7501dfe02600521a062c3c356",
+      "size": 7332
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_dynamics_disc.h",
+      "sha": "6ea26a70106fc6bce9fd45753f820c96145842c2",
+      "size": 6564
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_common.h",
+      "sha": "9388f3fd24651a4c14b405c07b567289df7ba6bc",
+      "size": 4496
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_convexify.h",
+      "sha": "cb523525e188bde05dfcfc692ab2f089de7fb99f",
+      "size": 4383
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_mirror.h",
+      "sha": "84a023cb69f07758e63c67019d950b6b5f756ccb",
+      "size": 3449
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_noreg.h",
+      "sha": "b571f3bac1508d6d41703e13dfd4aae0fadd4dc0",
+      "size": 3084
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_project.h",
+      "sha": "682ea206dc50aefe8a6ac869f657bb833622a529",
+      "size": 3461
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_reg_project_reduc_hess.h",
+      "sha": "7e12952c15265a38fb451c73b4bdea3481f259cf",
+      "size": 4035
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_sqp.h",
+      "sha": "fdb96417f94d71d73fdeedae1e2363a6c41156f3",
+      "size": 5049
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_nlp/ocp_nlp_sqp_rti.h",
+      "sha": "364d0f4717883511620727d35b1e7a8015683680",
+      "size": 4676
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_common.h",
+      "sha": "d1a45635e4054765b97ac75098c57fea8c104c41",
+      "size": 6281
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_common_frontend.h",
+      "sha": "f65f602c15c304c3726be24c2f1d298e662ad531",
+      "size": 3330
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_full_condensing.h",
+      "sha": "d23e658b4806c40afe7bafb40cd13298a8676538",
+      "size": 3778
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_hpipm.h",
+      "sha": "261606b8423a6a18d577a5a4b0457987444601da",
+      "size": 3323
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_hpmpc.h",
+      "sha": "8db53a279dbca68cb23d0305de2cb6e3e10312a6",
+      "size": 3937
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_ooqp.h",
+      "sha": "a535503f215118b24783ecddcfac9e0d540914c7",
+      "size": 4148
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_osqp.h",
+      "sha": "51df1b1cd680679585e3681167a22fa4a946248b",
+      "size": 3073
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_partial_condensing.h",
+      "sha": "844f6048fe6220058381221cf886bd3c5c4b8436",
+      "size": 3840
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_qpdunes.h",
+      "sha": "3b875caeb504190da6f0aed4fa21c6ecd607010a",
+      "size": 3838
+    },
+    {
+      "path": "third_party/acados/include/acados/ocp_qp/ocp_qp_xcond_solver.h",
+      "sha": "a78bc65bb9c6214cf44cd0f261c1a28dbd412543",
+      "size": 5782
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_collocation_utils.h",
+      "sha": "045d165cbccee2891a7edf4ce86d06cfc6655452",
+      "size": 2760
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_common.h",
+      "sha": "c4bbd6ed2b8de178f8927c5c38c7a25ed6e45bf7",
+      "size": 6666
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_erk_integrator.h",
+      "sha": "fd46cb4d99c0356d375f6e3b178f3a5c9e9c2755",
+      "size": 3968
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_gnsf.h",
+      "sha": "404532a73276223e8f0643e676de759f9234e9c4",
+      "size": 10236
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_irk_integrator.h",
+      "sha": "5090aa0bb526049c64b03089572d9c7979d537e2",
+      "size": 7487
+    },
+    {
+      "path": "third_party/acados/include/acados/sim/sim_lifted_irk_integrator.h",
+      "sha": "e60bb80ebf8b2f60e88dbc4704d7f5bc5476f367",
+      "size": 4979
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/external_function_generic.h",
+      "sha": "1e68dc155db82df5984689c872b5de14c5036168",
+      "size": 8757
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/math.h",
+      "sha": "7156a82084267f265c04df0fd993b1d0722ee4a1",
+      "size": 3735
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/mem.h",
+      "sha": "681a371e360f64b936614cd6bd09a5f426d162e6",
+      "size": 4074
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/print.h",
+      "sha": "824d3cee224a99329e97e0f9cfc756a31e873302",
+      "size": 3828
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/strsep.h",
+      "sha": "62bdfb48913266fc003727924a9eff73aab93df2",
+      "size": 2032
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/timing.h",
+      "sha": "b0955932da3a2fa99fdf9e2ef3997071705db5f1",
+      "size": 3195
+    },
+    {
+      "path": "third_party/acados/include/acados/utils/types.h",
+      "sha": "a27ef9e552ce620140c4aa4ffc3a112f8e67263b",
+      "size": 2627
+    },
+    {
+      "path": "third_party/acados/include/acados_c/condensing_interface.h",
+      "sha": "b4302078d6351674a3a320186ee3cbef28965422",
+      "size": 2777
+    },
+    {
+      "path": "third_party/acados/include/acados_c/dense_qp_interface.h",
+      "sha": "b3af4bf68250a245c03e92eb89faed98d8699501",
+      "size": 3320
+    },
+    {
+      "path": "third_party/acados/include/acados_c/external_function_interface.h",
+      "sha": "d4f52db85059810ad5b8734bef968ed446db9dc1",
+      "size": 3083
+    },
+    {
+      "path": "third_party/acados/include/acados_c/ocp_nlp_interface.h",
+      "sha": "dd3e596f8be763cb0dd23fc8717b805429862a65",
+      "size": 14238
+    },
+    {
+      "path": "third_party/acados/include/acados_c/ocp_qp_interface.h",
+      "sha": "3dc3f1a532e50cad33f4c8996cd6072b8cb12124",
+      "size": 7954
+    },
+    {
+      "path": "third_party/acados/include/acados_c/sim_interface.h",
+      "sha": "09a05d6995cf3d05055e5b553a2abdc99791b650",
+      "size": 4140
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo.h",
+      "sha": "c8549181937dee578e7ca305ba083bf685b0b7f3",
+      "size": 3923
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_block_size.h",
+      "sha": "5d0907a61cfea2f3a8e9155e639cbf7c5e2827bf",
+      "size": 15901
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_common.h",
+      "sha": "03b6c36d84b9bd2757f2eb088dba466a9dfbfb4d",
+      "size": 10398
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux.h",
+      "sha": "a6d6119c6c1446d993c3ff970415053f67889144",
+      "size": 13395
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux_ext_dep.h",
+      "sha": "bee9e986f15d8f4b94ec419a5fdde0fb1fff7069",
+      "size": 7907
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux_ext_dep_ref.h",
+      "sha": "81b811f032503941cd8fce9b5ada1181318461ff",
+      "size": 5370
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux_old.h",
+      "sha": "3a1847a6a0191dbed11aa9d3d64d438c61c4c485",
+      "size": 5728
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux_ref.h",
+      "sha": "1e007fa89e4bd6b73070bd5ef2967aba057785dc",
+      "size": 12412
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_aux_test.h",
+      "sha": "1c61635f3ffbfa44baf0ddc99b84361432c12738",
+      "size": 14062
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blas.h",
+      "sha": "ea8d00673128bd901d52f98dc811df2fc4bed3ad",
+      "size": 3555
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blas_api.h",
+      "sha": "2eab1e40949c225e3bc33b5cfb8a5ff9f42445da",
+      "size": 13277
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blasfeo_api.h",
+      "sha": "88bb3fce2262482905654e97aa325b0a4f4a18c9",
+      "size": 37346
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blasfeo_api_ref.h",
+      "sha": "141a1f0f06082c1127f27b94f50bf7391d115aca",
+      "size": 16855
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blasfeo_hp_api.h",
+      "sha": "405733f13e89b3bc96d51f0f57e4ee2fe1032174",
+      "size": 4973
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_blasfeo_ref_api.h",
+      "sha": "1a8b22c67efc686d588039b6651d32fe233e8cec",
+      "size": 25232
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_d_kernel.h",
+      "sha": "d20ac38bbd043c0edd890e13ef2dae86a30a2210",
+      "size": 157860
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_i_aux_ext_dep.h",
+      "sha": "74c3fb5c0a22ff65b093d0a928c686533031f1d2",
+      "size": 3956
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_m_aux.h",
+      "sha": "6248853e292fd2a17b95f13de1c50e4bce832155",
+      "size": 4036
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_memory.h",
+      "sha": "da4e7fa090078a39e3e837353d3d926685d93fb4",
+      "size": 3663
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_naming.h",
+      "sha": "c289443b1767931ac325f01c88b18a48c4dfe2b7",
+      "size": 4260
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_processor_features.h",
+      "sha": "67a0a4da049bfb917ce3e8d805a00380c59446f6",
+      "size": 5651
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux.h",
+      "sha": "f43f5e83ce9b313c70f2dc5d1723d46a52268278",
+      "size": 11686
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux_ext_dep.h",
+      "sha": "5209d20d377c21af592c35f2f59b66ef4edbaae9",
+      "size": 7864
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux_ext_dep_ref.h",
+      "sha": "6640e20a406c850a68b49f5880c4f24431645b1c",
+      "size": 5262
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux_old.h",
+      "sha": "5c6db37bab1b1defba4e96ee1ac7aeeb6c6c697d",
+      "size": 5583
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux_ref.h",
+      "sha": "998e1d899971753714005372f88e4aa8b2bc41cd",
+      "size": 11186
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_aux_test.h",
+      "sha": "08d9a14a6a7de4684928190943c3a84c3ed9e4ff",
+      "size": 13091
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_blas.h",
+      "sha": "200f1f51b1daacc2b9bc31cb33a236605be0a3f1",
+      "size": 3555
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_blas_api.h",
+      "sha": "cf2b3e0a2d1d36e83b1b2f7a2c66b2a09152af49",
+      "size": 7283
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_blasfeo_api.h",
+      "sha": "8b98104735fc6fc783a603f25e813742d21bc280",
+      "size": 25886
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_blasfeo_api_ref.h",
+      "sha": "f429a79dc3f45d03ada086cf0fc7265ad628075e",
+      "size": 14671
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_blasfeo_ref_api.h",
+      "sha": "17cb17969577efb9e335587ab45562951a27393d",
+      "size": 21882
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_s_kernel.h",
+      "sha": "99d2b28c823d57c969e1ee3f0803a097c37ab0da",
+      "size": 63298
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_stdlib.h",
+      "sha": "9bd248b1d4f702d2b92e69d639e906c20450d8c5",
+      "size": 3753
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_target.h",
+      "sha": "51f617a6499273fd24754a756aa84497f5d8682c",
+      "size": 1155
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_timing.h",
+      "sha": "5671b888feec39124d4030725ecf97e776dcd1b3",
+      "size": 5123
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/blasfeo_v_aux_ext_dep.h",
+      "sha": "1598551185cc68a2bd7af9366fe3268589e15ba4",
+      "size": 4624
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/d_blas.h",
+      "sha": "ffd2578da3c54d5c8c9b921c45c75d7aa9b9a826",
+      "size": 5805
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/d_blas_64.h",
+      "sha": "4f40d00dfb3fe8b1ed5701f5ef62acbabcaa9a24",
+      "size": 5701
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/s_blas.h",
+      "sha": "3b299ce64cdef60f6f0a516da2be6b60fd05ef1b",
+      "size": 5737
+    },
+    {
+      "path": "third_party/acados/include/blasfeo/include/s_blas_64.h",
+      "sha": "b9efab6c236ed1f0e18d1b4e4e7aa79b056e5a1c",
+      "size": 5652
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_aux_mem.h",
+      "sha": "7bd3d7e8bc53e94126ff5c898c4c9f4846f8b5af",
+      "size": 3651
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_aux_string.h",
+      "sha": "804cba5dc1a88db2aa6f38a94c1a674f5a3ce3c1",
+      "size": 3639
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_common.h",
+      "sha": "0cc96a7b506568805827eff0a459b64fecc28bad",
+      "size": 4124
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_cast_qcqp.h",
+      "sha": "0e4c41f22159acc52faa9d07cba189b26a5398ba",
+      "size": 3997
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_cond.h",
+      "sha": "5900a2ab10201eee91bda821fcbc7630cb3ca35e",
+      "size": 6695
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_cond_aux.h",
+      "sha": "73afba3c7e75e26b3c0d2bc4953be31264438ca8",
+      "size": 6116
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_cond_qcqp.h",
+      "sha": "266567bb8dfeaf280d6fac96cae4773f94abddb8",
+      "size": 6772
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_core_qp_ipm.h",
+      "sha": "f39d9a9b507a92c610f2ce340389a9d649dc8b9f",
+      "size": 5602
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_core_qp_ipm_aux.h",
+      "sha": "30cc824badba3a2cee4bb30b8b0314be91083a7b",
+      "size": 4377
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp.h",
+      "sha": "3da57164937a913f4a60e6ab48a24ecd8ddfb261",
+      "size": 8374
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp_dim.h",
+      "sha": "fa8c574a1ef0e23f8dce2a28f5c3a61fa72a0853",
+      "size": 5058
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp_ipm.h",
+      "sha": "fa3f98fa79a6ca9faf3b4c5956978758c932c894",
+      "size": 9384
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp_res.h",
+      "sha": "a76f16215e3e45b913157287d8500a6ff1988aaf",
+      "size": 5211
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp_sol.h",
+      "sha": "6c697a8e693b20d592596480f6edfb4a9cca4d20",
+      "size": 4162
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qcqp_utils.h",
+      "sha": "a34218bae4831a4eb9bfd1b17529d3a31ea4caec",
+      "size": 4525
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp.h",
+      "sha": "02fba5a9229a218b96ac8345399f7c345635c339",
+      "size": 9051
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_dim.h",
+      "sha": "98a551f31258bf11571a7d08d62e0fba23c3672c",
+      "size": 4791
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_ipm.h",
+      "sha": "e6e5d5d9b5b89ad62c2de8c0843f1f8dea1ddef8",
+      "size": 11918
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_kkt.h",
+      "sha": "6d05779f4bab57aa2dfb6d65a22855731fcb5dc6",
+      "size": 4618
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_res.h",
+      "sha": "7c2023257a3c18c4029137c3939dfc20388abf25",
+      "size": 5336
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_sol.h",
+      "sha": "aaa3fdb0e4904a1dff7599df726fe28927f0a406",
+      "size": 4604
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_dense_qp_utils.h",
+      "sha": "ccb77aaca3cee7793ff1fa79c6cdadf6832da751",
+      "size": 4566
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp.h",
+      "sha": "240c9b04be757883ae9c341cebff77419a69d058",
+      "size": 12782
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp_dim.h",
+      "sha": "268628a2b2bfc5a9a92ddfc26cffcfd607c2d62d",
+      "size": 5955
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp_ipm.h",
+      "sha": "99f2329dcc3f1618a401f9f428722be8a2afa6ca",
+      "size": 9865
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp_res.h",
+      "sha": "077f134677a2ccc849f4017fb232de7dcffeacbf",
+      "size": 5532
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp_sol.h",
+      "sha": "68adbfce2d0296d4bdd29de0853e83a5ac17cb5c",
+      "size": 5541
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qcqp_utils.h",
+      "sha": "00248f1dbe65e3189a3c0765cc8275a829a2a4a9",
+      "size": 4472
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp.h",
+      "sha": "ca26cdba3406a1de3a3e1fbdd714426e34c95fab",
+      "size": 13112
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_dim.h",
+      "sha": "dcfb801d31fddea8fb85d575d35ec4e29209d89f",
+      "size": 6831
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_ipm.h",
+      "sha": "d2a2833f224df8b1fab29e58234445207c57a60c",
+      "size": 13002
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_kkt.h",
+      "sha": "19dcec32caa974018ef8706589d1ad4f96fa9d53",
+      "size": 4260
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_red.h",
+      "sha": "f0482b04441eb9d0af1b9d095147c3d44b010c82",
+      "size": 5913
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_res.h",
+      "sha": "061c5729cd6e76ffdac9928b38adceedfd99dcc8",
+      "size": 5660
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_sol.h",
+      "sha": "eb91f3a7b1451fc42343ea7ce6da8833b1303e69",
+      "size": 6490
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_ocp_qp_utils.h",
+      "sha": "217e9d94ae711645243a23ed87a2a5cc80bad07e",
+      "size": 4494
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_part_cond.h",
+      "sha": "1c5f7850356a671d4bad2c49303d302a4e6d08fd",
+      "size": 6001
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_part_cond_qcqp.h",
+      "sha": "2d6624e5bbd0e601ab6c4d21e0dc6a0d748543aa",
+      "size": 5614
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_sim_erk.h",
+      "sha": "320b66bb28c201be2e7f14ee3a366ef82db79966",
+      "size": 6732
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_sim_rk.h",
+      "sha": "a50dcbb491ceea0977d9ea1163b7377965764047",
+      "size": 4146
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp.h",
+      "sha": "f36b51a06433f1e68549297ea5350166af48bbd2",
+      "size": 9996
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp_dim.h",
+      "sha": "257b82b2522bfe4170810699298071531792f261",
+      "size": 6101
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp_ipm.h",
+      "sha": "4a0fed1067aac8c0e1d93a0ebe0f5510cfc31e6b",
+      "size": 10359
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp_res.h",
+      "sha": "69eebb1ba4d67455dc6f6c2776234246a0524397",
+      "size": 5323
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp_sol.h",
+      "sha": "cde8de5c51b769ab91f890161844d113736f55ff",
+      "size": 5119
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qcqp_utils.h",
+      "sha": "5ef04fcf66fc5620e24147892aea27435252bdde",
+      "size": 4703
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp.h",
+      "sha": "1666ad7c71bc3ae42b7a21ee12fc3b5521ef65ae",
+      "size": 9072
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_dim.h",
+      "sha": "659b664594263efa7fd97560770fd4b0b82007e5",
+      "size": 5830
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_ipm.h",
+      "sha": "fb634208ce88458d834e0b6cd71f43ebb03e5b19",
+      "size": 10112
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_kkt.h",
+      "sha": "4afd52fe4bf1ccaf3edc799292b36d0274d538a0",
+      "size": 4174
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_res.h",
+      "sha": "fe499080ea89a3c2d9125c0ff79ad8ef08f5b899",
+      "size": 5507
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_sol.h",
+      "sha": "343d5e8ca6a1715411227004cf38ecd78ee0b1b3",
+      "size": 5316
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_d_tree_ocp_qp_utils.h",
+      "sha": "b689fdc0fa2d59445f202cb66f60046d068351e6",
+      "size": 4646
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_m_dense_qp.h",
+      "sha": "8bc101003e208adeba457bafff2524f357bf31cd",
+      "size": 3777
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_m_dense_qp_dim.h",
+      "sha": "4610321b970c9ed2cb9b854e7016b12df983b768",
+      "size": 3809
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_m_ocp_qp.h",
+      "sha": "95c3dad1aa02be29c0f065fbb20e9721eae06b4a",
+      "size": 3625
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_m_ocp_qp_ipm_hard.h",
+      "sha": "1c44acee2e849720a8959508383b717fec3fcc55",
+      "size": 6224
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_m_ocp_qp_kkt.h",
+      "sha": "032fe95b1f9897f1f0bd670a3cc4ce1d4e386747",
+      "size": 3734
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_cast_qcqp.h",
+      "sha": "ba01ecb3bd437eb68d75785906cd7da9292ef287",
+      "size": 3998
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_cond.h",
+      "sha": "30116798b77599b489d04a8303b436d4e2e4b130",
+      "size": 6697
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_cond_aux.h",
+      "sha": "003472ab9f306901ee0f7bb15449f187ad05c2a3",
+      "size": 6127
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_cond_qcqp.h",
+      "sha": "c36678abd55953c2433bd396bbaa82f198a926d4",
+      "size": 6773
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_core_qp_ipm.h",
+      "sha": "480392c7d91f115839fcb56bdc1d4a24eaf64c53",
+      "size": 5559
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_core_qp_ipm_aux.h",
+      "sha": "1ac3d7ede9bba861d73c4cd14b2f0827fd7b713a",
+      "size": 4369
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp.h",
+      "sha": "d03c065375f323c20d22ce3e9e73b9aa3da75f57",
+      "size": 8329
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp_dim.h",
+      "sha": "04908c2c3ad97f46b6b6655c171be8ea60cb3236",
+      "size": 5059
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp_ipm.h",
+      "sha": "8f85768ee3d7778f7d69fd71e08b8308d91eb0aa",
+      "size": 9638
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp_res.h",
+      "sha": "779658cc8f8b0a8f6d5022305ad9cd85fcd147b6",
+      "size": 5210
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp_sol.h",
+      "sha": "197a690e520ffa4f37bd261441433f48c3851190",
+      "size": 4162
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qcqp_utils.h",
+      "sha": "4f5aae26eb1aba98640e77eafc96014458b03ae1",
+      "size": 4526
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp.h",
+      "sha": "3c2517fe1b76fc11de4b29f6cd96da0ee01a9b8b",
+      "size": 8877
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_dim.h",
+      "sha": "b979d24432a9ee0555812a13d57630af223f4877",
+      "size": 4793
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_ipm.h",
+      "sha": "f2d56d45299574fe394d2feac37c8d082039b71c",
+      "size": 11896
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_kkt.h",
+      "sha": "260dc0ab21d5efb2fea85266bd0b80ac85516102",
+      "size": 4618
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_res.h",
+      "sha": "06b609c537cb1eb67e543ee1be99f4f8ebbc2a21",
+      "size": 5319
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_sol.h",
+      "sha": "1f40076378d833dccf99eae25773336ba212137e",
+      "size": 4591
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_dense_qp_utils.h",
+      "sha": "3dd93259a55a58a6a6cf2813c068f0572dc0827e",
+      "size": 4567
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp.h",
+      "sha": "b90b2ac633758020d14e724303e6b0d2336c1aea",
+      "size": 12699
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp_dim.h",
+      "sha": "c09903f07448ea78631b75a20bd0445cce4c1acf",
+      "size": 5956
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp_ipm.h",
+      "sha": "c14fc1c9fd27a94f84355edca19469fb13545a97",
+      "size": 9844
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp_res.h",
+      "sha": "1ceeec93b7ec5cdce8d7481fc6bae8f4b5d7d5cb",
+      "size": 5527
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp_sol.h",
+      "sha": "3d58022cc9c8ffd0c0b009aa63514410e4884ed8",
+      "size": 5527
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qcqp_utils.h",
+      "sha": "d64e3aabe737421c61e8f9d0ed115b82da5d997a",
+      "size": 4473
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp.h",
+      "sha": "b49191f192d83c0b8401976b3c635bf3be1a10fb",
+      "size": 12990
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_dim.h",
+      "sha": "bce80243b3eb2e7d7e6039df4b7857ec53740bfc",
+      "size": 6830
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_ipm.h",
+      "sha": "11f3c47be6ecd256554b9c57227a3735d84e86ef",
+      "size": 12966
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_kkt.h",
+      "sha": "3eb1f4aae878d000c5a139b85758259e0a87f733",
+      "size": 4260
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_red.h",
+      "sha": "5a7b3b070302b07cc1951ba9ce674bc3f8c47775",
+      "size": 5912
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_res.h",
+      "sha": "821585da6583dda91803e4b19f8c1ef133059c2c",
+      "size": 5639
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_sol.h",
+      "sha": "94dfa0d003b5d2052a3fa2cb06b3910f5365c73c",
+      "size": 6432
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_ocp_qp_utils.h",
+      "sha": "a4f832a5eac05bac9cfd8e0f224baa5a926a2b86",
+      "size": 4495
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_part_cond.h",
+      "sha": "e40511e69f0c1236b1033dd439abe7bd844410b6",
+      "size": 5976
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_part_cond_qcqp.h",
+      "sha": "311f7000bf28acc87f63861a4d07554e8093f6c8",
+      "size": 5615
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_sim_erk.h",
+      "sha": "1a05ad1a283f856de585ec63e46f26eb9044bb22",
+      "size": 6665
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_sim_rk.h",
+      "sha": "53acd71498f033e44d70d0c21f4bca2d2899576e",
+      "size": 4141
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp.h",
+      "sha": "450e992624b22b5a2838c83d02715ce75ec0bd98",
+      "size": 9901
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp_dim.h",
+      "sha": "7a49d519959afb9ff0ed3c0e47c6a5eb3f06ca92",
+      "size": 6077
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp_ipm.h",
+      "sha": "69d65914c527c4be21da5d14668c1a65e3c299a4",
+      "size": 10338
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp_res.h",
+      "sha": "d0d84a6f23952f9ee36483930dc5132c38a50de6",
+      "size": 5322
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp_sol.h",
+      "sha": "47f038c6b3dfe5b6976f1d3406671ad1b9923705",
+      "size": 5000
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qcqp_utils.h",
+      "sha": "79528de1ce74fa249561ba231b394ce527b78447",
+      "size": 4710
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp.h",
+      "sha": "722b930b9a45c866a5a338205f71fb85ff94390a",
+      "size": 9011
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_dim.h",
+      "sha": "90df57182b79931c5d80c16da49586c93c90a3e2",
+      "size": 5830
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_ipm.h",
+      "sha": "f8c26d31737f0dfcfd4ccceeb450ef15e1df6152",
+      "size": 10136
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_kkt.h",
+      "sha": "bcf7354783d2c360ad241db6fc36f8518e362b44",
+      "size": 4176
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_res.h",
+      "sha": "5c6797204f847ad8a29dbe3855bbced495661fae",
+      "size": 5489
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_sol.h",
+      "sha": "71e887675bc3d0d66f34b83171a3ed95a62f1540",
+      "size": 5190
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_s_tree_ocp_qp_utils.h",
+      "sha": "ec1747568f08a867d17fd7afea2ce441051cb270",
+      "size": 4647
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_scenario_tree.h",
+      "sha": "a3c77a670a1d02bd7dcfa4a257a0b846565a8957",
+      "size": 4033
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_timing.h",
+      "sha": "bd0f2dbcb34c5f6072f51f8d154c5166ac07fcb9",
+      "size": 3709
+    },
+    {
+      "path": "third_party/acados/include/hpipm/include/hpipm_tree.h",
+      "sha": "f9d69ecdddda74387c33794c1198c07e977a0c55",
+      "size": 3968
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Bounds.h",
+      "sha": "4e41c1d163b63da318b29a8120b986f96490546a",
+      "size": 14360
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Constants.h",
+      "sha": "13c777d75b83a312b22c13b571ce5c475e787e01",
+      "size": 3415
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/ConstraintProduct.h",
+      "sha": "eb5400c6cb91fa47612d18265e0beb9c32ea5d80",
+      "size": 2079
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Constraints.h",
+      "sha": "8aca10d5d979a85f9f0ca9dcd77c19dfc68ea253",
+      "size": 15685
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Flipper.h",
+      "sha": "63526a30f368e40d199c7bd68dab65867593a4ef",
+      "size": 4187
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Indexlist.h",
+      "sha": "02d259d63d03dbba968bc7012f1299ef70800a1e",
+      "size": 6259
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Matrices.h",
+      "sha": "e2a46b3a9daedaad1f7a99c8952219b6fb1f7f48",
+      "size": 11286
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/MessageHandling.h",
+      "sha": "fe5524948a8b2c6c25d3723a707c72a907ef5723",
+      "size": 26135
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Options.h",
+      "sha": "ca8086d2cc64ed7252578bafa513203d2378e7a2",
+      "size": 5942
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/QProblem.h",
+      "sha": "91a4a6f396720a95ba21bd0936d55774e021d503",
+      "size": 99068
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/QProblemB.h",
+      "sha": "ee5157dda77e8be800d442c7f71e22e398ff87bc",
+      "size": 65169
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Types.h",
+      "sha": "fc042aed8268721c9de0cf7fd2ea0e7433a5ed0b",
+      "size": 10154
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/UnitTesting.h",
+      "sha": "dbff201039eb58481d2df38525ecc71c8701e3e8",
+      "size": 2504
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/Utils.h",
+      "sha": "75e45a56a08c55af6186654018a7fc2d1a2dd054",
+      "size": 16565
+    },
+    {
+      "path": "third_party/acados/include/qpOASES_e/extras/OQPinterface.h",
+      "sha": "da59ea9db6483f9597ffdd7f0ecd4a2071ad4ac8",
+      "size": 10520
+    },
+    {
+      "path": "third_party/kaitai/custom_decoder.h",
+      "sha": "6da7f5fd23cd638ac0a12b1398d45fc27c4f5e6c",
+      "size": 236
+    },
+    {
+      "path": "third_party/kaitai/exceptions.h",
+      "sha": "5c09c4672b8c25696228c5ea20343849cd9aa57a",
+      "size": 5243
+    },
+    {
+      "path": "third_party/kaitai/kaitaistream.h",
+      "sha": "e7f4c6ce347d5b7e369b0c67d09b66f6d4e0702e",
+      "size": 8318
+    },
+    {
+      "path": "third_party/kaitai/kaitaistruct.h",
+      "sha": "8172ede6c981959d29fbc34fdf21bcec2ca4d6d4",
+      "size": 286
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv.h",
+      "sha": "aeffd5ef7a4ca249883c0986894ab752ad8fe665",
+      "size": 1013
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/basic_types.h",
+      "sha": "5b760ee0d4d4a2be9eead84100e0291505c3a3a5",
+      "size": 3304
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/compare.h",
+      "sha": "550712de6e589b6753123f97b536ad6065d7e1ce",
+      "size": 2608
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/compare_row.h",
+      "sha": "781cad3e65aba02f9ab83792a792103eb5eb8589",
+      "size": 2768
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/convert.h",
+      "sha": "d44485847be1d67672e84780fb29d34038dc6907",
+      "size": 9849
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/convert_argb.h",
+      "sha": "dc03ac8d5dc4e1c9b5620bf214bbd69666f4b413",
+      "size": 11678
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/convert_from.h",
+      "sha": "59c40474f1ef249140a6f17875356d0abb8f78cb",
+      "size": 6654
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/convert_from_argb.h",
+      "sha": "8d7f02f8c4dde61f5e924e212dba9bab5fbd0d27",
+      "size": 6346
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/cpu_id.h",
+      "sha": "7c6c9aeb00515dd9c199260d8f96042e98b0a157",
+      "size": 2560
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/macros_msa.h",
+      "sha": "92ed21c38532d49083be9094e59416f3c14b4b95",
+      "size": 3003
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/mjpeg_decoder.h",
+      "sha": "4975bae5b76ef1a9da83921734ef1fa33c0a16bd",
+      "size": 5870
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/planar_functions.h",
+      "sha": "1b57b29261eeb38798ff26c0830583cfc6f732f8",
+      "size": 20122
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/rotate.h",
+      "sha": "8a2da9a5aad5c5bd099e21ceb2075fb2c7d27877",
+      "size": 3867
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/rotate_argb.h",
+      "sha": "21fe7e1807c3348c117f250d6303913b42effbc4",
+      "size": 951
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/rotate_row.h",
+      "sha": "6abd201677460bf60efce286a48ce662bf23c7d3",
+      "size": 5043
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/row.h",
+      "sha": "b810221ec7a787a1fc106ca3e09fce365a080e15",
+      "size": 94296
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/scale.h",
+      "sha": "ae14694598b2cc0a5335dfff91d07c70725a0cca",
+      "size": 3676
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/scale_argb.h",
+      "sha": "35cd191c0f61239a625eca2c0173d6f23454b6e3",
+      "size": 2035
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/scale_row.h",
+      "sha": "791fbf7d0538fbf1286d92f9237bda5301aaa7e2",
+      "size": 25852
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/version.h",
+      "sha": "3a8f6337ca22cd16ab7f9032c6887675b198850d",
+      "size": 544
+    },
+    {
+      "path": "third_party/libyuv/include/libyuv/video_common.h",
+      "sha": "cb425426a256e01bc67d197850bf508ae396fb1f",
+      "size": 6632
+    },
+    {
+      "path": "third_party/linux/include/linux/ion.h",
+      "sha": "7b5b031f57fa0ea595aa902ad7fa95540081322c",
+      "size": 2586
+    },
+    {
+      "path": "third_party/linux/include/media/cam_cpas.h",
+      "sha": "c5cbac82e71b50de4c4c4795f47634655e3b27b2",
+      "size": 668
+    },
+    {
+      "path": "third_party/linux/include/media/cam_defs.h",
+      "sha": "e006463d2aa6c3227011795b0f009ae507bb52ac",
+      "size": 17990
+    },
+    {
+      "path": "third_party/linux/include/media/cam_fd.h",
+      "sha": "8feb6e4da89a79175b2971550559563183e82d66",
+      "size": 3818
+    },
+    {
+      "path": "third_party/linux/include/media/cam_icp.h",
+      "sha": "680d05b630a67e3d1e2cdee3860f55a074a6dae4",
+      "size": 5472
+    },
+    {
+      "path": "third_party/linux/include/media/cam_isp.h",
+      "sha": "266840d38c25479c717efb8693969c8d6562462f",
+      "size": 14881
+    },
+    {
+      "path": "third_party/linux/include/media/cam_isp_ife.h",
+      "sha": "f5e72813fc0d2da95fa2fbd9a4f2d31aa9c38df0",
+      "size": 2347
+    },
+    {
+      "path": "third_party/linux/include/media/cam_isp_vfe.h",
+      "sha": "e48db2f98d91c2d2a8f71cea6ee7aafdabff258b",
+      "size": 2821
+    },
+    {
+      "path": "third_party/linux/include/media/cam_jpeg.h",
+      "sha": "f3082f3bfe295bf2918075c3520721188a31b5a6",
+      "size": 3055
+    },
+    {
+      "path": "third_party/linux/include/media/cam_lrme.h",
+      "sha": "97d957835ee3b72cb1522a15f1ebbfcfa1ee5615",
+      "size": 1491
+    },
+    {
+      "path": "third_party/linux/include/media/cam_req_mgr.h",
+      "sha": "ae65649964ff0ac9b61712d8a8fe1d4a7eb3d77e",
+      "size": 13631
+    },
+    {
+      "path": "third_party/linux/include/media/cam_sensor.h",
+      "sha": "f5af6047f5ac8801288f90c8a736a7f0ff4024e9",
+      "size": 13987
+    },
+    {
+      "path": "third_party/linux/include/media/cam_sensor_cmn_header.h",
+      "sha": "24617b39bd1266a85fbaf4fe768aa2ffbd4c56c7",
+      "size": 8625
+    },
+    {
+      "path": "third_party/linux/include/media/cam_sync.h",
+      "sha": "4a8781fc823d542dd7784e91986496c6f330729f",
+      "size": 3594
+    },
+    {
+      "path": "third_party/linux/include/msm_cam_sensor.h",
+      "sha": "c75d1fd5272444e59b9156cb80864bdfb58ace8d",
+      "size": 19390
+    },
+    {
+      "path": "third_party/linux/include/msm_camsensor_sdk.h",
+      "sha": "62a4da253c934512a434a2a0f0b1393df183d3c7",
+      "size": 8928
+    },
+    {
+      "path": "third_party/linux/include/msm_ion.h",
+      "sha": "d5caed5eb36e1b7cae4196c1601cac2af25e8b69",
+      "size": 5674
+    },
+    {
+      "path": "third_party/linux/include/msm_kgsl.h",
+      "sha": "93582eb066db771a5fcf001f45520de2c8286bde",
+      "size": 45343
+    },
+    {
+      "path": "third_party/linux/include/msm_media_info.h",
+      "sha": "39dceb2c49f147c25beb03462d3ecc69e66607a4",
+      "size": 27487
+    },
+    {
+      "path": "third_party/linux/include/msmb_camera.h",
+      "sha": "f4c4b3e183e86c3686f087acc8517a16458568e7",
+      "size": 7285
+    },
+    {
+      "path": "third_party/linux/include/msmb_isp.h",
+      "sha": "35589e050a4d0630fb00a2285c136dc4fd63ffac",
+      "size": 23733
+    },
+    {
+      "path": "third_party/linux/include/msmb_ispif.h",
+      "sha": "2564c33b7b31ed07e4dfc5af9e3af733d13e24fe",
+      "size": 2187
+    },
+    {
+      "path": "third_party/linux/include/v4l2-controls.h",
+      "sha": "d14cd8fabee1c7d12a89f66a31d9b4fef7cf7b49",
+      "size": 70589
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl.h",
+      "sha": "0086319f5faf1bec66edb607f6d9e2561a70ee7a",
+      "size": 74542
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_d3d10.h",
+      "sha": "d5960a43f72123bdd693da50d3ad9a3a82cd032c",
+      "size": 5122
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_d3d11.h",
+      "sha": "39f9072398a29ab0c5a91f3a08b8c75034e8ac17",
+      "size": 5116
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_dx9_media_sharing.h",
+      "sha": "2729e8b9e89a10dc410863140a904ee67250950d",
+      "size": 5421
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_egl.h",
+      "sha": "a765bd5266c02fc2fd2892f0257b228996d73c5f",
+      "size": 5358
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_ext.h",
+      "sha": "7941583895c57b5babaef8f784123ef57f3fd60b",
+      "size": 16402
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_ext_qcom.h",
+      "sha": "6328a1cd93a10e6970f9bfe850e2ee617be7940b",
+      "size": 9331
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_gl.h",
+      "sha": "945daa83d7f712918886693b75a3f0b40bc0ad50",
+      "size": 7583
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_gl_ext.h",
+      "sha": "e3c14c6408c44160103bcb4c0dcd230a674643a5",
+      "size": 2869
+    },
+    {
+      "path": "third_party/opencl/include/CL/cl_platform.h",
+      "sha": "4e334a2918390d1727d3cff53e8e78cd198507ae",
+      "size": 43544
+    },
+    {
+      "path": "third_party/opencl/include/CL/opencl.h",
+      "sha": "9855cd75e7da064e094658b660851997c38a8c56",
+      "size": 1993
+    },
+    {
+      "path": "third_party/qrcode/QrCode.cc",
+      "sha": "b9de86215e204a2ec3d33f15e18f40e59409617a",
+      "size": 28562
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoBase.h",
+      "sha": "7b2567920e35251d38586ceebceddde362666aca",
+      "size": 20101
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoImpl.h",
+      "sha": "a0cb648cf725f8dfeb75a468d93cdd3a45a5d0ce",
+      "size": 13172
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoImplCpu.h",
+      "sha": "3bbe0638e60fc893ae8d312124071cbccaed6bd7",
+      "size": 1521
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoImplDsp.h",
+      "sha": "b97a6493202ae8683384fbd385011d656caea261",
+      "size": 9425
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoImplGpu.h",
+      "sha": "1af654d110c26b9b07771d0de810fd316e7b4d71",
+      "size": 3930
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoReg.h",
+      "sha": "a5d239883355ab1ac1a7dbc183dbf7e9115a4465",
+      "size": 3434
+    },
+    {
+      "path": "third_party/snpe/include/SnpeUdo/UdoShared.h",
+      "sha": "418d9db9e2f91b5e74f4957fb277eac939f807cb",
+      "size": 1320
+    },
+    {
+      "path": "system/camerad/cameras/camera_common.h",
+      "sha": "555362ab8bc7abd37e60ad75358b54ebe810a284",
+      "size": 2575
+    },
+    {
+      "path": "system/camerad/cameras/camera_qcom2.h",
+      "sha": "0b15c9c3f04f06de59c5172e300a1fff299fa4ff",
+      "size": 2467
+    },
+    {
+      "path": "system/camerad/cameras/camera_util.h",
+      "sha": "891ce3e793a5b82a48c6cedf20163778099f520a",
+      "size": 1367
+    },
+    {
+      "path": "system/loggerd/encoder/encoder.h",
+      "sha": "72848609efbf4b7d3805c38f8b7f3b7eb4d3b87b",
+      "size": 1143
+    },
+    {
+      "path": "system/loggerd/encoder/ffmpeg_encoder.h",
+      "sha": "9e45a3d82db5ead172c0cc956f058cff70256e1f",
+      "size": 768
+    },
+    {
+      "path": "system/loggerd/encoder/v4l_encoder.h",
+      "sha": "9336bf3d8b81bcc55f9d12ab81b7f243fd583863",
+      "size": 691
+    },
+    {
+      "path": "system/loggerd/logger.h",
+      "sha": "7a8490d57a1300a825a07a4b043abca642bdc555",
+      "size": 1571
+    },
+    {
+      "path": "system/loggerd/loggerd.h",
+      "sha": "7c80ba51a214cd2441722b9f1fee8b0681656718",
+      "size": 5026
+    },
+    {
+      "path": "system/loggerd/video_writer.h",
+      "sha": "1aa758b42b78b0e94a8a7c48bda7f97b2fedd7fa",
+      "size": 598
+    },
+    {
+      "path": "system/proclogd/proclog.h",
+      "sha": "49f97cdd36bed7f4f045833ed0e9e0b94eb3f393",
+      "size": 966
+    },
+    {
+      "path": "system/sensord/sensors/bmx055_accel.h",
+      "sha": "2cc316e992521b1f94fe95b83cab7a3e44a12c38",
+      "size": 1255
+    },
+    {
+      "path": "system/sensord/sensors/bmx055_gyro.h",
+      "sha": "7be3e56563c6bedbc5e0227b39425442f775e679",
+      "size": 1197
+    },
+    {
+      "path": "system/sensord/sensors/bmx055_magn.h",
+      "sha": "15c4e734b9c69155f83fedcfed86abe64fb29743",
+      "size": 1920
+    },
+    {
+      "path": "system/sensord/sensors/bmx055_temp.h",
+      "sha": "a2eabae395c4b1090a465c67f653536a699fe7c1",
+      "size": 353
+    },
+    {
+      "path": "system/sensord/sensors/constants.h",
+      "sha": "c216f838a5ab0e11835cc93aac20535405c7fef5",
+      "size": 542
+    },
+    {
+      "path": "system/sensord/sensors/i2c_sensor.h",
+      "sha": "ba100c3b0128c208310876a800dc6581c5c4ea13",
+      "size": 1425
+    },
+    {
+      "path": "system/sensord/sensors/lsm6ds3_accel.h",
+      "sha": "69667cb759ec2ad3d22aaeae2546b5d4fd456586",
+      "size": 1785
+    },
+    {
+      "path": "system/sensord/sensors/lsm6ds3_gyro.h",
+      "sha": "adaae62dd28dcdec9cf349008b46f6a20cba8ff0",
+      "size": 1552
+    },
+    {
+      "path": "system/sensord/sensors/lsm6ds3_temp.h",
+      "sha": "1b5b6218143faba869b9dc35af20a69d438536c7",
+      "size": 697
+    },
+    {
+      "path": "system/sensord/sensors/mmc5603nj_magn.h",
+      "sha": "9c0fbd252129f098d9a3bf2330dde057f8e41661",
+      "size": 1052
+    },
+    {
+      "path": "system/sensord/sensors/sensor.h",
+      "sha": "1b0e3be0dc6065e7396b58bac48078ef264435d5",
+      "size": 537
+    },
+    {
+      "path": "system/ubloxd/generated/glonass.h",
+      "sha": "19867ba22b220e3ad3728f52836c8f648821e6ff",
+      "size": 9668
+    },
+    {
+      "path": "system/ubloxd/generated/gps.h",
+      "sha": "9dfc5031f505c93b3b72178132dbb6d976ac2c65",
+      "size": 9732
+    },
+    {
+      "path": "system/ubloxd/generated/ubx.h",
+      "sha": "022108489ff27a9adfab1920931e63e8375e2670",
+      "size": 14946
+    },
+    {
+      "path": "system/ubloxd/ublox_msg.h",
+      "sha": "d21760edc284982c586e8047abc0d58690b34315",
+      "size": 4002
+    },
+    {
+      "path": "third_party/libyuv/larch64/lib/libyuv.a",
+      "sha": "fdbcda2517a96c5191112488e3634f328801b358",
+      "size": 499734
+    }
+  ]
+}

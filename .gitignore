@@ -83,3 +83,7 @@ build/
 
 poetry.toml
 Pipfile
+
+# Local native UI builds and previews
+.native-build/
+.native-preview/

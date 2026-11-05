@@ -8,6 +8,7 @@ class Params(_Params):
   _internal_keys = {
     "StartAccelRamp",
     "ToadPilotConfig",
+    "ToadPilotHealth",
     "ToadPilotResetTune",
     "ToadPilotSteeringResponseRequest",
     "ToadPilotStatus",

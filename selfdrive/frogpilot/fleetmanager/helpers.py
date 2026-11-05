@@ -870,6 +870,32 @@ def get_toadpilot_state():
   }
 
 
+def get_toadpilot_models():
+  from openpilot.selfdrive.frogpilot.frogpilot_variables import DEFAULT_CLASSIC_MODEL, DEFAULT_CLASSIC_MODEL_NAME, MODELS_PATH
+  from openpilot.selfdrive.toad_modeld.artifact import MODELS, installed
+  models = [dict(id=DEFAULT_CLASSIC_MODEL, name=DEFAULT_CLASSIC_MODEL_NAME,
+                 installed=(MODELS_PATH / f'{DEFAULT_CLASSIC_MODEL}.thneed').is_file(), generation='legacy')]
+  models.extend(dict(id=key, name=spec['name'].replace(' (ToadPilot)', ''), installed=installed(key),
+                     generation=spec['version']) for key, spec in MODELS.items())
+  return dict(selected=params.get('Model', encoding='utf-8'), models=models,
+              environment=_get_toadpilot_road_state(), randomizer=params.get_bool('ModelRandomizer'))
+
+
+def set_toadpilot_model(data):
+  if not isinstance(data, dict) or set(data) != {'model'} or not isinstance(data['model'], str):
+    raise ValueError('Choose one installed driving model.')
+  _require_toadpilot_offroad()
+  catalog = get_toadpilot_models()
+  selected = next((m for m in catalog['models'] if m['id'] == data['model'] and m['installed']), None)
+  if selected is None:
+    raise ValueError('This model and its matching runtime must be installed first.')
+  _require_toadpilot_offroad()
+  params.put('Model', selected['id'])
+  params.put_bool('ModelRandomizer', False)
+  update_frogpilot_toggles()
+  return get_toadpilot_models()
+
+
 def set_toadpilot_config(request_data):
   _require_toadpilot_not_onroad()
 

@@ -34,4 +34,4 @@ html.dark-mode {
 #htmlElement.dark-mode :focus-visible { outline:3px solid #ffe23f; outline-offset:4px; }
 #htmlElement.dark-mode .uk-table { color:#f0ebff; }
 #htmlElement.dark-mode .uk-table-striped tbody tr:nth-of-type(odd) { background:#1d1533; }
-@media (max-width:600px) { #htmlElement.dark-mode .navbar-brand img { width:52px; height:52px; } }
+@media (max-width:600px) { #htmlElement.dark-mode .navbar-brand img { width:150px; height:50px; } }

@@ -374,6 +374,61 @@ def toadpilot_route():
     return jsonify({"error": "Failed to access TOADPILOT configuration.", "details": str(error)}), 500
 
 
+@app.route('/toadpilot/models', methods=['GET', 'POST'])
+def toadpilot_models_route():
+  try:
+    state = fleet.set_toadpilot_model(request.get_json(silent=True)) if request.method == 'POST' else fleet.get_toadpilot_models()
+    response = jsonify(state)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+  except ValueError as error:
+    return jsonify(error=str(error)), 400
+
+
+@app.route('/toadpilot/health')
+def toadpilot_health_route():
+  import time
+  from openpilot.selfdrive.frogpilot.diagnostics import HEALTH_KEY
+  from openpilot.selfdrive.frogpilot.toadpilot import read_json_status
+  state = read_json_status(HEALTH_KEY, fleet.params_memory)
+  age = time.time() - state.get('published_at_unix', 0)
+  state['fresh'] = 0 <= age <= 5
+  response = jsonify(state)
+  response.headers['Cache-Control'] = 'no-store'
+  return response
+
+
+@app.route('/diagnostics')
+def diagnostics_page():
+  return render_template('diagnostics.html')
+
+
+@app.route('/toadpilot/trips')
+def toadpilot_trips_route():
+  from openpilot.selfdrive.frogpilot.diagnostics import list_trips
+  response = jsonify(trips=list_trips())
+  response.headers['Cache-Control'] = 'no-store'
+  return response
+
+
+@app.route('/toadpilot/trips/<trace_id>/download')
+def toadpilot_trip_download(trace_id):
+  import re
+  from openpilot.selfdrive.frogpilot.diagnostics import ROOT
+  if not re.fullmatch(r'\d{8}T\d{6}Z-[a-f0-9]{8}-\d{3,6}', trace_id):
+    return jsonify(error='Unknown trip.'), 404
+  return send_from_directory(ROOT, trace_id + '.jsonl', as_attachment=True, mimetype='application/x-ndjson')
+
+
+@app.route('/toadpilot/trips/<trace_id>')
+def toadpilot_trip_route(trace_id):
+  from openpilot.selfdrive.frogpilot.diagnostics import read_trip
+  try:
+    return jsonify(read_trip(trace_id))
+  except (ValueError, OSError):
+    return jsonify(error='Unknown trip.'), 404
+
+
 @app.route("/start_accel_ramp", methods=['GET', 'POST'])
 def start_accel_ramp_route():
   try:
