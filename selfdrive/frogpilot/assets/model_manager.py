@@ -12,6 +12,8 @@ from pathlib import Path
 from openpilot.selfdrive.frogpilot.assets.download_functions import GITLAB_URL, download_file, get_repository_url, handle_error, handle_request_error, verify_download
 from openpilot.selfdrive.frogpilot.frogpilot_utilities import delete_file
 from openpilot.selfdrive.frogpilot.frogpilot_variables import DEFAULT_CLASSIC_MODEL, DEFAULT_MODEL, DEFAULT_TINYGRAD_MODEL, MODELS_PATH, params, params_default, params_memory
+from openpilot.selfdrive.toad_modeld.artifact import (ARTIFACT_PATH, MODEL_ID, catalog_entry,
+                                                    installed as modern_model_installed)
 
 VERSION = "v13"
 
@@ -89,6 +91,14 @@ class ModelManager:
       self.downloading_model = False
 
   def download_model(self, model_to_download):
+    if model_to_download == MODEL_ID:
+      if not modern_model_installed():
+        handle_error(None, "Pinned RDF4 runtime is not installed", "Install RDF4 runtime first", MODEL_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, params_memory)
+        return
+      self.copy_modern_model()
+      params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Downloaded!")
+      params_memory.remove(MODEL_DOWNLOAD_PARAM)
+      return
     self.downloading_model = True
 
     repo_url = get_repository_url()
@@ -117,7 +127,15 @@ class ModelManager:
       self.handle_verification_failure(model_to_download, model_path, file_extension)
 
   @staticmethod
+  def copy_modern_model():
+    if modern_model_installed():
+      target = MODELS_PATH / f'{MODEL_ID}.pkl'
+      if not target.exists():
+        target.symlink_to(ARTIFACT_PATH)
+
+  @staticmethod
   def copy_default_model():
+    ModelManager.copy_modern_model()
     classic_default_model_path = MODELS_PATH / f"{DEFAULT_CLASSIC_MODEL}.thneed"
     source_path = Path(__file__).parents[2] / "classic_modeld/models/supercombo.thneed"
     if source_path.is_file() and not classic_default_model_path.is_file():
@@ -187,6 +205,10 @@ class ModelManager:
       self.download_all_models()
 
   def update_model_params(self, model_info, repo_url):
+    model_info = [entry for entry in model_info if entry['id'] != MODEL_ID]
+    if modern_model_installed():
+      self.copy_modern_model()
+      model_info.append(catalog_entry())
     self.available_models = [model["id"] for model in model_info]
     self.model_versions = [model["version"] for model in model_info]
 

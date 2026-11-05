@@ -1,0 +1,75 @@
+"""Install a pinned runtime from a verified StarPilot reference checkout, offroad only."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+from openpilot.selfdrive.toad_modeld.artifact import (ARTIFACT_SHA256, MODEL_ID, REFERENCE_REVISION,
+                                                    RUNTIME_PATH, installed, verify_artifact)
+
+
+def require_offroad():
+  if Path('/data/params/d/IsOnroad').read_text().strip() != '0':
+    raise RuntimeError('Installation requires a confirmed offroad state')
+
+
+def install(reference):
+  require_offroad()
+  reference = Path(reference).resolve()
+
+  def git(*args):
+    return subprocess.check_output(['git', '-C', str(reference), *args])
+
+  if git('rev-parse', 'HEAD').decode().strip() != REFERENCE_REVISION:
+    raise ValueError('Reference checkout is not the pinned StarPilot revision')
+  git('diff', '--exit-code', 'HEAD', '--', 'tinygrad_repo/tinygrad', 'selfdrive/modeld/models')
+  if RUNTIME_PATH.exists():
+    if not installed():
+      raise RuntimeError('Existing runtime is incomplete; inspect it before reinstalling')
+    verify_artifact()
+  else:
+    RUNTIME_PATH.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.install-', dir=RUNTIME_PATH.parent))
+    try:
+      runtime_hashes = {}
+      for name in git('ls-files', 'tinygrad_repo/tinygrad').decode().splitlines():
+        relative = Path(name).relative_to('tinygrad_repo')
+        target = staging / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(reference / name, target)
+        runtime_hashes[str(relative)] = hashlib.sha256(target.read_bytes()).hexdigest()
+      (staging / 'tinygrad-LICENSE').write_bytes(git('show', 'HEAD:tinygrad_repo/LICENSE'))
+      (staging / 'StarPilot-LICENSE').write_bytes(git('show', 'HEAD:LICENSE'))
+      model = staging / 'driving_tinygrad.pkl'
+      with model.open('wb') as output:
+        for part in range(1, 4):
+          path = reference / f'selfdrive/modeld/models/driving_tinygrad.pkl.chunk{part:02d}of03'
+          with path.open('rb') as source:
+            shutil.copyfileobj(source, output)
+        output.flush()
+        os.fsync(output.fileno())
+      verify_artifact(model)
+      receipt = dict(reference_revision=REFERENCE_REVISION, artifact_sha256=ARTIFACT_SHA256,
+                     artifact_bytes=model.stat().st_size, runtime_files=runtime_hashes)
+      (staging / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+      require_offroad()
+      staging.rename(RUNTIME_PATH)
+    finally:
+      if staging.exists():
+        shutil.rmtree(staging)
+  print(f'Installed verified runtime: {RUNTIME_PATH}')
+
+
+def main():
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument('--reference', required=True, type=Path)
+  args = parser.parse_args()
+  install(args.reference)
+
+
+if __name__ == '__main__':
+  main()

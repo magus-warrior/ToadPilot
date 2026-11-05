@@ -16,6 +16,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.system.hardware.power_monitoring import VBATT_PAUSE_CHARGING
 from openpilot.system.version import get_build_metadata
 from panda import ALTERNATIVE_EXPERIENCE
+from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID as MODERN_MODEL_ID
 from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_DEFAULT, START_ACCEL_RAMP_PARAM,
                                                                         parse_start_accel_ramp)
 from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG_JSON, TOADPILOT_FINGERPRINT,
@@ -716,7 +717,9 @@ class FrogPilotVariables:
       if toggle.model_randomizer:
         if not started:
           blacklisted_models = (params.get("BlacklistedModels", encoding="utf-8") or "").split(",")
-          selectable_models = [model for model in downloaded_models if model not in blacklisted_models]
+          # An installed experimental runtime must be selected explicitly before
+          # a supervised comparison, not picked unexpectedly by the randomizer.
+          selectable_models = [model for model in downloaded_models if model not in blacklisted_models and model != MODERN_MODEL_ID]
           toggle.model = random.choice(selectable_models) if selectable_models else default.get("Model", encoding="utf-8")
           toggle.model_name = "Mystery Model 👻"
           toggle.model_version = toggle.model_versions.split(",")[toggle.available_models.split(",").index(toggle.model)]

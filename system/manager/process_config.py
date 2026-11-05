@@ -4,6 +4,7 @@ from cereal import car
 from openpilot.common.params import Params
 from openpilot.system.hardware import PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
+from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 
@@ -52,10 +53,13 @@ def run_classic_modeld(started, params, CP: car.CarParams, classic_model, tinygr
   return started and classic_model
 
 def run_new_modeld(started, params, CP: car.CarParams, classic_model, tinygrad_model, frogpilot_toggles) -> bool:
-  return started and not (classic_model or tinygrad_model)
+  return started and not (classic_model or tinygrad_model or is_modern_model(frogpilot_toggles))
 
 def run_tinygrad_modeld(started, params, CP: car.CarParams, classic_model, tinygrad_model, frogpilot_toggles) -> bool:
   return started and tinygrad_model
+
+def run_toad_modeld(started, params, CP: car.CarParams, classic_model, tinygrad_model, frogpilot_toggles) -> bool:
+  return started and is_modern_model(frogpilot_toggles)
 
 procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
@@ -113,6 +117,7 @@ procs = [
   PythonProcess("frogpilot_process", "selfdrive.frogpilot.frogpilot_process", always_run),
   PythonProcess("mapd", "selfdrive.frogpilot.navigation.mapd", always_run),
   NativeProcess("tinygrad_modeld", "selfdrive/tinygrad_modeld", ["./tinygrad_modeld"], run_tinygrad_modeld),
+  NativeProcess("toad_modeld", ".", ["python", "-m", "selfdrive.toad_modeld.modeld"], run_toad_modeld),
 ]
 
 managed_processes = {p.name: p for p in procs}

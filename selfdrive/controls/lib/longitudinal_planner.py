@@ -16,6 +16,8 @@ from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDX
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_UNSET, CONTROL_N, get_speed_error
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
+from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
+from openpilot.selfdrive.toad_modeld.action import combine_longitudinal
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
 A_CRUISE_MIN = -1.2
@@ -269,6 +271,8 @@ class LongitudinalPlanner:
       clipped_accel_coast_interp = interp(v_ego, [MIN_ALLOW_THROTTLE_SPEED, MIN_ALLOW_THROTTLE_SPEED*2], [accel_limits_turns[1], clipped_accel_coast])
       accel_limits_turns[1] = min(accel_limits_turns[1], clipped_accel_coast_interp)
 
+    self.model_accel_limits = tuple(accel_limits_turns)
+
     if force_slow_decel:
       v_cruise = 0.0
     # clip limits, cannot init MPC outside of bounds
@@ -342,6 +346,16 @@ class LongitudinalPlanner:
                                                   action_t=action_t, vEgoStopping=frogpilot_toggles.vEgoStopping)
     longitudinalPlan.aTarget = a_target
     longitudinalPlan.shouldStop = should_stop
+    if is_modern_model(frogpilot_toggles) and sm['controlsState'].experimentalMode:
+      try:
+        a_target, should_stop = combine_longitudinal(
+          a_target, should_stop, sm['modelV2'].action, *self.model_accel_limits)
+        longitudinalPlan.aTarget = a_target
+        longitudinalPlan.shouldStop = should_stop
+      except ValueError:
+        # Reject a stale legacy publisher or non-finite action during a model
+        # transition. Never treat a missing new field as a valid zero action.
+        plan_send.valid = False
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = self.allow_throttle
 
