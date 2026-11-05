@@ -147,6 +147,11 @@ def update_wheel_image(image, holiday_theme="stock", random_event=True):
 
 class ThemeManager:
   def __init__(self):
+    # Built-in local theme: preserve it when the remote theme catalog refreshes.
+    neon = THEME_SAVE_PATH / "theme_packs" / "toad_neon" / "colors"
+    if not neon.exists():
+      neon.parent.mkdir(parents=True, exist_ok=True)
+      neon.symlink_to(Path(__file__).resolve().parent / "toad_neon" / "colors", target_is_directory=True)
     self.downloading_theme = False
 
     self.theme_assets = {
@@ -419,7 +424,7 @@ class ThemeManager:
       if not downloadable_list:
         continue
 
-      if theme_name.lower() in {"none", "stock"}:
+      if theme_name.lower() in {"none", "stock"} or (theme_component == "colors" and theme_name == "toad_neon"):
         continue
 
       if theme_component == "steering_wheels":

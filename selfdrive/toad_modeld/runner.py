@@ -9,10 +9,10 @@ import struct
 import numpy as np
 from tinygrad import Tensor
 
-from openpilot.selfdrive.toad_modeld.artifact import ARTIFACT_PATH, verify_artifact
+from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODELS, artifact_path, verify_artifact
 from openpilot.selfdrive.toad_modeld.nv12_info import get_nv12_info
 from openpilot.selfdrive.toad_modeld.parse_model_outputs import Parser
-from openpilot.selfdrive.toad_modeld.queues import make_supercombo_input_queues
+from openpilot.selfdrive.toad_modeld.queues import make_supercombo_input_queues, make_split_input_queues
 
 
 def load_oob(source):
@@ -43,28 +43,35 @@ def load_oob(source):
 
 
 class ModelState:
-  def __init__(self, width, height):
-    verify_artifact()
-    with ARTIFACT_PATH.open('rb') as model:
-      self.artifact = load_oob(model)
+  def __init__(self, width, height, model_id=MODEL_ID):
+    verify_artifact(model_id=model_id)
+    with artifact_path(model_id).open('rb') as model:
+      self.artifact = pickle.load(model) if model.peek(1)[:1] == b'\x80' else load_oob(model)
     artifact = self.artifact
-    if (artifact['format_version'] != 1 or artifact['model_type'] != 'supercombo' or
-        artifact['behavior_version'] != 'v15' or artifact['image_history_pipeline'] != 'policy'):
-      raise ValueError('Unsupported model artifact; expected the pinned v15 supercombo')
+    if (artifact['format_version'] != 1 or artifact['model_type'] not in ('supercombo', 'vision_policy') or
+        artifact['behavior_version'] != MODELS[model_id]['version'] or artifact['image_history_pipeline'] != 'policy'):
+      raise ValueError('Unsupported pinned model artifact')
     self.width, self.height = width, height
     if (width, height) not in artifact:
       raise ValueError(f'No compiled camera warp for {width}x{height}')
     self.stride, self.y_height, _, self.frame_size = get_nv12_info(width, height)
-    self.metadata = artifact['metadata']['model']
+    self.metadata = artifact['metadata']
+    self.split = artifact['model_type'] == 'vision_policy'
+    if self.split and artifact['policy_order'] != ['policy']:
+      raise ValueError('Unsupported split policy order')
     self.parser = Parser()
     self.warp = artifact[(width, height)]
     self.run_policy = artifact['run_policy']
+    self.frames = {}
     self._reset()
 
   def _reset(self):
-    self.queues, self.arrays = make_supercombo_input_queues(self.metadata['input_shapes'], self.artifact['frame_skip'], 'QCOM')
+    if self.split:
+      self.queues, self.arrays = make_split_input_queues(self.metadata['vision']['input_shapes'],
+                                                       self.metadata['policy']['input_shapes'], self.artifact['frame_skip'], 'QCOM')
+    else:
+      self.queues, self.arrays = make_supercombo_input_queues(self.metadata['model']['input_shapes'], self.artifact['frame_skip'], 'QCOM')
     self.previous_desire = np.zeros(8, dtype=np.float32)
-    self.frames = {}
 
   def _frame(self, key, buf):
     if (buf.width, buf.height, buf.stride, buf.uv_offset) != (self.width, self.height, self.stride, self.stride * self.y_height):
@@ -89,15 +96,28 @@ class ModelState:
     self.arrays['desire'][:] = np.where(desire - self.previous_desire > 0.99, desire, 0)
     self.previous_desire[:] = desire
     self.arrays['traffic_convention'][:] = traffic_convention
-    self.arrays['action_t'][:] = action_t
+    if 'action_t' in self.arrays:
+      self.arrays['action_t'][:] = action_t
     self.arrays['tfm'][:] = transform
     self.arrays['big_tfm'][:] = wide_transform
     warped = self.warp(**{k: self.queues[k] for k in self.artifact['warp_input_keys']}, frame=frame, big_frame=wide_frame)
-    raw = self.run_policy(**{k: self.queues[k] for k in self.artifact['policy_input_keys']}, warped=warped)[0].numpy().flatten()
-    if raw.shape != (2580,) or not np.isfinite(raw).all():
-      raise ValueError('Invalid RDF4 inference output')
-    self.arrays['prev_feat'][:] = raw[self.metadata['output_slices']['hidden_state']]
-    outputs = self.parser.parse_outputs({k: raw[np.newaxis, s].copy() for k, s in self.metadata['output_slices'].items()})
+    raw_outputs = self.run_policy(**{k: self.queues[k] for k in self.artifact['policy_input_keys']}, warped=warped)
+    names = ['vision', 'policy'] if self.split else ['model']
+    if len(raw_outputs) != len(names):
+      raise ValueError('Unexpected inference output count')
+    sliced = {}
+    for name, tensor in zip(names, raw_outputs, strict=True):
+      raw = tensor.numpy().flatten()
+      metadata = self.metadata[name]
+      if raw.size != np.prod(metadata['output_shapes']['outputs']) or not np.isfinite(raw).all():
+        raise ValueError('Invalid model inference output')
+      sliced[name] = {k: raw[np.newaxis, sl].copy() for k, sl in metadata['output_slices'].items()}
+    if self.split:
+      outputs = self.parser.parse_vision_outputs(sliced['vision'])
+      outputs.update(self.parser.parse_policy_outputs(sliced['policy']))
+    else:
+      self.arrays['prev_feat'][:] = sliced['model']['hidden_state']
+      outputs = self.parser.parse_outputs(sliced['model'])
     if any(not np.isfinite(v).all() for v in outputs.values()):
       raise ValueError('Invalid parsed RDF4 output')
     return outputs
@@ -112,6 +132,11 @@ class ModelState:
     return self._evaluate(*self._synthetic_frames, np.eye(3, dtype=np.float32), np.eye(3, dtype=np.float32),
                           np.zeros(8, dtype=np.float32), np.array([1, 0], dtype=np.float32), np.array([0.3, 0.3], dtype=np.float32))
 
-  def warmup(self):
+  def warmup(self, road=None, wide=None):
     self.synthetic()
+    if road is not None and wide is not None:
+      # Prime the external-camera cache-maintenance/JIT path before publishing.
+      # Retain buffer mappings, but discard warmup model history.
+      self.run(road, wide, np.eye(3, dtype=np.float32), np.eye(3, dtype=np.float32),
+               np.zeros(8, dtype=np.float32), np.array([1, 0], dtype=np.float32), np.array([0.3, 0.3], dtype=np.float32))
     self._reset()

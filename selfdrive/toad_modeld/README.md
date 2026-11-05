@@ -1,14 +1,19 @@
-# ToadPilot on-device RDF4 integration
+# ToadPilot on-device model integration
 
-This module supports the pinned Regret Driven Framework V4 (`toad-rdf4`, generation
-v15) bundled with StarPilot commit
-`4a553da9ac22a14e34513c011aed04c1e93b4619`. It uses the comma device's QCOM GPU.
-The legacy v1–v7 runners and model selections remain available.
+Supported models use the comma device's existing QCOM GPU:
 
-The artifact, tinygrad implementation, input history, image warps, metadata and
-parser are a matched set. Other downloaded pickles are **not** interchangeable.
-In particular, the public Pop v2 resource tested during this port did not load
-with this tinygrad revision. This integration does not advertise that model.
+| Model | Generation | Matching StarPilot runtime |
+| --- | --- | --- |
+| Regret Driven Framework V4 (`toad-rdf4`) | v15 | `4a553da9ac22a14e34513c011aed04c1e93b4619` |
+| Pop Model V2 (`toad-pop-v2`) | v11 | `6bd48c28e8feea277cfdd3916c313dfec6236a93` |
+| South Carolina (`toad-south-carolina`) | v11 | `6bd48c28e8feea277cfdd3916c313dfec6236a93` |
+
+The legacy v1–v7 runners remain available. Each artifact has a pinned SHA-256
+and its own installed runtime; serialized GPU programs cannot be mixed with an
+arbitrary tinygrad revision. Pop v2 and South Carolina use separate vision and
+policy outputs, with 25-frame sampled feature history. RDF4 is a supercombo with
+its own history and direct action output. The parser/constants are identical
+between the two pinned revisions. No Chestnut or external GPU is required.
 
 `runner.py` verifies the bundled artifact before loading it and checks camera
 dimensions, stride, UV offset, input/output shapes and finite values. The camera
@@ -19,7 +24,8 @@ beside the artifact.
 
 The v15 action's first component is divided by `max(1, vEgo)^2` to obtain
 curvature. Lateral and longitudinal output smoothing use 0.1 and 0.3 seconds,
-respectively. A stop uses the raw acceleration and upstream 0.3 m/s and 0.1 m/s²
+respectively. v11 derives acceleration and curvature from the plan at the
+configured action horizon, following the pinned upstream mlsim path. A v15 stop uses the raw acceleration and upstream 0.3 m/s and 0.1 m/s²
 thresholds. This fork has no live steering-delay estimator; its configured
 `CarParams.steerActuatorDelay` supplies the actuator delay. Smoothing and the
 0.075-second frame/action horizon are added explicitly.
@@ -43,8 +49,8 @@ bundled `selfdrive/modeld/models/driving_tinygrad.pkl` chunks. Installation chec
 the revision, working-tree modifications and model SHA-256. It installs into
 `/data/toadpilot/model-runtime/<revision>` without replacing legacy tinygrad.
 
-The model manager adds the installed model to its catalog and creates its model
-file link. The randomizer excludes this new model; select it explicitly in the
+The model manager adds installed models to its catalog and creates its model
+file link. The randomizer excludes these new models; select one explicitly in the
 model selector. Restart after installing the schema/process changes before
 selecting it. Returning to North Dakota selects the original runner.
 
@@ -57,3 +63,16 @@ Validation covers unit/regression tests, synthetic inference and serialization,
 and a real-camera shadow run. These checks establish software compatibility, not
 driving quality, sustained onroad timing, or freedom from unexpected slowing in
 Experimental Mode.
+
+For Pop v2 / South Carolina, use the corresponding pinned reference and supply
+`--model toad-pop-v2 --artifact /path/to/pop223_driving_tinygrad.pkl` or
+`--model toad-south-carolina --artifact /path/to/sc23_driving_tinygrad.pkl` to the
+installer. Both validation commands accept `--model MODEL_ID` as well.
+
+The Tools page's default-on **Smooth braking** setting is separate from model
+output conversion. It eases mild brake release by limiting each increase to
+0.8 m/s³, with at most 0.15 m/s² additional braking. Stronger requested braking
+passes immediately. It bypasses low speed, stopping, positive acceleration,
+manual brake/gas, inactive controls and invalid input. **Smooth stop finish**
+remains the separate near-standstill feature. Both are Camry TSS2 features and
+can be disabled in Tools; they do not change model weights or actuator limits.

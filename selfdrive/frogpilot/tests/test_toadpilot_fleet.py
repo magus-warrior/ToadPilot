@@ -33,6 +33,7 @@ VALID_CONFIG = {
   "improved_stop_and_go": True,
   "responsive_takeoff": True,
   "smooth_stop_finish": True,
+  "smooth_braking": True,
   "automatic_traffic_mode": True,
   "traffic_mode_entry_time": 1.0,
   "traffic_mode_max_speed_mph": 30,

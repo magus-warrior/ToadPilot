@@ -372,6 +372,10 @@ Tools
         <input type="checkbox" id="toadResponsiveTakeoff" checked>
       </label>
 
+      <label class="toadpilot-check" for="toadSmoothBraking">
+        <span><strong>Smooth braking</strong><small>Ease mild brake release while moving. Stronger braking responds immediately; gentle stops use Smooth stop finish below.</small></span>
+        <input type="checkbox" id="toadSmoothBraking" checked>
+      </label>
       <label class="toadpilot-check" for="toadSmoothStopFinish">
         <span><strong>Smooth stop finish</strong><br><small>Default on. Gently eases the final low-speed approach when braking demand allows. Keeps normal stop holding and stronger braking available; following distance is unchanged.</small></span>
         <input type="checkbox" id="toadSmoothStopFinish" checked>
@@ -559,6 +563,7 @@ Tools
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
   const toadResponsiveTakeoff = document.getElementById("toadResponsiveTakeoff");
+  const toadSmoothBraking = document.getElementById("toadSmoothBraking");
   const toadSmoothStopFinish = document.getElementById("toadSmoothStopFinish");
   const toadAutomaticTrafficMode = document.getElementById("toadAutomaticTrafficMode");
   const toadMapStopAssist = document.getElementById("toadMapStopAssist");
@@ -581,6 +586,7 @@ Tools
     toadSmoothLaneTransitions,
     toadResponsiveTakeoff,
     toadSmoothStopFinish,
+    toadSmoothBraking,
     toadAutomaticTrafficMode,
     toadMapStopAssist,
     toadExperimentalSteeringResponse,
@@ -729,6 +735,7 @@ Tools
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
       toadLegacyStopGo = config.improved_stop_and_go === true;
       toadResponsiveTakeoff.checked = config.responsive_takeoff === true;
+      toadSmoothBraking.checked = config.smooth_braking === true;
       toadSmoothStopFinish.checked = config.smooth_stop_finish === true;
       toadAutomaticTrafficMode.checked = config.automatic_traffic_mode !== false;
       toadTrafficModeEntryTime = Number(config.traffic_mode_entry_time || 1.0);
@@ -1228,6 +1235,7 @@ Tools
       improved_stop_and_go: toadLegacyStopGo,
       responsive_takeoff: toadResponsiveTakeoff.checked,
       smooth_stop_finish: toadSmoothStopFinish.checked,
+      smooth_braking: toadSmoothBraking.checked,
       automatic_traffic_mode: toadAutomaticTrafficMode.checked,
       traffic_mode_entry_time: toadTrafficModeEntryTime,
       traffic_mode_max_speed_mph: toadTrafficModeMaxSpeedMph,

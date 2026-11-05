@@ -9,13 +9,14 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState
 from openpilot.selfdrive.frogpilot.controls.lib.frogpilot_acceleration import FrogPilotAcceleration
-from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import StopReleaseLatch, smooth_stop_request
+from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import StopReleaseLatch, smooth_stop_request, smooth_brake_release
 from openpilot.selfdrive.frogpilot.toadpilot import ToadPilotConfig, decode_toadpilot_config
 
 
 class TestLongitudinalFeatureConfig(unittest.TestCase):
   def test_v8_migrates_with_new_features_on_and_preserves_choices(self):
     old = asdict(ToadPilotConfig(profile="observe", auto_tune=False, enabled=False))
+    old.pop("smooth_braking")
     old.pop("responsive_takeoff")
     old.pop("smooth_stop_finish")
     old["version"] = 8
@@ -172,6 +173,74 @@ class TestSmoothStopFinish(unittest.TestCase):
       with patch.object(cloudlog, "event"):
         control.update(True, cs, 0.12, False, (-3.5, 2.0), toggles)
       self.assertFalse(control.start_accel_ramp.armed)
+
+
+class TestSmoothBraking(unittest.TestCase):
+  def test_migration_default_and_saved_off(self):
+    old = asdict(ToadPilotConfig(responsive_takeoff=False, smooth_stop_finish=False))
+    old.pop('smooth_braking')
+    old['version'] = 9
+    config = decode_toadpilot_config(json.dumps(old))
+    self.assertTrue(config.enabled)
+    self.assertTrue(config.smooth_braking)
+    self.assertFalse(config.responsive_takeoff)
+    self.assertFalse(config.smooth_stop_finish)
+    current = asdict(config)
+    current['smooth_braking'] = False
+    self.assertFalse(decode_toadpilot_config(json.dumps(current)).smooth_braking)
+    for invalid in (None, 1, 'true'):
+      bad = decode_toadpilot_config(json.dumps({**current, 'smooth_braking': invalid}))
+      self.assertFalse(bad.enabled)
+      self.assertFalse(bad.smooth_braking)
+
+  def test_release_reduces_step_with_bounded_extra_braking(self):
+    out = smooth_brake_release(-0.7, -0.8, -0.7, 15, allowed=True)
+    self.assertAlmostEqual(out, -0.792)
+    for previous in (-3, -1.9, -0.8, 0, 1):
+      for request in (-3, -1.9, -0.7, -0.01, 0, 1):
+        out = smooth_brake_release(request, previous, -0.7, 15, allowed=True)
+        self.assertLessEqual(out, request)
+        self.assertGreaterEqual(out, request - 0.15)
+        if request <= previous or request >= 0:
+          self.assertEqual(out, request)
+
+  def test_bypasses_override_stop_launch_and_invalid_history(self):
+    for plan, speed, allowed, previous in ((-0.7, 15, False, -0.8), (-0.7, 1, True, -0.8),
+                                          (0.1, 15, True, -0.8), (-3, 15, True, -0.8),
+                                          (-0.7, math.nan, True, -0.8), (-0.7, 15, True, math.nan)):
+      self.assertEqual(smooth_brake_release(-0.7, previous, plan, speed, allowed=allowed), -0.7)
+
+  def test_actual_controller_release_toggle_and_hard_brake(self):
+    for enabled, brake, gas, active, expected in ((True, False, False, True, -0.792),
+                                                 (False, False, False, True, -0.7),
+                                                 (True, True, False, True, -0.7),
+                                                 (True, False, True, True, -0.7),
+                                                 (True, False, False, False, 0)):
+      control, toggles, cs = TestSmoothStopFinish.setup_control()
+      toggles.toadpilot_smooth_braking = enabled
+      cs.vEgo, cs.aEgo, cs.brakePressed, cs.gasPressed = 15, -0.7, brake, gas
+      control.last_output_accel = -0.8
+      with patch.object(cloudlog, 'event'):
+        self.assertAlmostEqual(control.update(active, cs, -0.7, False, (-3.5, 2), toggles), expected)
+        if active:
+          self.assertEqual(control.update(True, cs, -3.5, False, (-3.5, 2), toggles), -3.5)
+
+  def test_classic_controller_uses_same_release_and_preserves_hard_braking(self):
+    from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
+    for enabled in (False, True):
+      control, toggles, cs = TestSmoothStopFinish.setup_control()
+      toggles.toadpilot_smooth_braking = enabled
+      cs.vEgo, cs.aEgo = 15, -0.7
+      cp = control.CP
+      cp.vEgoStopping, cp.vEgoStarting, cp.longitudinalActuatorDelay = 0.3, 0.5, 0.3
+      cp.stoppingControl = True
+      cp.longitudinalTuning.deadzoneBP, cp.longitudinalTuning.deadzoneV = [0], [0]
+      plan = NS(speeds=[15.0] * CONTROL_N, accels=[0.7] * CONTROL_N)
+      control.last_output_accel = -0.8
+      out = control.update_old_long(True, cs, plan, (-3.5, 2), 0, toggles)
+      self.assertAlmostEqual(out, -0.792 if enabled else -0.7)
+      plan.accels = [3.5] * CONTROL_N
+      self.assertEqual(control.update_old_long(True, cs, plan, (-3.5, 2), 0, toggles), -3.5)
 
 
 if __name__ == "__main__":

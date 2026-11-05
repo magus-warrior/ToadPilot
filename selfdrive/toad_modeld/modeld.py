@@ -7,8 +7,8 @@ import time
 import numpy as np
 
 from openpilot.selfdrive.toad_modeld.bootstrap import configure_runtime
-from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
-from openpilot.selfdrive.toad_modeld.action import convert_action, LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS
+from openpilot.selfdrive.toad_modeld.artifact import is_modern_model, MODEL_ID, MODELS
+from openpilot.selfdrive.toad_modeld.action import action_from_outputs, LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS
 
 from cereal import car, log
 import cereal.messaging as messaging
@@ -46,10 +46,17 @@ class FrameMeta:
       self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
 
-def main(shadow=False, max_frames=0):
-  configure_runtime()
+def main(shadow=False, max_frames=0, model_id=None):
+  frogpilot_toggles = get_frogpilot_toggles()
+  if shadow:
+    model_id = model_id or MODEL_ID
+  else:
+    if not is_modern_model(frogpilot_toggles):
+      raise RuntimeError('Modern model process started for a different selected model')
+    model_id = frogpilot_toggles.model
+  configure_runtime(model_id)
   from openpilot.selfdrive.toad_modeld.runner import ModelState
-  cloudlog.warning("RDF4 modeld init")
+  cloudlog.warning("ToadPilot modeld init: %s", model_id)
 
   sentry.set_tag("daemon", PROCESS_NAME)
   cloudlog.bind(daemon=PROCESS_NAME)
@@ -65,7 +72,7 @@ def main(shadow=False, max_frames=0):
   frogpilot_toggles = get_frogpilot_toggles()
 
   if not is_modern_model(frogpilot_toggles) and not shadow:
-    raise RuntimeError("RDF4 process started for a different selected model")
+    raise RuntimeError("Modern model process started for a different selected model")
 
   # visionipc clients
   while True:
@@ -90,8 +97,14 @@ def main(shadow=False, max_frames=0):
   if use_extra_client:
     cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
 
-  model = ModelState(vipc_client_main.width, vipc_client_main.height)
-  model.warmup()
+  model = ModelState(vipc_client_main.width, vipc_client_main.height, model_id)
+  warm_road = vipc_client_main.recv()
+  while warm_road is None:
+    warm_road = vipc_client_main.recv()
+  warm_wide = vipc_client_extra.recv() if use_extra_client else warm_road
+  while warm_wide is None:
+    warm_wide = vipc_client_extra.recv()
+  model.warmup(warm_road, warm_wide)
   previous_action = log.ModelDataV2.Action(longitudinalValid=True)
   completed_frames = 0
   shadow_timings = []
@@ -107,7 +120,7 @@ def main(shadow=False, max_frames=0):
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_FREQ)
   frame_id = 0
-  last_vipc_frame_id = 0
+  last_vipc_frame_id = None
   run_count = 0
 
   model_transform_main = np.eye(3, dtype=np.float32)
@@ -184,7 +197,7 @@ def main(shadow=False, max_frames=0):
       vec_desire[desire] = 1
 
     # tracked dropped frames
-    vipc_dropped_frames = max(0, meta_main.frame_id - last_vipc_frame_id - 1)
+    vipc_dropped_frames = max(0, meta_main.frame_id - last_vipc_frame_id - 1) if last_vipc_frame_id is not None else 0
     frames_dropped = frame_dropped_filter.update(min(vipc_dropped_frames, 10))
     if run_count < 10: # let frame drops warm up
       frame_dropped_filter.x = 0.
@@ -211,8 +224,8 @@ def main(shadow=False, max_frames=0):
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
-      curvature, acceleration, should_stop = convert_action(
-        model_output['action'][0], v_ego, previous_action.desiredCurvature, previous_action.desiredAcceleration)
+      curvature, acceleration, should_stop = action_from_outputs(
+        model_output, v_ego, action_t, previous_action.desiredCurvature, previous_action.desiredAcceleration)
       previous_action = log.ModelDataV2.Action(desiredCurvature=curvature, desiredAcceleration=acceleration,
                                               shouldStop=should_stop, longitudinalValid=True)
       fill_model_msg(drivingdata_send, modelv2_send, model_output, previous_action,
@@ -254,5 +267,8 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--shadow', action='store_true')
   parser.add_argument('--max-frames', type=int, default=0)
+  parser.add_argument("--model", choices=MODELS, help="Model override for shadow validation only")
   args = parser.parse_args()
-  main(shadow=args.shadow, max_frames=args.max_frames)
+  if args.model and not args.shadow:
+    parser.error("--model is available only with --shadow")
+  main(shadow=args.shadow, max_frames=args.max_frames, model_id=args.model)

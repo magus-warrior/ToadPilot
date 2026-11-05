@@ -73,3 +73,31 @@ def make_supercombo_input_queues(input_shapes, frame_skip, device):
     "packed_npy_inputs": Tensor(packed_inputs, device="NPY").realize(),
   })
   return queues, npy
+
+
+def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip, device):
+  queues, npy = make_warp_input_queues(vision_input_shapes, frame_skip, device)
+  features_shape = policy_input_shapes["features_buffer"]
+  desire_key = _detect_desire_key(policy_input_shapes)
+  desire_shape = policy_input_shapes[desire_key]
+  packed_shapes, packed_sizes = _packed_policy_shapes(policy_input_shapes)
+
+  packed_inputs = np.zeros(sum(packed_sizes), dtype=np.float32)
+  npy.update({
+    key: value.reshape(shape)
+    for (key, shape), value in zip(
+      packed_shapes.items(), np.split(packed_inputs, np.cumsum(packed_sizes[:-1])), strict=True,
+    )
+  })
+  queues.update({
+    "feat_q": Tensor(
+      np.zeros((frame_skip * (features_shape[1] - 1) + 1, features_shape[0], features_shape[2]), dtype=np.float32),
+      device=device,
+    ).contiguous().realize(),
+    "desire_q": Tensor(
+      np.zeros((frame_skip * desire_shape[1], desire_shape[0], desire_shape[2]), dtype=np.float32),
+      device=device,
+    ).contiguous().realize(),
+    "packed_npy_inputs": Tensor(packed_inputs, device="NPY").realize(),
+  })
+  return queues, npy

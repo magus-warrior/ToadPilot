@@ -96,7 +96,7 @@ TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 9
+TOADPILOT_CONFIG_VERSION = 10
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -129,6 +129,7 @@ class ToadPilotConfig:
   improved_stop_and_go: bool = True
   responsive_takeoff: bool = True
   smooth_stop_finish: bool = True
+  smooth_braking: bool = True
   automatic_traffic_mode: bool = True
   traffic_mode_entry_time: float = 1.0
   traffic_mode_max_speed_mph: int = 30
@@ -142,7 +143,7 @@ DEFAULT_TOADPILOT_CONFIG = ToadPilotConfig()
 FAILSAFE_TOADPILOT_CONFIG = ToadPilotConfig(enabled=False, profile="observe", lane_centering_assist=False,
                                             smooth_lane_transitions=False, straight_line_smoothing=False,
                                             improved_stop_and_go=False, automatic_traffic_mode=False,
-                                            map_stop_assist=False, responsive_takeoff=False, smooth_stop_finish=False)
+                                            map_stop_assist=False, responsive_takeoff=False, smooth_stop_finish=False, smooth_braking=False)
 DEFAULT_TOADPILOT_CONFIG_JSON = json.dumps(asdict(DEFAULT_TOADPILOT_CONFIG), sort_keys=True, separators=(",", ":"))
 _CONFIG_FIELDS = set(asdict(DEFAULT_TOADPILOT_CONFIG))
 _V1_CONFIG_FIELDS = {
@@ -156,6 +157,8 @@ _V5_CONFIG_FIELDS = _V4_CONFIG_FIELDS | {"straight_line_smoothing"}
 _V6_CONFIG_FIELDS = _V5_CONFIG_FIELDS | {"experimental_max_torque"}
 _V7_CONFIG_FIELDS = _V6_CONFIG_FIELDS | {"automatic_traffic_mode", "map_stop_assist"}
 _V8_CONFIG_FIELDS = _V7_CONFIG_FIELDS | {"traffic_mode_entry_time", "traffic_mode_max_speed_mph"}
+
+_V9_CONFIG_FIELDS = _V8_CONFIG_FIELDS | {"responsive_takeoff", "smooth_stop_finish"}
 
 
 def normalize_toadpilot_config(data, base=None, partial=False):
@@ -177,7 +180,7 @@ def normalize_toadpilot_config(data, base=None, partial=False):
     raise ValueError(f"Unknown TOADPILOT profile: {normalized['profile']}")
 
   for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
-                "automatic_traffic_mode", "map_stop_assist", "responsive_takeoff", "smooth_stop_finish",
+                "automatic_traffic_mode", "map_stop_assist", "responsive_takeoff", "smooth_stop_finish", "smooth_braking",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
     if type(normalized[field]) is not bool:
       raise ValueError(f"TOADPILOT setting '{field}' must be a boolean.")
@@ -298,6 +301,12 @@ def decode_toadpilot_config(raw):
         if set(data) != _V8_CONFIG_FIELDS:
           raise ValueError("Malformed TOADPILOT version 8 configuration.")
         data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      elif source_version == 9:
+        if set(data) != _V9_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 9 configuration.")
+        data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      if 1 <= source_version <= 9:
+        data = {**data, "smooth_braking": True}
       if 1 <= source_version <= 6:
         data = {
           **data,
@@ -408,6 +417,7 @@ def config_from_toggles(toggles):
       "improved_stop_and_go": getattr(toggles, "toadpilot_improved_stop_and_go"),
       "responsive_takeoff": getattr(toggles, "toadpilot_responsive_takeoff", False),
       "smooth_stop_finish": getattr(toggles, "toadpilot_smooth_stop_finish", False),
+      "smooth_braking": getattr(toggles, "toadpilot_smooth_braking", False),
       "automatic_traffic_mode": getattr(toggles, "toadpilot_automatic_traffic_mode"),
       # Shared toggle snapshots can briefly lag one schema during a process
       # restart. These two tuning-only additions have conservative defaults.

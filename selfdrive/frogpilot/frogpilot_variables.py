@@ -16,7 +16,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.system.hardware.power_monitoring import VBATT_PAUSE_CHARGING
 from openpilot.system.version import get_build_metadata
 from panda import ALTERNATIVE_EXPERIENCE
-from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID as MODERN_MODEL_ID
+from openpilot.selfdrive.toad_modeld.artifact import MODELS as MODERN_MODELS
 from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_ACCEL_RAMP_DEFAULT, START_ACCEL_RAMP_PARAM,
                                                                         parse_start_accel_ramp)
 from openpilot.selfdrive.frogpilot.toadpilot import (DEFAULT_TOADPILOT_CONFIG_JSON, TOADPILOT_FINGERPRINT,
@@ -719,7 +719,7 @@ class FrogPilotVariables:
           blacklisted_models = (params.get("BlacklistedModels", encoding="utf-8") or "").split(",")
           # An installed experimental runtime must be selected explicitly before
           # a supervised comparison, not picked unexpectedly by the randomizer.
-          selectable_models = [model for model in downloaded_models if model not in blacklisted_models and model != MODERN_MODEL_ID]
+          selectable_models = [model for model in downloaded_models if model not in blacklisted_models and model not in MODERN_MODELS]
           toggle.model = random.choice(selectable_models) if selectable_models else default.get("Model", encoding="utf-8")
           toggle.model_name = "Mystery Model 👻"
           toggle.model_version = toggle.model_versions.split(",")[toggle.available_models.split(",").index(toggle.model)]
@@ -859,6 +859,7 @@ class FrogPilotVariables:
     toggle.toadpilot_straight_line_smoothing = toadpilot_config.straight_line_smoothing
     toggle.toadpilot_experimental_max_torque = toadpilot_config.experimental_max_torque
     toggle.toadpilot_responsive_takeoff = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.responsive_takeoff
+    toggle.toadpilot_smooth_braking = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_braking
     toggle.toadpilot_smooth_stop_finish = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_stop_finish
     toggle.toadpilot_improved_stop_and_go = toggle.toadpilot_responsive_takeoff
     # The independently configured launch boost remains available alongside

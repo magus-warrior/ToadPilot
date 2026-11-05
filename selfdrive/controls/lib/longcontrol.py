@@ -13,7 +13,7 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
                                                                         START_ACCEL_RAMP_MAX_DURATION,
                                                                         StartAccelRamp)
 from openpilot.selfdrive.frogpilot.toadpilot import TOADPILOT_FINGERPRINT
-from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import smooth_stop_request
+from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import smooth_stop_request, smooth_brake_release
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
@@ -369,6 +369,14 @@ class LongControl:
       cruise_standstill,
       preserve_on_planner_stop=self.stop_go_planner_stop_pending,
     )
+    output_accel = smooth_brake_release(
+      output_accel, self.last_output_accel, a_target, CS.vEgo,
+      allowed=(getattr(frogpilot_toggles, "toadpilot_smooth_braking", False) is True and
+               getattr(self.CP, "carFingerprint", None) == TOADPILOT_FINGERPRINT and
+               self.CP.openpilotLongitudinalControl and active and not CS.brakePressed and
+               not getattr(CS, "gasPressed", False) and not should_stop and not forcing_stop and
+               self.long_control_state == LongCtrlState.pid and previous_long_control_state == LongCtrlState.pid),
+    )
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
 
@@ -398,6 +406,7 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    previous_long_control_state = self.long_control_state
     output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans_old_long(self.CP, active, self.long_control_state, CS.vEgo,
                                                                 v_target, v_target_1sec, CS.brakePressed,
@@ -433,6 +442,14 @@ class LongControl:
                                      feedforward=a_target,
                                      freeze_integrator=freeze_integrator)
 
+    output_accel = smooth_brake_release(
+      output_accel, self.last_output_accel, a_target, CS.vEgo,
+      allowed=(getattr(frogpilot_toggles, "toadpilot_smooth_braking", False) is True and
+               getattr(self.CP, "carFingerprint", None) == TOADPILOT_FINGERPRINT and
+               self.CP.openpilotLongitudinalControl and active and not CS.brakePressed and
+               not getattr(CS, "gasPressed", False) and v_target_1sec > self.CP.vEgoStopping and
+               self.long_control_state == LongCtrlState.pid and previous_long_control_state == LongCtrlState.pid),
+    )
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
 
     return self.last_output_accel

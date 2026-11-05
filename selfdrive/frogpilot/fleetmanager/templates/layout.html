@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" id="htmlElement">
+<html lang="en" id="htmlElement" class="dark-mode">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="initial-scale=1, width=device-width">
@@ -40,13 +40,14 @@
     text-align: center;
   }
 </style>
-  <title>FrogPilot: {% block title %}{% endblock %}</title>
+  <title>ToadPilot: {% block title %}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/toad-neon.css">
 </head>
 <body>
   <nav class="navbar navbar-fixed-top navbar-expand-sm navbar-dark bg-dark">
     <div class="container">
       <a href="/" class="navbar-brand mb-0 h1">
-        <img class="d-inline-block align-top mr-2" src="/static/frog.png" /> FrogPilot </a>
+        <img class="d-inline-block align-top mr-2" src="/static/frog.png" /> ToadPilot </a>
       <button type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" class="navbar-toggler" aria-controls="navbarNav" aria-expanded="false" arial-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -74,7 +75,7 @@
   <main class="container-fluid p-7 text-center"> {% block main %}{% endblock %} </main>
   {% block unformated %}{% endblock %}
 
-  <button class="uk-button uk-button-default uk-margin-small-right" onclick="toggleDarkMode()">Toggle Dark Mode</button>
+  <button class="uk-button uk-button-default uk-margin-small-right" onclick="toggleDarkMode()">Toggle Neon / Light</button>
 
   <script>
     function setCookie(name, value, days) {
@@ -95,7 +96,7 @@
     }
     document.addEventListener('DOMContentLoaded', function () {
       const htmlElement = document.documentElement;
-      htmlElement.classList.toggle('dark-mode', getCookie('darkMode') === 'true');
+      htmlElement.classList.toggle('dark-mode', getCookie('darkMode') !== 'false');
     });
   </script>
 

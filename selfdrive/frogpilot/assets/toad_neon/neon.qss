@@ -1,0 +1,14 @@
+/* ToadPilot Neon: offroad surfaces and button accents. Alert/video painting stays native. */
+SettingsWindow, OffroadHome, Sidebar, FrogPilotSettingsWindow {
+  background-color: #080b14;
+  color: #f4f7ff;
+}
+QPushButton {
+  color: #f4f7ff;
+  border: 2px solid #354366;
+  border-bottom: 4px solid qlineargradient(x1:0, y1:0, x2:1, y2:0,
+    stop:0 #ff4c97, stop:0.2 #ffb547, stop:0.4 #c8ff5a,
+    stop:0.6 #46f5d2, stop:0.8 #51b5ff, stop:1 #be80ff);
+}
+QPushButton:pressed { border-color: #46f5d2; }
+QPushButton:disabled { color: #9ca7bd; border-color: #354366; }

@@ -56,3 +56,16 @@ class StopReleaseLatch:
       self.pending = False
       return True
     return False
+
+
+def smooth_brake_release(request, previous, planner_request, speed, *, allowed):
+  """Ease mild brake release only; stronger braking always passes immediately.
+
+  Never weaken the controller request. Extra braking is limited to 0.15 m/s²,
+  only while the plan still requests deceleration above 2 m/s. Bypass stopping,
+  overrides and launch in the caller, and abandon history on every bypass.
+  """
+  if (not allowed or not all(finite(v) for v in (request, previous, planner_request, speed)) or
+      speed < 2.0 or not -2.0 < previous < request < 0.0 or not -2.0 < planner_request < 0.0):
+    return request
+  return max(request - 0.15, min(request, previous + 0.8 * DT_CTRL))

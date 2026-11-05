@@ -12,7 +12,7 @@ from pathlib import Path
 from openpilot.selfdrive.frogpilot.assets.download_functions import GITLAB_URL, download_file, get_repository_url, handle_error, handle_request_error, verify_download
 from openpilot.selfdrive.frogpilot.frogpilot_utilities import delete_file
 from openpilot.selfdrive.frogpilot.frogpilot_variables import DEFAULT_CLASSIC_MODEL, DEFAULT_MODEL, DEFAULT_TINYGRAD_MODEL, MODELS_PATH, params, params_default, params_memory
-from openpilot.selfdrive.toad_modeld.artifact import (ARTIFACT_PATH, MODEL_ID, catalog_entry,
+from openpilot.selfdrive.toad_modeld.artifact import (MODELS, artifact_path, catalog_entry,
                                                     installed as modern_model_installed)
 
 VERSION = "v13"
@@ -91,9 +91,9 @@ class ModelManager:
       self.downloading_model = False
 
   def download_model(self, model_to_download):
-    if model_to_download == MODEL_ID:
-      if not modern_model_installed():
-        handle_error(None, "Pinned RDF4 runtime is not installed", "Install RDF4 runtime first", MODEL_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, params_memory)
+    if model_to_download in MODELS:
+      if not modern_model_installed(model_to_download):
+        handle_error(None, "Pinned model runtime is not installed", "Install matching model runtime first", MODEL_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, params_memory)
         return
       self.copy_modern_model()
       params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Downloaded!")
@@ -128,10 +128,11 @@ class ModelManager:
 
   @staticmethod
   def copy_modern_model():
-    if modern_model_installed():
-      target = MODELS_PATH / f'{MODEL_ID}.pkl'
-      if not target.exists():
-        target.symlink_to(ARTIFACT_PATH)
+    for model_id in MODELS:
+      if modern_model_installed(model_id):
+        target = MODELS_PATH / f'{model_id}.pkl'
+        if not target.exists():
+          target.symlink_to(artifact_path(model_id))
 
   @staticmethod
   def copy_default_model():
@@ -205,10 +206,9 @@ class ModelManager:
       self.download_all_models()
 
   def update_model_params(self, model_info, repo_url):
-    model_info = [entry for entry in model_info if entry['id'] != MODEL_ID]
-    if modern_model_installed():
-      self.copy_modern_model()
-      model_info.append(catalog_entry())
+    model_info = [entry for entry in model_info if entry['id'] not in MODELS]
+    self.copy_modern_model()
+    model_info.extend(catalog_entry(model_id) for model_id in MODELS if modern_model_installed(model_id))
     self.available_models = [model["id"] for model in model_info]
     self.model_versions = [model["version"] for model in model_info]
 
@@ -218,6 +218,18 @@ class ModelManager:
     params.put("ModelVersions", ",".join(self.model_versions))
     print("Models list updated successfully")
 
+  def register_local_models(self):
+    """Preserve the cached remote catalog and add pinned models when offline."""
+    ids = (params.get('AvailableModels', encoding='utf-8') or '').split(',')
+    names = (params.get('AvailableModelNames', encoding='utf-8') or '').split(',')
+    versions = (params.get('ModelVersions', encoding='utf-8') or '').split(',')
+    experimental = set((params.get('ExperimentalModels', encoding='utf-8') or '').split(','))
+    if not ids[0] or not len(ids) == len(names) == len(versions):
+      return
+    entries = [dict(id=i, name=n, version=v, experimental=i in experimental)
+               for i, n, v in zip(ids, names, versions, strict=True)]
+    self.update_model_params(entries, None)
+
   def update_models(self, boot_run=False):
     if self.downloading_model:
       return
@@ -225,12 +237,15 @@ class ModelManager:
     repo_url = get_repository_url()
     if repo_url is None:
       print("GitHub and GitLab are offline...")
+      self.register_local_models()
       return
 
     model_info = self.fetch_models(f"{repo_url}/Versions/model_names_{VERSION}.json")
     if model_info:
       self.update_model_params(model_info, repo_url)
       self.check_models(boot_run, repo_url)
+    else:
+      self.register_local_models()
 
   def queue_model_download(self, model, model_name=None):
     while params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8"):

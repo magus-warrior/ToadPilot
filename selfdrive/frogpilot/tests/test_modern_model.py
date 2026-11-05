@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import unittest
 
 from cereal import log
-from openpilot.selfdrive.toad_modeld.action import combine_longitudinal, convert_action
+from openpilot.selfdrive.toad_modeld.action import combine_longitudinal, convert_action, convert_plan_action
 from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODEL_VERSION
 from openpilot.system.manager.process_config import run_classic_modeld, run_new_modeld, run_tinygrad_modeld, run_toad_modeld
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
@@ -12,6 +12,25 @@ import numpy as np
 
 
 class TestModernModel(unittest.TestCase):
+  def test_v11_plan_action_constant_acceleration_and_turn(self):
+    from openpilot.selfdrive.toad_modeld.constants import ModelConstants, Plan
+    t = np.asarray(ModelConstants.T_IDXS)
+    plan = np.zeros((33, 15))
+    plan[:, Plan.VELOCITY][:, 0] = 10 - 0.5 * t
+    plan[:, Plan.ACCELERATION][:, 0] = -0.5
+    plan[:, Plan.T_FROM_CURRENT_EULER][:, 2] = 0.02 * t
+    plan[:, Plan.ORIENTATION_RATE][:, 2] = 0.02
+    curvature, accel, stop = convert_plan_action(plan, 10, 0.3, 0.5)
+    self.assertAlmostEqual(curvature, (1 - math.exp(-0.5)) * 0.002)
+    self.assertAlmostEqual(accel, (1 - math.exp(-0.05 / 0.3)) * -0.5)
+    self.assertFalse(stop)
+    self.assertTrue(convert_plan_action(np.zeros((33, 15)), 0, 0.3, 0.5)[2])
+    for invalid in (np.zeros((17, 15)), np.full((33, 15), np.nan)):
+      with self.assertRaises(ValueError):
+        convert_plan_action(invalid, 10, 0.3, 0.5)
+    with self.assertRaises(ValueError):
+      convert_plan_action(plan, 10, 0, 0.5)
+
   def test_v15_curvature_is_acceleration_scaled(self):
     alpha = 1 - math.exp(-0.05 / 0.1)
     for speed in (1, 10, 30):
@@ -72,6 +91,8 @@ class TestModernModel(unittest.TestCase):
       ('national-public-radio', 'v6', False, False, 1),
       ('not-too-shabby', 'v7', False, True, 2),
       (MODEL_ID, MODEL_VERSION, False, False, 3),
+      ("toad-pop-v2", "v11", False, False, 3),
+      ("toad-south-carolina", "v11", False, False, 3),
     ):
       toggles = SimpleNamespace(model=name, model_version=version)
       for started in (False, True):

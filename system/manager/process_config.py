@@ -81,7 +81,7 @@ procs = [
   NativeProcess("mapsd", "selfdrive/navd", ["./mapsd"], run_classic_modeld),
   PythonProcess("navmodeld", "selfdrive.classic_modeld.navmodeld", run_classic_modeld),
   NativeProcess("sensord", "system/sensord", ["./sensord"], only_onroad, enabled=not PC),
-  NativeProcess("ui", "selfdrive/ui", ["./ui"], always_run, watchdog_max_dt=(5 if not PC else None)),
+  NativeProcess("ui", "selfdrive/ui", ["./ui", "-stylesheet", "../frogpilot/assets/toad_neon/neon.qss"], always_run, watchdog_max_dt=(5 if not PC else None)),
   #PythonProcess("soundd", "selfdrive.ui.soundd", only_onroad),
   NativeProcess("locationd", "selfdrive/locationd", ["./locationd"], only_onroad),
   NativeProcess("pandad", "selfdrive/pandad", ["./pandad"], always_run, enabled=False),

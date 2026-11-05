@@ -4,19 +4,32 @@ import sys
 import hashlib
 import json
 
-from openpilot.selfdrive.toad_modeld.artifact import RUNTIME_PATH, installed
+from openpilot.selfdrive.toad_modeld.artifact import MODEL_ID, MODELS, installed
 
 
-def configure_runtime():
-  if not installed():
-    raise RuntimeError('Install the pinned ToadPilot model runtime before loading RDF4')
+def configure_runtime(model_id=MODEL_ID):
+  runtime = MODELS[model_id]["runtime"]
+  if not installed(model_id):
+    raise RuntimeError('Install the pinned ToadPilot model runtime before loading a modern model')
   if 'tinygrad' in sys.modules:
-    raise RuntimeError('RDF4 must run in a fresh process, isolated from legacy tinygrad')
-  receipt = json.loads((RUNTIME_PATH / 'receipt.json').read_text())
+    raise RuntimeError('The modern model must run in a fresh process, isolated from legacy tinygrad')
+  receipt = json.loads((runtime / 'receipt.json').read_text())
   for name, expected in receipt['runtime_files'].items():
-    if hashlib.sha256((RUNTIME_PATH / name).read_bytes()).hexdigest() != expected:
+    if hashlib.sha256((runtime / name).read_bytes()).hexdigest() != expected:
       raise RuntimeError(f'Pinned runtime file changed: {name}')
   os.environ['DEV'] = 'QCOM'
   os.environ['QCOM'] = '1'
   os.environ['GMMU'] = '0'
-  sys.path.insert(0, str(RUNTIME_PATH))
+  sys.path.insert(0, str(runtime))
+
+  if MODELS[model_id]['version'] == 'v11':
+    # AGNOS 10.1 uses glibc 2.31, where these POSIX symbols live in
+    # libpthread. The v23 runtime assumes glibc >= 2.34's merged libc.
+    # Resolve the existing ABI from its proper library; keep GPU code intact.
+    import ctypes
+    import ctypes.util
+    from tinygrad.runtime.autogen import libc
+    pthread = ctypes.CDLL(ctypes.util.find_library('pthread'), use_errno=True)
+    for symbol in ('sem_open', 'sem_unlink', 'sem_wait', 'sem_close', 'sem_post', 'pthread_exit'):
+      if not hasattr(libc.dll, symbol):
+        setattr(libc.dll, symbol, getattr(pthread, symbol))
