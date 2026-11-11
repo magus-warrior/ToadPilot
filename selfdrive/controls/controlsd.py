@@ -163,8 +163,8 @@ class Controls:
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'liveLocationKalman',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
-                                   'testJoystick', 'frogpilotCarState', 'frogpilotPlan'] + self.camera_packets + self.sensor_packets,
-                                  ignore_alive=ignore, ignore_avg_freq=ignore+['radarState', 'testJoystick'], ignore_valid=['testJoystick', ],
+                                   'testJoystick', 'frogpilotCarState', 'frogpilotPlan', 'liveDelay'] + self.camera_packets + self.sensor_packets,
+                                  ignore_alive=ignore+['liveDelay'], ignore_avg_freq=ignore+['radarState', 'testJoystick', 'liveDelay'], ignore_valid=['testJoystick', 'liveDelay'],
                                   frequency=int(1/DT_CTRL))
 
     self.joystick_mode = self.params.get_bool("JoystickDebugMode")
@@ -683,10 +683,13 @@ class Controls:
     self.toadpilot_stop_go_publish_pending = False
     self.toadpilot_stop_go_last_publish_monotonic = now_monotonic
     payload = self.LoC.stop_go_snapshot(
-      getattr(self.frogpilot_toggles, "start_accel_ramp", 0.0),
+      (0.0 if getattr(self.frogpilot_toggles, 'toadpilot_takeoff_style', 'existing') == 'planner'
+       else getattr(self.frogpilot_toggles, "start_accel_ramp", 0.0)),
       route_id=self.toadpilot_diagnostic_route_id, supported=supported,
       improved_stop_go_active=improved_stop_go_active,
     )
+    payload['takeoff_style'] = getattr(self.frogpilot_toggles, 'toadpilot_takeoff_style', 'existing')
+    payload['saved_backup_accel'] = getattr(self.frogpilot_toggles, 'start_accel_ramp', 0.0)
     car_output_valid = bool(self.sm.valid["carOutput"])
     car_output = self.sm["carOutput"].actuatorsOutput
     payload.update({
@@ -976,6 +979,10 @@ class Controls:
       # Keep model-curvature limiting distinct from downstream car/safety
       # clipping (`steer_limited`), which TOADPILOT uses for torque saturation.
       actuators.curvature = self.desired_curvature
+      if self.CP.lateralTuning.which() == 'torque':
+        self.LaC.update_live_delay(
+          self.sm['liveDelay'], self.sm.valid['liveDelay'] and self.sm.alive['liveDelay'],
+          time.monotonic() - self.sm.logMonoTime['liveDelay'] * 1e-9, self.frogpilot_toggles)
       toadpilot_centering_status = {
         **self.toadpilot_lane_centering.snapshot(),
         **self.toadpilot_straight_line_smoother.snapshot(),

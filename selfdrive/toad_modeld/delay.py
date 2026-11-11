@@ -10,7 +10,7 @@ class DelaySelector:
     self.fallback = float(fallback)
     self.current = self.fallback
 
-  def update(self, enabled, estimate, valid, age):
+  def update(self, enabled, estimate, valid, age, dt=0.05):
     if not enabled:
       self.current = self.fallback
       return self.current
@@ -22,7 +22,8 @@ class DelaySelector:
         math.isfinite(estimate.lateralDelayEstimateStd) and 0 <= estimate.lateralDelayEstimateStd <= 0.1):
       target = float(estimate.lateralDelay)
     # At 20 Hz, at most 0.1 seconds of horizon change per second.
-    self.current += max(-0.005, min(0.005, target - self.current))
+    step = 0.1 * dt if math.isfinite(dt) and 0 < dt <= 0.05 else 0.0
+    self.current += max(-step, min(step, target - self.current))
     return self.current
 
 

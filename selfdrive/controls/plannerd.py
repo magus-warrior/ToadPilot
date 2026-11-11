@@ -7,6 +7,14 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 import cereal.messaging as messaging
 
 from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_toggles
+from openpilot.selfdrive.toad_modeld.starpilot_response import response_enabled
+
+
+def new_longitudinal_planner(CP, toggles):
+  if response_enabled(toggles) and CP.openpilotLongitudinalControl:
+    from openpilot.selfdrive.toad_modeld.starpilot_long.adapter import StarPilotPlanner
+    return StarPilotPlanner(CP)
+  return LongitudinalPlanner(CP)
 
 def publish_ui_plan(sm, pm, longitudinal_planner, radarless_model):
   ui_send = messaging.new_message('uiPlan')
@@ -37,6 +45,7 @@ def plannerd_thread():
 
   # FrogPilot variables
   frogpilot_toggles = get_frogpilot_toggles()
+  longitudinal_planner = new_longitudinal_planner(CP, frogpilot_toggles)
 
   classic_model = frogpilot_toggles.classic_model
   radarless_model = frogpilot_toggles.radarless_model
@@ -50,7 +59,12 @@ def plannerd_thread():
 
     # Update FrogPilot parameters
     if sm['frogpilotPlan'].togglesUpdated:
-      frogpilot_toggles = get_frogpilot_toggles()
+      refreshed_toggles = get_frogpilot_toggles()
+      if response_enabled(refreshed_toggles) != response_enabled(frogpilot_toggles):
+        # Settings writes are parked-only; initialize the selected planner from
+        # measured motion if a refreshed snapshot selects another implementation.
+        longitudinal_planner = new_longitudinal_planner(CP, refreshed_toggles)
+      frogpilot_toggles = refreshed_toggles
 
 def main():
   plannerd_thread()

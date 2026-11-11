@@ -96,7 +96,7 @@ TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 11
+TOADPILOT_CONFIG_VERSION = 12
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -135,6 +135,8 @@ class ToadPilotConfig:
   accel_boost: bool = False
   hill_compensation: bool = False
   camera_timing_checks: bool = False
+  starpilot_response: bool = False
+  takeoff_style: str = "existing"
   automatic_traffic_mode: bool = True
   traffic_mode_entry_time: float = 1.0
   traffic_mode_max_speed_mph: int = 30
@@ -165,6 +167,7 @@ _V8_CONFIG_FIELDS = _V7_CONFIG_FIELDS | {"traffic_mode_entry_time", "traffic_mod
 
 _V9_CONFIG_FIELDS = _V8_CONFIG_FIELDS | {"responsive_takeoff", "smooth_stop_finish"}
 _V10_CONFIG_FIELDS = _V9_CONFIG_FIELDS | {"smooth_braking"}
+_V11_CONFIG_FIELDS = _V10_CONFIG_FIELDS | {"live_steering_delay", "modern_longitudinal", "accel_boost", "hill_compensation", "camera_timing_checks"}
 
 
 def normalize_toadpilot_config(data, base=None, partial=False):
@@ -184,10 +187,12 @@ def normalize_toadpilot_config(data, base=None, partial=False):
     raise ValueError(f"Unsupported TOADPILOT configuration version: {normalized['version']}")
   if type(normalized["profile"]) is not str or normalized["profile"] not in TOADPILOT_PROFILES:
     raise ValueError(f"Unknown TOADPILOT profile: {normalized['profile']}")
+  if type(normalized["takeoff_style"]) is not str or normalized["takeoff_style"] not in ("existing", "planner"):
+    raise ValueError("Takeoff style must be existing or planner.")
 
   for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
                 "automatic_traffic_mode", "map_stop_assist", "responsive_takeoff", "smooth_stop_finish", "smooth_braking",
-                "live_steering_delay", "modern_longitudinal", "accel_boost", "hill_compensation", "camera_timing_checks",
+                "live_steering_delay", "modern_longitudinal", "accel_boost", "hill_compensation", "camera_timing_checks", "starpilot_response",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
     if type(normalized[field]) is not bool:
       raise ValueError(f"TOADPILOT setting '{field}' must be a boolean.")
@@ -316,6 +321,12 @@ def decode_toadpilot_config(raw):
         if set(data) != _V10_CONFIG_FIELDS:
           raise ValueError("Malformed TOADPILOT version 10 configuration.")
         data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      elif source_version == 11:
+        if set(data) != _V11_CONFIG_FIELDS:
+          raise ValueError("Malformed TOADPILOT version 11 configuration.")
+        data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      if 1 <= source_version <= 11:
+        data = {**data, "starpilot_response": False, "takeoff_style": "existing"}
       if 1 <= source_version <= 10:
         data = {**data, "live_steering_delay": False, "modern_longitudinal": False, "accel_boost": False, "hill_compensation": False, "camera_timing_checks": False}
       if 1 <= source_version <= 9:
@@ -436,6 +447,8 @@ def config_from_toggles(toggles):
       "accel_boost": getattr(toggles, "toadpilot_accel_boost", False),
       "hill_compensation": getattr(toggles, "toadpilot_hill_compensation", False),
       "camera_timing_checks": getattr(toggles, "toadpilot_camera_timing_checks", False),
+      "starpilot_response": getattr(toggles, "toadpilot_starpilot_response", False),
+      "takeoff_style": getattr(toggles, "toadpilot_takeoff_style", "existing"),
       "automatic_traffic_mode": getattr(toggles, "toadpilot_automatic_traffic_mode"),
       # Shared toggle snapshots can briefly lag one schema during a process
       # restart. These two tuning-only additions have conservative defaults.

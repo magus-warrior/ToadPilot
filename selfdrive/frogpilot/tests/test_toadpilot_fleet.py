@@ -39,6 +39,8 @@ VALID_CONFIG = {
   "accel_boost": False,
   "hill_compensation": False,
   "camera_timing_checks": False,
+  "starpilot_response": False,
+  "takeoff_style": "existing",
   "automatic_traffic_mode": True,
   "traffic_mode_entry_time": 1.0,
   "traffic_mode_max_speed_mph": 30,

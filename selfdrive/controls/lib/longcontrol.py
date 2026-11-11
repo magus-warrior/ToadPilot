@@ -30,6 +30,12 @@ def should_stop_for_long_control(planner_should_stop, forcing_stop):
   return bool(planner_should_stop or forcing_stop)
 
 
+def planner_takeoff_enabled(CP, toggles):
+  return (getattr(toggles, 'toadpilot_enabled', False) is True and
+          getattr(CP, 'carFingerprint', None) == TOADPILOT_FINGERPRINT and
+          getattr(toggles, 'toadpilot_takeoff_style', 'existing') == 'planner')
+
+
 def cruise_standstill_for_long_control(CP, cruise_standstill, improved_stop_and_go, *, active,
                                        should_stop, brake_pressed, planner_accel):
   """Return the Toyota/PCM standstill gate that should hold longitudinal control.
@@ -342,7 +348,8 @@ class LongControl:
       self.reset()
 
     elif self.long_control_state == LongCtrlState.starting:
-      output_accel = (a_target if frogpilot_toggles.human_acceleration else self.CP.startAccel)
+      output_accel = (a_target if frogpilot_toggles.human_acceleration or planner_takeoff_enabled(self.CP, frogpilot_toggles)
+                      else self.CP.startAccel)
       self.reset()
 
     else:  # LongCtrlState.pid
@@ -351,6 +358,8 @@ class LongControl:
                                      feedforward=a_target)
 
     configured_start_accel = getattr(frogpilot_toggles, "start_accel_ramp", 0.0)
+    if planner_takeoff_enabled(self.CP, frogpilot_toggles):
+      configured_start_accel = 0.0
     # Honor the configured launch floor in Traffic Mode too. StartAccelRamp
     # bounds it to a confirmed release, positive plan, low speed, and two seconds;
     # capping it here silently defeats higher settings during stop-and-go.

@@ -124,7 +124,8 @@ class TestModernModel(unittest.TestCase):
       for experimental in (False, True):
         toggles = SimpleNamespace(model=MODEL_ID if modern else 'national-public-radio',
                                   model_version=MODEL_VERSION if modern else 'v6', vEgoStopping=0.05)
-        sm = State(controlsState=SimpleNamespace(experimentalMode=experimental), modelV2=model)
+        sm = State(controlsState=SimpleNamespace(experimentalMode=experimental), modelV2=model,
+                   carState=SimpleNamespace(vEgo=0.0))
         planner.publish(False, False, sm, pm, toggles)
         self.assertTrue(pm.message.valid)
         self.assertAlmostEqual(pm.message.longitudinalPlan.aTarget, -1.2 if modern and experimental else 0.0)

@@ -16,7 +16,7 @@ from openpilot.selfdrive.frogpilot.toadpilot import ToadPilotConfig, decode_toad
 class TestLongitudinalFeatureConfig(unittest.TestCase):
   def test_v8_migrates_with_new_features_on_and_preserves_choices(self):
     old = asdict(ToadPilotConfig(profile="observe", auto_tune=False, enabled=False))
-    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks']:
+    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks', 'starpilot_response', 'takeoff_style']:
       old.pop(key)
     old.pop("smooth_braking")
     old.pop("responsive_takeoff")
@@ -180,7 +180,7 @@ class TestSmoothStopFinish(unittest.TestCase):
 class TestSmoothBraking(unittest.TestCase):
   def test_migration_default_and_saved_off(self):
     old = asdict(ToadPilotConfig(responsive_takeoff=False, smooth_stop_finish=False))
-    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks']:
+    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks', 'starpilot_response', 'takeoff_style']:
       old.pop(key)
     old.pop('smooth_braking')
     old['version'] = 9

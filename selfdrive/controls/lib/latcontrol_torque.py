@@ -13,6 +13,8 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.toad_modeld.delay import DelaySelector
+from openpilot.selfdrive.toad_modeld.starpilot_response import SteeringResponse, response_enabled
 from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_FRICTION_MAX_RATIO,
                                                      TOADPILOT_FRICTION_MIN_RATIO, TOADPILOT_LAT_ACCEL_FACTOR_MAX_RATIO,
                                                      TOADPILOT_LAT_ACCEL_FACTOR_MIN_RATIO, TOADPILOT_LAT_ACCEL_OFFSET_MAX,
@@ -201,6 +203,8 @@ class LatControlTorque(LatControl):
     self.live_lat_accel_offset = self.stock_lat_accel_offset
     self.live_friction = self.stock_friction
     self.delayed_lateral_response = DelayedLateralResponse(CP.steerActuatorDelay)
+    self.starpilot_response = SteeringResponse(CP.minSteerSpeed)
+    self.starpilot_delay = DelaySelector(CP.steerActuatorDelay)
 
     # Twilsonco's Lateral Neural Network Feedforward
     self.use_nnff = CI.use_nnff
@@ -329,6 +333,11 @@ class LatControlTorque(LatControl):
       self.live_friction = float(friction)
     self._apply_toadpilot_tune(config_from_toggles(frogpilot_toggles))
 
+  def update_live_delay(self, estimate, valid, age, toggles):
+    self.starpilot_delay.update(
+      response_enabled(toggles) and getattr(toggles, 'toadpilot_live_steering_delay', False) is True,
+      estimate, valid, age, dt=DT_CTRL)
+
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, llk, model_data=None,
              frogpilot_toggles=None, experimental_mode=False, toadpilot_centering_status=None,
              toadpilot_longitudinal_stopping=False):
@@ -350,6 +359,48 @@ class LatControlTorque(LatControl):
       "straight_line_smoothed_curvature": 0.0,
     }
     self._apply_toadpilot_tune(toadpilot_config)
+
+    starpilot_active = (self.toadpilot_capable and response_enabled(frogpilot_toggles) and
+                        not self.use_nnff and not self.use_nnff_lite)
+    if starpilot_active:
+      measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
+      curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.))
+      output, response = self.starpilot_response.update(
+        active=active, speed=CS.vEgo, desired_curvature=desired_curvature,
+        measured_curvature=measured_curvature, roll=params.roll,
+        delay=self.starpilot_delay.current + 0.1,
+        factor=self.torque_params.latAccelFactor,
+        offset=self._bounded_live_value(self.torque_params.latAccelOffset, 0., -0.5, 0.5),
+        friction=self.torque_params.friction, deadzone=curvature_deadzone * CS.vEgo ** 2,
+        steer_max=self.steer_max, limited=steer_limited_by_safety, override=CS.steeringPressed)
+      self.pid.reset()
+      self.toadpilot_assist.reset(desired_curvature)
+      controller = self.starpilot_response.pid
+      pid_log.active = bool(active and response['valid'])
+      pid_log.error = controller.p / max(controller.k_p, 1e-3)
+      pid_log.p, pid_log.i, pid_log.d, pid_log.f = controller.p, controller.i, controller.d, controller.f
+      pid_log.output = output
+      pid_log.actualLateralAccel = response['measurement']
+      pid_log.desiredLateralAccel = response['setpoint']
+      pid_log.saturated = self._check_saturation(
+        self.steer_max - abs(output) < 1e-3, CS, steer_limited_by_safety, curvature_limited)
+      if self.toadpilot_assist.status_due(toadpilot_config):
+        self.toadpilot_assist.publish_status(
+          toadpilot_config, active=pid_log.active, experimental_mode=bool(experimental_mode),
+          requested_steer=output, feedforward_source='starpilot_linear',
+          active_lat_accel_factor=float(self.torque_params.latAccelFactor),
+          active_lat_accel_offset=float(self.torque_params.latAccelOffset),
+          active_friction=float(self.torque_params.friction),
+          applied_lat_accel_offset=response['applied_offset'],
+          steering_delay_s=self.starpilot_delay.current,
+          response_valid=response['valid'], **centering_status)
+      return output, 0., pid_log
+
+    # Keep the alternate loop primed during baseline operation and disengagement.
+    self.starpilot_response.pid.reset()
+    self.starpilot_response.history.append(desired_curvature)
+    self.starpilot_response.jerk_filter.x = 0.0
+    self.starpilot_response.previous_setpoint = desired_curvature * CS.vEgo ** 2
 
     future_desired_lateral_accel = desired_curvature * CS.vEgo ** 2
     expected_lateral_accel, expected_curvature, upstream_desired_lateral_jerk, response_ready = \

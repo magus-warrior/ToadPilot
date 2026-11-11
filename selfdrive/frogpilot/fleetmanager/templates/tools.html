@@ -371,6 +371,13 @@ Tools
         <span><strong>Responsive takeoff</strong><br><small>Default on. Keeps your chosen acceleration profile in traffic and releases the previous brake hold when the planner requests movement. Follows the planner's lead-car decisions without an added launch kick.</small></span>
         <input type="checkbox" id="toadResponsiveTakeoff" checked>
       </label>
+      <label class="toadpilot-select" for="toadTakeoffStyle">
+        <span><strong>Takeoff style</strong><br><small>Planner follows requested acceleration. Existing launch boost restores your saved takeoff value.</small></span>
+        <select id="toadTakeoffStyle">
+          <option value="planner">Planner</option>
+          <option value="existing">Existing launch boost (backup)</option>
+        </select>
+      </label>
 
       <label class="toadpilot-check" for="toadSmoothBraking">
         <span><strong>Smooth braking</strong><small>Ease mild brake release while moving. Stronger braking responds immediately; gentle stops use Smooth stop finish below.</small></span>
@@ -400,6 +407,10 @@ Tools
 
       <p id="toadDelayStatus" role="status"></p>
       <p>Optional upgrades below start off. Save while parked; changes apply on the next drive.</p>
+      <label class="toadpilot-check" for="toadStarPilotResponse">
+        <span><strong>StarPilot response</strong><br><small>Camry TSS2: StarPilot steering, lead-following planner and throttle confirmation. Steering-delay learning is selected separately. Your following targets and takeoff selection still apply.</small></span>
+        <input type="checkbox" id="toadStarPilotResponse">
+      </label>
       <label class="toadpilot-check" for="toadLiveSteeringDelay">
         <span><strong>Live steering-delay learning</strong><br><small>Learns steering response during qualified driving. Pop V2, South Carolina and RDF4 use a confident estimate; otherwise the vehicle default remains in use.</small></span>
         <input type="checkbox" id="toadLiveSteeringDelay">
@@ -586,6 +597,8 @@ Tools
   const toadLaneCentering = document.getElementById("toadLaneCentering");
   const toadSmoothLaneTransitions = document.getElementById("toadSmoothLaneTransitions");
   const toadResponsiveTakeoff = document.getElementById("toadResponsiveTakeoff");
+  const toadTakeoffStyle = document.getElementById("toadTakeoffStyle");
+  const toadStarPilotResponse = document.getElementById("toadStarPilotResponse");
   const toadLiveSteeringDelay = document.getElementById("toadLiveSteeringDelay");
   const toadModernLongitudinal = document.getElementById("toadModernLongitudinal");
   const toadAccelBoost = document.getElementById("toadAccelBoost");
@@ -613,6 +626,8 @@ Tools
     toadLaneCentering,
     toadSmoothLaneTransitions,
     toadResponsiveTakeoff,
+    toadTakeoffStyle,
+    toadStarPilotResponse,
     toadSmoothStopFinish,
     toadLiveSteeringDelay,
     toadModernLongitudinal,
@@ -773,6 +788,8 @@ Tools
       toadSmoothLaneTransitions.checked = config.smooth_lane_transitions !== false;
       toadLegacyStopGo = config.improved_stop_and_go === true;
       toadResponsiveTakeoff.checked = config.responsive_takeoff === true;
+      toadTakeoffStyle.value = config.takeoff_style || "existing";
+      toadStarPilotResponse.checked = config.starpilot_response === true;
       toadLiveSteeringDelay.checked = config.live_steering_delay === true;
       toadModernLongitudinal.checked = config.modern_longitudinal === true;
       toadAccelBoost.checked = config.accel_boost === true;
@@ -1277,6 +1294,8 @@ Tools
       smooth_lane_transitions: toadSmoothLaneTransitions.checked,
       improved_stop_and_go: toadLegacyStopGo,
       responsive_takeoff: toadResponsiveTakeoff.checked,
+      takeoff_style: toadTakeoffStyle.value,
+      starpilot_response: toadStarPilotResponse.checked,
       smooth_stop_finish: toadSmoothStopFinish.checked,
       live_steering_delay: toadLiveSteeringDelay.checked,
       modern_longitudinal: toadModernLongitudinal.checked,

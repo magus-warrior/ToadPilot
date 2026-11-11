@@ -19,6 +19,7 @@ from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_t
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 from openpilot.selfdrive.toad_modeld.action import combine_longitudinal
 from openpilot.selfdrive.toad_modeld.longitudinal import LongitudinalCoordinator, coordination_enabled
+from openpilot.selfdrive.toad_modeld.starpilot_response import ThrottlePermission, response_enabled
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
 A_CRUISE_MIN = -1.2
@@ -183,6 +184,7 @@ class LongitudinalPlanner:
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True
+    self.throttle_permission = ThrottlePermission()
 
     self.coordinator = LongitudinalCoordinator()
     self.coordinated_output = None
@@ -272,7 +274,11 @@ class LongitudinalPlanner:
     self.v_model_error = get_speed_error(sm['modelV2'], v_ego)
     x, v, a, j, throttle_prob = self.parse_model(sm['modelV2'], self.v_model_error, v_ego, frogpilot_toggles.taco_tune)
     # Don't clip at low speeds since throttle_prob doesn't account for creep
-    self.allow_throttle = should_allow_throttle(throttle_prob, v_ego)
+    if response_enabled(frogpilot_toggles):
+      self.allow_throttle = self.throttle_permission.update(throttle_prob, v_ego, self.dt, reset=reset_state)
+    else:
+      self.throttle_permission = ThrottlePermission()
+      self.allow_throttle = should_allow_throttle(throttle_prob, v_ego)
 
     if not self.allow_throttle:
       clipped_accel_coast = max(accel_coast, accel_limits_turns[0])
