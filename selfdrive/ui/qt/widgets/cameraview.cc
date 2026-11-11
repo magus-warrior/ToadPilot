@@ -13,6 +13,7 @@
 
 #include <QApplication>
 #include <QOpenGLBuffer>
+#include <QOpenGLExtraFunctions>
 #include <QOffscreenSurface>
 
 namespace {
@@ -112,7 +113,7 @@ CameraWidget::~CameraWidget() {
   makeCurrent();
   stopVipcThread();
   if (isValid()) {
-    glDeleteVertexArrays(1, &frame_vao);
+    context()->extraFunctions()->glDeleteVertexArrays(1, &frame_vao);
     glDeleteBuffers(1, &frame_vbo);
     glDeleteBuffers(1, &frame_ibo);
     glDeleteBuffers(2, textures);
@@ -152,8 +153,8 @@ void CameraWidget::initializeGL() {
     { 1.0, -1.0, x1, y1}, // br
   };
 
-  glGenVertexArrays(1, &frame_vao);
-  glBindVertexArray(frame_vao);
+  context()->extraFunctions()->glGenVertexArrays(1, &frame_vao);
+  context()->extraFunctions()->glBindVertexArray(frame_vao);
   glGenBuffers(1, &frame_vbo);
   glBindBuffer(GL_ARRAY_BUFFER, frame_vbo);
   glBufferData(GL_ARRAY_BUFFER, sizeof(frame_coords), frame_coords, GL_STATIC_DRAW);
@@ -167,14 +168,21 @@ void CameraWidget::initializeGL() {
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, frame_ibo);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(frame_indicies), frame_indicies, GL_STATIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
-  glBindVertexArray(0);
+  context()->extraFunctions()->glBindVertexArray(0);
 
   glUseProgram(program->programId());
 
+  glGenTextures(2, textures);
 #ifdef QCOM2
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, textures[0]);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
   glUniform1i(program->uniformLocation("uTexture"), 0);
 #else
-  glGenTextures(2, textures);
   glUniform1i(program->uniformLocation("uTextureY"), 0);
   glUniform1i(program->uniformLocation("uTextureUV"), 1);
 #endif
@@ -270,6 +278,9 @@ void CameraWidget::updateCalibration(const mat3 &calib) {
 }
 
 void CameraWidget::paintGL() {
+  // QPainter shares this context and can leave errors from its native-painting
+  // transition. Check only errors produced by our camera rendering below.
+  while (glGetError() != GL_NO_ERROR) {}
   glClearColor(bg.redF(), bg.greenF(), bg.blueF(), bg.alphaF());
   glClear(GL_STENCIL_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
@@ -296,14 +307,19 @@ void CameraWidget::paintGL() {
   updateFrameMat();
 
   glViewport(0, 0, glWidth(), glHeight());
-  glBindVertexArray(frame_vao);
+  context()->extraFunctions()->glBindVertexArray(frame_vao);
   glUseProgram(program->programId());
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
 #ifdef QCOM2
   // no frame copy
   glActiveTexture(GL_TEXTURE0);
-  glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, egl_images[frame->idx]);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, textures[0]);
+  // Resolve the extension through Qt's current EGL context, not libGL's GLX dispatch.
+  static const auto bind_egl_image = reinterpret_cast<void (*)(GLenum, void *)>(
+    context()->getProcAddress("glEGLImageTargetTexture2DOES"));
+  assert(bind_egl_image != nullptr);
+  bind_egl_image(GL_TEXTURE_EXTERNAL_OES, egl_images[frame->idx]);
   assert(glGetError() == GL_NO_ERROR);
 #else
   // fallback to copy
@@ -324,8 +340,12 @@ void CameraWidget::paintGL() {
   glEnableVertexAttribArray(0);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (const void *)0);
   glDisableVertexAttribArray(0);
-  glBindVertexArray(0);
+  context()->extraFunctions()->glBindVertexArray(0);
+#ifdef QCOM2
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+#else
   glBindTexture(GL_TEXTURE_2D, 0);
+#endif
   glActiveTexture(GL_TEXTURE0);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
