@@ -11,6 +11,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX
+from openpilot.selfdrive.toad_modeld.starpilot_response import response_enabled
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_planner import Lead
 
@@ -35,10 +36,12 @@ def safe_rounded_float(value, digits=3):
 
 
 class FrogPilotPlanner:
-  def __init__(self):
+  def __init__(self, *, starpilot_state_path='/data/toadpilot/starpilot-controls.json'):
+    self.starpilot_state_path = starpilot_state_path
     self.auto_traffic_mode = AutoTrafficMode()
     self.auto_traffic_status = self.auto_traffic_mode.update(v_ego=0.0, lead_present=False, dt=0.0)
     self.cem = ConditionalExperimentalMode(self)
+    self.starpilot_controls = None
     self.frogpilot_acceleration = FrogPilotAcceleration(self)
     self.frogpilot_events = FrogPilotEvents(self)
     self.frogpilot_following = FrogPilotFollowing(self)
@@ -72,6 +75,8 @@ class FrogPilotPlanner:
 
   def close(self):
     self.navigation_trial_recorder.close()
+    if self.starpilot_controls is not None:
+      self.starpilot_controls.close()
 
   def update(self, carState, controlsState, frogpilotCarState, frogpilotNavigation, liveLocationKalman, modelData,
              radarless_model, radarState, frogpilot_toggles, *, navigation_age_s=float("inf"), navigation_valid=False,
@@ -121,13 +126,36 @@ class FrogPilotPlanner:
       self.auto_traffic_mode.reset()
       self.auto_traffic_status = self.auto_traffic_mode.update(v_ego=v_ego, lead_present=False, dt=0.0)
 
+    starpilot_active = response_enabled(frogpilot_toggles)
+    if starpilot_active:
+      if self.starpilot_controls is None:
+        from openpilot.selfdrive.toad_modeld.starpilot_controls.integration import StarPilotControls
+        self.starpilot_controls = StarPilotControls(self, params, params_memory, state_path=self.starpilot_state_path)
+        self.cem = self.starpilot_controls.starpilot_cem
+      # Native stop management consumes this frame's model and lead observations.
+      self.model_length = modelData.position.x[-1]
+      self.model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME or self.frogpilot_vcruise.forcing_stop
+      self.road_curvature = calculate_road_curvature(modelData, v_ego)
+      self.road_curvature_detected = ((1 / max(abs(self.road_curvature), 1e-9))**0.5 < v_ego > CRUISING_SPEED and
+                                       not (carState.leftBlinker or carState.rightBlinker))
+      self.tracking_lead = self.set_lead_status()
+      self.frogpilot_following.update(carState.aEgo, controlsState, frogpilotCarState, self.lead_one.dRel, v_ego, frogpilot_toggles)
+      self.starpilot_controls.prepare(carState, controlsState, frogpilotCarState, frogpilotNavigation,
+                                     modelData, carControl, frogpilot_toggles)
+    elif self.starpilot_controls is not None:
+      self.starpilot_controls.close()
+      self.starpilot_controls = None
+      self.cem = ConditionalExperimentalMode(self)
+
     if controlsState.enabled:
       self.frogpilot_acceleration.update(frogpilotCarState, v_ego, frogpilot_toggles)
     else:
       self.frogpilot_acceleration.max_accel = 0
       self.frogpilot_acceleration.min_accel = 0
 
-    if controlsState.enabled and frogpilot_toggles.conditional_experimental_mode:
+    if starpilot_active:
+      self.starpilot_controls.update_mode(v_ego, v_cruise, controlsState.enabled)
+    elif controlsState.enabled and frogpilot_toggles.conditional_experimental_mode:
       self.cem.update(carState, frogpilotCarState, frogpilotNavigation, v_ego, frogpilot_toggles)
     elif frogpilot_toggles.force_stops or frogpilot_toggles.green_light_alert or frogpilot_toggles.show_stopping_point:
       self.cem.curve_detected = False
@@ -137,7 +165,8 @@ class FrogPilotPlanner:
 
     self.frogpilot_events.update(carState, controlsState, frogpilotCarState, self.lead_one.dRel, modelData, v_cruise, frogpilot_toggles)
 
-    self.frogpilot_following.update(carState.aEgo, controlsState, frogpilotCarState, self.lead_one.dRel, v_ego, frogpilot_toggles)
+    if not starpilot_active:
+      self.frogpilot_following.update(carState.aEgo, controlsState, frogpilotCarState, self.lead_one.dRel, v_ego, frogpilot_toggles)
 
     localizer_valid = (liveLocationKalman.status == log.LiveLocationKalman.Status.valid) and liveLocationKalman.positionGeodetic.valid
     if liveLocationKalman.gpsOK and localizer_valid:
@@ -161,16 +190,17 @@ class FrogPilotPlanner:
     self.lateral_check |= not (carState.leftBlinker or carState.rightBlinker) and frogpilot_toggles.pause_lateral_below_signal
     self.lateral_check |= carState.standstill
 
-    self.model_length = modelData.position.x[-1]
+    if not starpilot_active:
+      self.model_length = modelData.position.x[-1]
 
-    self.model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME
-    self.model_stopped |= self.frogpilot_vcruise.forcing_stop
+      self.model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME
+      self.model_stopped |= self.frogpilot_vcruise.forcing_stop
 
-    self.road_curvature = calculate_road_curvature(modelData, v_ego)
+      self.road_curvature = calculate_road_curvature(modelData, v_ego)
 
-    self.road_curvature_detected = (1 / abs(self.road_curvature))**0.5 < v_ego > CRUISING_SPEED
+      self.road_curvature_detected = (1 / abs(self.road_curvature))**0.5 < v_ego > CRUISING_SPEED
 
-    self.tracking_lead = self.set_lead_status()
+      self.tracking_lead = self.set_lead_status()
 
     self.v_cruise = self.frogpilot_vcruise.update(
       carState, controlsState, frogpilotCarState, frogpilotNavigation, gps_position, v_cruise, v_ego,
@@ -427,6 +457,9 @@ class FrogPilotPlanner:
 
     frogpilotPlan.forcingStop = self.frogpilot_vcruise.forcing_stop
     frogpilotPlan.forcingStopLength = self.frogpilot_vcruise.tracked_model_length
+    native_cruise = self.starpilot_controls.starpilot_vcruise if self.starpilot_controls is not None else None
+    frogpilotPlan.approachStopLength = native_cruise.approach_stop_length if native_cruise is not None else 0.0
+    frogpilotPlan.stopSignConfirmed = native_cruise.stop_sign_confirmed if native_cruise is not None else False
 
     frogpilotPlan.frogpilotEvents = self.frogpilot_events.events.to_msg()
 

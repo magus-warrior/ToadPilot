@@ -33,9 +33,11 @@ def planner_setup(tmp_path):
   return StarPilotPlanner(cp), sm, toggles
 
 
+@pytest.mark.parametrize('experimental', [False, True])
 @pytest.mark.parametrize('scenario', ['cruise', 'opening_lead', 'braking_lead', 'cut_in', 'lead_departure', 'forced_stop'])
-def test_closed_loop_legacy_adapter_and_real_solver(tmp_path, monkeypatch, scenario):
+def test_closed_loop_legacy_adapter_and_real_solver(tmp_path, monkeypatch, scenario, experimental):
   p, sm, toggles = planner_setup(tmp_path)
+  sm['controlsState'].experimentalMode = experimental
   clock = [100.]
   monkeypatch.setattr(source, 'time', NS(monotonic=lambda: clock[0]))
   ego = 0. if scenario == 'lead_departure' else 27.

@@ -201,13 +201,15 @@ def _steady_follow_deadband(lead, v_ego: float, t_follow: float, previous: float
 
 def apply(lead_one, lead_two, *, source: str, active: bool, v_ego: float, t_follow: float,
           previous_target: float, raw_target: float, tracking: bool, post_departure: bool,
-          blocked: bool, panic_bypass: bool) -> FollowResult:
+          blocked: bool, panic_bypass: bool, profile_controlled: bool = False) -> FollowResult:
   if blocked or panic_bypass or post_departure:
     return FollowResult(None, None, None, float(raw_target))
 
   lead = select_lead(lead_one, lead_two, source, active, v_ego, t_follow)
-  if lead is None:
-    return FollowResult(None, None, None, float(raw_target))
+  if lead is None or profile_controlled:
+    # The ACC solver already applies the selected acceleration and braking
+    # jerk settings. Fixed post-solver caps would flatten Sport's response.
+    return FollowResult(lead, None, None, float(raw_target))
 
   cap = _catchup_cap(lead, v_ego, t_follow, source=source, tracking=tracking,
                      post_departure=post_departure)

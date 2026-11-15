@@ -4,6 +4,8 @@ import time
 from cereal import car
 from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.toad_modeld.starpilot_response import response_enabled
+from openpilot.selfdrive.toad_modeld.starpilot_controls.longcontrol import stop_release_ready, moving_stop_target_follow
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, apply_deadzone
 from openpilot.selfdrive.controls.lib.pid import PIDController
@@ -59,11 +61,13 @@ def cruise_standstill_for_long_control(CP, cruise_standstill, improved_stop_and_
 
 
 def long_control_state_trans(CP, active, long_control_state, v_ego,
-                             should_stop, brake_pressed, cruise_standstill, frogpilot_toggles):
+                             should_stop, brake_pressed, cruise_standstill, frogpilot_toggles, allow_stopping_release=None):
   stopping_condition = should_stop
   starting_condition = (not should_stop and
                         not cruise_standstill and
                         not brake_pressed)
+  stopping_release_condition = (starting_condition if allow_stopping_release is None else
+                                not should_stop and not brake_pressed and allow_stopping_release)
   started_condition = v_ego > frogpilot_toggles.vEgoStarting
 
   if not active:
@@ -80,9 +84,9 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
           long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition and CP.startingState:
+      if stopping_release_condition and CP.startingState:
         long_control_state = LongCtrlState.starting
-      elif starting_condition:
+      elif stopping_release_condition:
         long_control_state = LongCtrlState.pid
 
     elif long_control_state in [LongCtrlState.starting, LongCtrlState.pid]:
@@ -136,6 +140,7 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
+    self.stop_release_counter = 0
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
@@ -159,8 +164,10 @@ class LongControl:
     self.stop_go_last_event_unix = None
     self.stop_go_route_started_at_unix = time.time()
 
-  def reset(self):
+  def reset(self, preserve_stop_release=False):
     self.pid.reset()
+    if not preserve_stop_release:
+      self.stop_release_counter = 0
 
   def _record_stop_go_event(self, event, CS, planner_accel, detail=None):
     self.stop_go_handoff_last_event = event
@@ -298,7 +305,7 @@ class LongControl:
     }
 
   def update(self, active, CS, a_target, should_stop, accel_limits, frogpilot_toggles, *,
-             forcing_stop=False, inactive_reason="controls_inactive", traffic_mode=False):
+             forcing_stop=False, inactive_reason="controls_inactive", traffic_mode=False, has_lead=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -313,9 +320,11 @@ class LongControl:
       improved_stop_and_go,
       active=active, should_stop=should_stop, brake_pressed=CS.brakePressed, planner_accel=a_target,
     )
+    native_stop_control = response_enabled(frogpilot_toggles)
+    allow_release = stop_release_ready(self, CS, a_target, should_stop, has_lead, frogpilot_toggles) if native_stop_control else None
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
-                                                       cruise_standstill, frogpilot_toggles)
+                                                       cruise_standstill, frogpilot_toggles, allow_release)
     released_from_stop = (previous_long_control_state == LongCtrlState.stopping and
                           self.long_control_state in (LongCtrlState.starting, LongCtrlState.pid) and
                           not self.stop_go_planner_stop_recovered)
@@ -345,7 +354,9 @@ class LongControl:
         allowed=smooth_finish_enabled and not CS.brakePressed and not forcing_stop,
       )
       self.stop_finish_relief = output_accel - self.stop_finish_stock_accel
-      self.reset()
+      if native_stop_control:
+        output_accel = moving_stop_target_follow(output_accel, a_target, should_stop, CS, frogpilot_toggles)
+      self.reset(preserve_stop_release=native_stop_control)
 
     elif self.long_control_state == LongCtrlState.starting:
       output_accel = (a_target if frogpilot_toggles.human_acceleration or planner_takeoff_enabled(self.CP, frogpilot_toggles)

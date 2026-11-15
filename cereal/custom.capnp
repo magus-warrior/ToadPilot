@@ -96,6 +96,8 @@ struct FrogPilotPlan @0xda96579883444c35 {
   mapStopState @36 :Text;
   mapStopDistance @37 :Float32;
   trafficModeBlend @38 :Float32;  # 0 normal profile, 1 full Traffic Mode profile
+  approachStopLength @39 :Float32;  # native StarPilot pre-commit stop distance, meters
+  stopSignConfirmed @40 :Bool;
 }
 
 struct CustomReserved4 @0x80ae746ee2596b11 {

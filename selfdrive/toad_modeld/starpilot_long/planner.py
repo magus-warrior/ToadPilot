@@ -10,7 +10,7 @@ from openpilot.common.conversions import Conversions as CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
-from openpilot.selfdrive.toad_modeld.starpilot_long.compat import is_tinygrad_model_version
+from openpilot.selfdrive.toad_modeld.starpilot_long.compat import is_tinygrad_model_version, get_force_stop_distance_bias
 FT_TO_M, OFFSET_FT_MIN, OFFSET_FT_MAX = 0.3048, -20, 20
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.toad_modeld.starpilot_long.mpc import LongitudinalMpc, get_safe_obstacle_distance
@@ -33,7 +33,6 @@ from openpilot.selfdrive.toad_modeld.starpilot_long.vehicle_tunes import (
   get_vision_low_speed_stop_buffer_lead_speed_limits,
   get_toyota_rav4_tss2_lead_departure_tune,
   get_toyota_rav4_tss2_lead_creep_tune,
-  get_force_stop_distance_bias,
   get_force_stop_handoff_distance,
   get_stop_sign_low_speed_hold,
   allow_radar_standstill_gap_settle,
@@ -734,7 +733,7 @@ class LongitudinalPlanner:
     ))
     return float(np.clip(a_launch, 0.0, accel_cap))
 
-  def get_close_lead_brake_cap(self, lead, v_ego, accel_min):
+  def get_close_lead_brake_cap(self, lead, v_ego, accel_min, *, comfort_accel_min=None):
     if lead is None or not lead.status:
       return None
 
@@ -753,6 +752,14 @@ class LongitudinalPlanner:
       return None
     required_decel = (projected_closing_speed ** 2) / (2.0 * available_gap) + 0.7 * lead_brake
     if required_decel < 0.2:
+      return None
+
+    # Ordinary ACC slowing belongs to the MPC and its selected jerk settings.
+    # A mild post-solver cap at a long TTC otherwise requests the same instant
+    # braking for every intensity. Keep the existing cap for short-TTC scenes
+    # and whenever the estimated braking need exceeds the comfort profile.
+    if (comfort_accel_min is not None and projected_ttc > RAW_LEAD_SAFETY_TTC and
+        required_decel <= max(0.0, -float(comfort_accel_min))):
       return None
 
     return max(accel_min, -required_decel)
@@ -1075,9 +1082,15 @@ class LongitudinalPlanner:
       float(lead.dRel) <= bypass_distance
     )
 
-  def get_dynamic_t_follow(self, base_t_follow, lead, v_ego):
+  def get_dynamic_t_follow(self, base_t_follow, lead, v_ego, traffic_mode_blend=0.0):
     base_t_follow = float(base_t_follow)
     target_t_follow = base_t_follow
+    # Traffic Mode already supplies a speed-blended user headway. Do not
+    # stack approach spacing on top of it or retain a normal-mode allowance.
+    traffic_blend = float(np.clip(traffic_mode_blend, 0.0, 1.0))
+    if traffic_blend >= 1.0:
+      self.effective_t_follow = base_t_follow
+      return self.effective_t_follow
 
     if lead is not None and lead.status:
       lead_prob = float(getattr(lead, "modelProb", 1.0 if bool(getattr(lead, "radar", False)) else 0.0))
@@ -1109,7 +1122,7 @@ class LongitudinalPlanner:
                 0.40 * time_factor + 0.30 * gap_factor + 0.20 * slow_lead_factor + 0.10 * closing_factor,
                 0.0, 1.0)
               target_delta += vision_extra
-            target_t_follow = base_t_follow + float(target_delta)
+            target_t_follow = base_t_follow + float(target_delta) * (1.0 - traffic_blend)
 
     if self.effective_t_follow is None:
       self.effective_t_follow = base_t_follow
@@ -1305,7 +1318,8 @@ class LongitudinalPlanner:
       getattr(starpilot_car_state, "accelPressed", False) or
       getattr(sm["carState"], "gasPressed", False)
     )
-    model_should_stop = bool(getattr(sm["modelV2"].action, "shouldStop", False))
+    model_should_stop = bool(sm['selfdriveState'].experimentalMode and
+                             getattr(sm["modelV2"].action, "shouldStop", False))
     standstill = bool(getattr(sm["carState"], "standstill", False))
     forcing_stop = bool(getattr(sm["starpilotPlan"], "forcingStop", False))
     red_light = bool(getattr(sm["starpilotPlan"], "redLight", False))
@@ -2068,7 +2082,10 @@ class LongitudinalPlanner:
     # Compute model v_ego error
     self.v_model_error = self.get_model_speed_error(sm['modelV2'], v_ego)
     x, v, a, j, throttle_prob = self.parse_model(sm['modelV2'], self.v_model_error, v_ego, starpilot_toggles)
-    if bool(sm['carState'].standstill):
+    if not experimental_mode:
+      self.model_launch_armed = False
+      self.model_launch_stop_seen = False
+    elif bool(sm['carState'].standstill):
       self.model_launch_armed = True
       self.model_launch_stop_seen |= bool(
         sm['modelV2'].action.shouldStop or
@@ -2083,7 +2100,12 @@ class LongitudinalPlanner:
     # Don't clip at low speeds since throttle_prob doesn't account for creep. Raw
     # gasPressProb can cross both hysteresis thresholds for only a few model frames,
     # so confirm transitions before changing the physical coast cap.
-    if v_ego <= MIN_ALLOW_THROTTLE_SPEED:
+    if not experimental_mode:
+      # Model gas predictions must not limit ordinary cruise control. The lead
+      # MPC and selected acceleration profile still constrain its acceleration.
+      self.model_allow_throttle = True
+      self.model_allow_throttle_transition_t = 0.0
+    elif v_ego <= MIN_ALLOW_THROTTLE_SPEED:
       self.model_allow_throttle = True
       self.model_allow_throttle_transition_t = 0.0
     else:
@@ -2098,15 +2120,16 @@ class LongitudinalPlanner:
           self.model_allow_throttle_transition_t = 0.0
       else:
         self.model_allow_throttle_transition_t = 0.0
-    self.allow_throttle = self.model_allow_throttle and not sm['starpilotPlan'].disableThrottle
+    self.allow_throttle = self.model_allow_throttle and not (experimental_mode and sm['starpilotPlan'].disableThrottle)
 
     if not self.allow_throttle:
       clipped_accel_coast = max(accel_coast, accel_limits_turns[0])
-      # Hold the output cap to the physical coasting limit until throttle is
-      # allowed again. Relaxing back toward positive accel while the gate is
-      # still closed can stall downhill coastdown well above the target speed.
+      # Experimental mode keeps StarPilot's physical coasting cap.
       accel_limits_turns[1] = min(accel_limits_turns[1], clipped_accel_coast)
     no_throttle_output_max = accel_limits_turns[1]
+    # Solver initialization may widen these limits below. Keep the selected
+    # profile separately so that widening cannot become an output permission.
+    comfort_accel_limits = tuple(accel_limits_turns)
 
     if force_slow_decel:
       v_cruise = 0.0
@@ -2152,7 +2175,9 @@ class LongitudinalPlanner:
           for lead in (self.lead_one, self.lead_two))
     )
     lead_one_active = bool(self.lead_one.status and lead_control_active)
-    effective_t_follow = self.get_dynamic_t_follow(sm['starpilotPlan'].tFollow, self.lead_one if lead_one_active else None, v_ego)
+    traffic_mode_blend = float(np.clip(getattr(sm['starpilotPlan'], 'trafficModeBlend', 0.0), 0.0, 1.0))
+    effective_t_follow = self.get_dynamic_t_follow(
+      sm['starpilotPlan'].tFollow, self.lead_one if lead_one_active else None, v_ego, traffic_mode_blend)
 
     if self.is_preap and self.nap_adaptive_accel and lead_one_active:
       follow_limit = get_preap_follow_limit(v_ego)
@@ -2201,7 +2226,7 @@ class LongitudinalPlanner:
 
     # Calculate scene uncertainty from model desire prediction entropy and disengage predictions
     uncertainty = 0.0
-    if hasattr(sm['modelV2'], 'meta'):
+    if experimental_mode and hasattr(sm['modelV2'], 'meta'):
       # Desire prediction entropy (maneuver uncertainty), normalized to [0, 1]
       desire_entropy = 0.0
       if hasattr(sm['modelV2'].meta, 'desirePrediction'):
@@ -2244,6 +2269,11 @@ class LongitudinalPlanner:
       self.uncert_fast.update(raw_uncertainty)
       # Use a more permissive track for accel decisions
       uncertainty = self.uncert_slow.x
+    else:
+      # ACC follows measured lead motion and the selected jerk settings. Model
+      # intervention predictions must not retune those settings behind a lead,
+      # including through residual experimental-mode uncertainty filters.
+      self.uncert_slow.x = self.uncert_fast.x = 0.0
     uncertainty_accel = min(self.uncert_slow.x, self.uncert_fast.x)
 
     # --- Slope-based panic bypass ---
@@ -2338,7 +2368,13 @@ class LongitudinalPlanner:
                          uncertainty=uncertainty,
                          panic_bypass=panic_bypass,
                          filter_time_factor_floor=steady_follow_filter_floor)
-    self.mpc.set_accel_limits(accel_limits_turns[0], accel_limits_turns[1])
+    profile_stop_active = bool(
+      force_slow_decel or (experimental_mode and sm['modelV2'].action.shouldStop) or
+      getattr(sm['starpilotPlan'], 'forcingStop', False) or
+      getattr(sm['starpilotPlan'], 'redLight', False)
+    )
+    cruise_accel_min = get_vehicle_min_accel(self.CP, v_ego) if profile_stop_active else comfort_accel_limits[0]
+    self.mpc.set_accel_limits(cruise_accel_min, accel_limits_turns[1])
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
     # After deciding the MPC mode via get_mpc_mode(), ensure MPC uses that mode when not mlsim
     dec_mpc_mode = self.get_mpc_mode()
@@ -2367,7 +2403,7 @@ class LongitudinalPlanner:
 
     stopped_lead_obstacle_bias = (0.0, 0.0)
     if (
-      not bool(getattr(sm['modelV2'].action, 'shouldStop', False)) and
+      (not experimental_mode or not bool(getattr(sm['modelV2'].action, 'shouldStop', False))) and
       not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
       not bool(getattr(sm['carState'], 'standstill', False))
@@ -2384,7 +2420,7 @@ class LongitudinalPlanner:
                     smooth_duplicate_vision=nonurgent_duplicate_vision_follow and not panic_bypass,
                     stop_x=force_stop_x,
                     silverado_early_follow=early_truck_follow,
-                    modelV2=sm['modelV2'],
+                    modelV2=sm['modelV2'] if experimental_mode else None,
                     lead_obstacle_bias=stopped_lead_obstacle_bias,
                     tracked_lead_catchup_headway_margins=self.tracked_lead_catchup_headway_margins,
                     tracked_lead_catchup_bias_gain=self.tracked_lead_catchup_bias_gain,
@@ -2422,7 +2458,11 @@ class LongitudinalPlanner:
     if lead_one_active:
       rel_v = max(0.0, v_ego - self.lead_one.vLead)
       # dynamic time headway adds a small buffer when uncertainty is elevated
-      base_th = get_follow_prebrake_min_headway(self.CP, effective_t_follow)
+      normal_prebrake_headway = get_follow_prebrake_min_headway(self.CP, effective_t_follow)
+      # The separate normal-mode comfort floor must fade out with Traffic
+      # Mode. Raw-lead braking, MPC constraints and stop handling stay active.
+      base_th = ((1.0 - traffic_mode_blend) * normal_prebrake_headway +
+                 traffic_mode_blend * effective_t_follow)
       th = base_th + 0.6 * max(0.0, uncertainty - 0.42)
       desired_gap = th * v_ego
       if (self.lead_dist_f is not None and self.lead_dist_f < desired_gap and rel_v > 0.5):
@@ -2485,10 +2525,27 @@ class LongitudinalPlanner:
         self.v_desired_trajectory, self.a_desired_trajectory,
         action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
 
-    comfort_output_accel_min = get_vehicle_min_accel(self.CP, v_ego) if experimental_mlsim else accel_limits_turns[0]
+    comfort_output_accel_min = comfort_accel_limits[0]
     vision_cap_accel_min = min(comfort_output_accel_min, get_vehicle_min_accel(self.CP, v_ego))
     output_accel_min = comfort_output_accel_min
-    model_desired_accel = float(sm['modelV2'].action.desiredAcceleration)
+    # Profiles govern ordinary slowing. Stops and physically necessary lead
+    # braking retain the vehicle's full deceleration authority.
+    lead_requires_stronger_braking = any(
+      cap is not None and cap < comfort_output_accel_min
+      for cap in (self.get_close_lead_brake_cap(lead, scene_v_ego, vision_cap_accel_min)
+                  for lead in (self.lead_one, self.lead_two))
+    )
+    if profile_stop_active or output_should_stop or panic_bypass or lead_requires_stronger_braking:
+      output_accel_min = vision_cap_accel_min
+    # Departure assistance in ACC uses its own lead-aware MPC request. A model
+    # brake request must not suppress a measured lead's confirmed departure.
+    model_desired_accel = (float(sm['modelV2'].action.desiredAcceleration) if experimental_mode
+                           else float(output_a_target))
+    if experimental_mlsim:
+      # A reduced turn/cruise target keeps the selected comfort profile. The
+      # model can request stronger braking without granting the cruise branch
+      # unrestricted physical deceleration for the entire experimental mode.
+      output_accel_min = min(output_accel_min, max(vision_cap_accel_min, model_desired_accel))
 
     raw_approach_lift_cap = None
     if not tracking_lead:
@@ -2601,7 +2658,11 @@ class LongitudinalPlanner:
         )
         if rav4_early_lead_cap is not None:
           rav4_early_lead_caps.append(rav4_early_lead_cap)
-        cap = self.get_close_lead_brake_cap(lead, v_ego, output_accel_min)
+        cap = self.get_close_lead_brake_cap(
+          lead, v_ego, output_accel_min,
+          comfort_accel_min=(comfort_output_accel_min
+                             if not experimental_mode and not profile_stop_active else None),
+        )
         if cap is not None:
           close_lead_caps.append(cap)
         cap = get_honda_crv_5g_low_speed_stopped_lead_cap(
@@ -2969,6 +3030,7 @@ class LongitudinalPlanner:
       post_departure=post_departure_bypass,
       blocked=bool(output_should_stop or vision_low_speed_stop_active or close_lead_caps),
       panic_bypass=panic_bypass,
+      profile_controlled=not experimental_mode,
     )
     comfort_follow_lead = follow_result.lead
     comfort_lead = follow_result.lead
@@ -2980,7 +3042,7 @@ class LongitudinalPlanner:
 
     # Model-backed braking remains outside the ordinary follow policy. These
     # floors are safety responses, not comfort arbitration.
-    if comfort_follow_lead is not None and not panic_bypass and not output_should_stop and not vision_low_speed_stop_active:
+    if experimental_mode and comfort_follow_lead is not None and not panic_bypass and not output_should_stop and not vision_low_speed_stop_active:
       tracked_vision_model_brake_floor = self.get_tracked_vision_model_brake_floor(
         comfort_follow_lead, scene_v_ego, output_accel_min, effective_t_follow, model_desired_accel,
       )
@@ -2988,7 +3050,7 @@ class LongitudinalPlanner:
         self.a_desired = min(self.a_desired, tracked_vision_model_brake_floor)
         output_a_target = min(output_a_target, tracked_vision_model_brake_floor)
 
-    if comfort_follow_lead is not None and not panic_bypass and not output_should_stop and not vision_low_speed_stop_active:
+    if experimental_mode and comfort_follow_lead is not None and not panic_bypass and not output_should_stop and not vision_low_speed_stop_active:
       tracked_vision_model_brake_cap = self.get_tracked_vision_model_brake_cap(
         comfort_follow_lead, scene_v_ego, effective_t_follow, model_desired_accel,
       )
@@ -2996,7 +3058,7 @@ class LongitudinalPlanner:
         self.a_desired = max(self.a_desired, tracked_vision_model_brake_cap)
         output_a_target = max(output_a_target, tracked_vision_model_brake_cap)
 
-    output_accel_max = no_throttle_output_max if not self.allow_throttle else accel_limits_turns[1]
+    output_accel_max = no_throttle_output_max if not self.allow_throttle else comfort_accel_limits[1]
     output_a_target = float(np.clip(output_a_target, output_accel_min, output_accel_max))
 
     if close_stop_hold_cap is not None:
@@ -3192,6 +3254,10 @@ class LongitudinalPlanner:
       self.a_desired = min(self.a_desired, accord_stop_go_target)
       output_a_target = accord_stop_go_target
 
+    # Do not carry an out-of-profile internal trajectory into the next frame
+    # after its output was constrained. Safety overrides above retain authority.
+    self.a_desired = float(np.clip(self.a_desired, min(output_accel_min, output_a_target),
+                                   max(output_accel_max, output_a_target)))
     self.output_a_target = output_a_target
     self.output_should_stop = bool(output_should_stop or vision_low_speed_stop_active)
 

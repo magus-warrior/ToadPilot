@@ -1,0 +1,108 @@
+{% extends "layout.html" %}
+{% block title %}Vehicle controls{% endblock %}
+{% block main %}
+<style>
+  .body-controls {max-width:1000px;margin:24px auto;padding:0 16px;text-align:left}
+  .body-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .body-card {border:1px solid #52605d;border-radius:16px;padding:20px;background:#17221f;color:#eef8f1}
+  .body-card h2 {font-size:1.3rem;color:inherit;margin-top:0}
+  .body-card button,.body-controls select {padding:12px 16px;margin:4px;border-radius:10px;border:1px solid #78988c;background:#213d32;color:#fff;cursor:pointer}
+  .body-card button:disabled {opacity:.4;cursor:default}
+  .body-controls .stop {background:#b32f36;color:white;font-size:1.2rem;padding:16px 28px;border:0;border-radius:12px;position:sticky;bottom:12px;z-index:2}
+  #body-message {white-space:pre-wrap;min-height:3em;padding:12px 0}
+  .body-muted {color:#adc5ba;font-size:.9rem}.body-state{min-height:1.8em}
+</style>
+<div class="body-controls">
+  <h1>Vehicle controls</h1>
+  <p id="body-vehicle">Connecting to vehicle…</p>
+  <p>Use while stopped in Park. Keep every opening clear: these motor commands bypass factory jam protection.</p>
+  <label><input id="body-clear" type="checkbox"> Openings are clear for closing and percentage moves.</label>
+  <p class="body-muted">25%, 50%, and 75% are timed estimates. Each percentage move closes the window first.</p>
+  <p id="body-availability" class="body-muted"></p>
+  <div id="body-cards" class="body-grid"></div>
+  <div class="body-card" style="margin-top:16px">
+    <h2>Window groups</h2>
+    <select id="body-group"><option value="all">All four</option><option value="front">Front pair</option><option value="rear">Rear pair</option></select>
+    <button class="move" onclick="bodyCommand(document.getElementById('body-group').value,'down')">Open</button>
+    <button class="move closing" onclick="bodyCommand(document.getElementById('body-group').value,'up')">Close</button>
+  </div>
+  <div class="body-card" style="margin-top:16px">
+    <h2>Moonroof</h2><p id="roof-state">Reading roof status…</p>
+    <div id="roof-controls">
+      <button class="move closing" onclick="bodyCommand('moonroof','slide_open')">Slide open</button>
+      <button class="move closing" onclick="bodyCommand('moonroof','slide_open',null,.4)">Open step</button>
+      <button class="move closing" onclick="bodyCommand('moonroof','close_slide')">Close slide</button>
+      <button class="move closing" onclick="bodyCommand('moonroof','tilt_up')">Tilt up</button>
+      <button class="move closing" onclick="bodyCommand('moonroof','tilt_down')">Lower tilt</button>
+    </div>
+    <p class="body-muted" id="roof-note">Slide and tilt directions are verified. Close slide after sliding open; Lower tilt after tilting up. Close/lower stops on the closed-state signal. Intermediate roof position is not measured.</p>
+  </div>
+  <div id="body-message" role="status" aria-live="polite"></div>
+  <button class="stop" onclick="bodyStop()">STOP ALL</button>
+  <p class="body-muted">REST API: <code>/api/vehicle/v1/windows</code> and <code>/api/vehicle/v1/window-jobs</code>. Future clients use the local bearer token.</p>
+</div>
+<script>
+const bodyCSRF = {{ body_csrf | tojson }};
+const bodyWindows = {front_left:'Driver',front_right:'Front passenger',rear_left:'Rear driver',rear_right:'Rear passenger'};
+let bodyStatus=null, bodyPending=false, bodyJob=null, bodyPolling=false;
+const bodyMessage = document.getElementById('body-message');
+for (const [name,label] of Object.entries(bodyWindows)) {
+  const card=document.createElement('div');card.className='body-card';
+  card.innerHTML=`<h2>${label}</h2><p class="body-state" id="state-${name}">Unknown</p>
+    <button class="move" onclick="bodyCommand('${name}','down')">Open</button>
+    <button class="move closing" onclick="bodyCommand('${name}','up')">Close</button><br>
+    <button class="move" onclick="bodyCommand('${name}','down',null,.35)">↓ Step</button>
+    <button class="move closing" onclick="bodyCommand('${name}','up',null,.35)">↑ Step</button><br>
+    ${[0,25,50,75,100].map(p=>`<button class="move closing" onclick="bodyCommand('${name}','position',${p})">${p}%</button>`).join('')}`;
+  document.getElementById('body-cards').appendChild(card);
+}
+async function bodyAPI(path,data) {
+  const options={headers:{'X-Toad-CSRF':bodyCSRF},cache:'no-store'};
+  if(data!==undefined){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(data);}
+  const response=await fetch('/api/vehicle/'+path,options);
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'Vehicle request failed');return result;
+}
+function bodyButtons(){
+  const v=bodyStatus?.vehicle;
+  const ready=!!v?.fresh&&v.gear==='park'&&Math.abs(v.speed)<.01&&!v.controls_active&&!bodyPending&&!bodyStatus?.active_job;
+  document.getElementById('body-availability').textContent=!ready?'Controls wait for fresh Park status and an idle motor.':!document.getElementById('body-clear').checked?'Check “Openings are clear” to enable Close, step up and percentage controls.':'All four window controls are available.';
+  for(const b of document.querySelectorAll('.move'))b.disabled=!ready||(b.classList.contains('closing')&&!document.getElementById('body-clear').checked);
+}
+document.getElementById('body-clear').addEventListener('change',bodyButtons);
+async function bodyCommand(window,action,percent=null,duration=null){
+  if(bodyPending)return;
+  bodyPending=true;bodyButtons();bodyMessage.textContent='Sending command…';
+  const command={window,action};if(percent!==null)command.open_percent=percent;if(duration!==null)command.duration_s=duration;
+  try{
+    const result=await bodyAPI('v1/window-jobs',{commands:[command],confirm_clear:document.getElementById('body-clear').checked,request_id:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)});
+    bodyJob=result.id;bodyMessage.textContent='Command accepted. Watching motor response…';
+  }catch(e){bodyMessage.textContent=e.message;bodyPending=false;}
+  bodyButtons();
+}
+async function bodyStop(){
+  try{await bodyAPI('v1/stop',{});bodyMessage.textContent='Stop requested.';}catch(e){bodyMessage.textContent=e.message;}
+}
+async function bodyRefresh(){
+  if(bodyPolling)return;bodyPolling=true;
+  try{
+    bodyStatus=await bodyAPI('v1/windows');const v=bodyStatus.vehicle;
+    document.getElementById('body-vehicle').textContent=v.fresh?`${v.gear.toUpperCase()} · ${(v.speed*3.6).toFixed(0)} km/h · ${bodyStatus.phase.replaceAll('_',' ')}`:'Vehicle state unavailable — controls paused';
+    for(const name of Object.keys(bodyWindows)){
+      const state=bodyStatus.windows[name];const fresh=bodyStatus.window_status_age_s!==null&&bodyStatus.window_status_age_s<2;
+      document.getElementById('state-'+name).textContent=fresh&&state?state.state.replaceAll('_',' '):'Status unavailable';
+    }
+    if(bodyStatus.moonroof?.state)document.getElementById('roof-state').textContent=bodyStatus.moonroof.state.replaceAll('_',' ');
+    if(bodyJob){
+      const job=await bodyAPI('v1/jobs/'+bodyJob);
+      if(['completed','failed','cancelled'].includes(job.status)){
+        bodyMessage.textContent=job.status==='completed'?'Command completed.':job.error||job.status;
+        bodyJob=null;bodyPending=false;
+      }
+    }
+  }catch(e){bodyStatus=null;bodyMessage.textContent=e.message;}
+  finally{bodyButtons();bodyPolling=false;}
+}
+bodyButtons();bodyRefresh();setInterval(bodyRefresh,600);
+</script>
+{% endblock %}

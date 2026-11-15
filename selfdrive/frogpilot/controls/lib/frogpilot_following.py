@@ -5,7 +5,6 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, STOP_DISTANCE, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
 
 from openpilot.selfdrive.frogpilot.frogpilot_variables import CITY_SPEED_LIMIT
-from openpilot.selfdrive.toad_modeld.starpilot_response import response_enabled
 
 TRAFFIC_MODE_BP = [0., CITY_SPEED_LIMIT]
 TRAFFIC_MODE_BLEND_TIME = 2.0
@@ -85,14 +84,6 @@ class FrogPilotFollowing:
       self.desired_follow_distance = 0
 
   def update_follow_values(self, lead_distance, v_ego, v_lead, frogpilot_toggles):
-    if response_enabled(frogpilot_toggles):
-      # StarPilot keeps the chosen headway; its planner handles lead response.
-      self.slower_lead = False
-      if frogpilot_toggles.conditional_slower_lead and v_lead < v_ego:
-        distance_factor = max(lead_distance - v_lead * self.t_follow, 1)
-        braking_offset = float(np.clip(min(v_ego - v_lead, v_lead) - COMFORT_BRAKE, 1, distance_factor))
-        self.slower_lead = braking_offset > 1
-      return
     # Offset by FrogAi for FrogPilot for a more natural approach to a faster lead
     if frogpilot_toggles.human_following and v_lead > v_ego:
       distance_factor = max(lead_distance - (v_ego * self.t_follow), 1)

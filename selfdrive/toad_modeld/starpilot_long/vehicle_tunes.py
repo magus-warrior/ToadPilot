@@ -416,6 +416,12 @@ def get_standstill_gap_settle_max_extra_gap(CP):
 
 
 def get_standstill_stopped_lead_guard_distance_margin(CP):
+  if (getattr(CP, "brand", "") == "toyota" and
+      str(getattr(CP, "carFingerprint", "")) == "TOYOTA_CAMRY_TSS2"):
+    # Hold at the same gap where the bounded gap-settle path finishes. The
+    # generic 3 m margin could stop a rolling Camry up to 8.5 m away, beyond
+    # that path's 7 m entry limit, and prevent the MPC closing the excess gap.
+    return 0.15
   if is_honda_crv_5g(CP):
     return HONDA_CRV_5G_GUARD_DISTANCE_MARGIN
   if is_ford_f150_lightning(CP):

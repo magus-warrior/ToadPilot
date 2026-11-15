@@ -31,6 +31,11 @@ def driving_sample(sm, now):
     requested_accel=finite(cc.actuators.accel), output_accel=finite(output.accel),
     planner_accel=finite(plan.accels[0]) if len(plan.accels) else None,
     should_stop=bool(plan.shouldStop),
+    planner_target=finite(plan.aTarget), experimental_mode=bool(controls.experimentalMode),
+    model_accel=finite(model.action.desiredAcceleration), model_stop=bool(model.action.shouldStop),
+    model_length=finite(model.position.x[-1]) if len(model.position.x) else None,
+    stop_detected=bool(sm['frogpilotPlan'].redLight) if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else None,
+    approach_stop_length=finite(sm['frogpilotPlan'].approachStopLength) if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else None,
     forced_stop=bool(sm['frogpilotPlan'].forcingStop) if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else None,
     traffic_mode=bool(sm['frogpilotCarState'].trafficMode) if sm.alive['frogpilotCarState'] and sm.valid['frogpilotCarState'] else None,
     model_ms=finite(model.modelExecutionTime * 1000), frame_drop_percent=finite(model.frameDropPerc))

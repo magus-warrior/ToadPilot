@@ -83,6 +83,27 @@ class FrogPilotVCruise:
         now=map_stop_now,
       )
 
+    native = getattr(self.frogpilot_planner, 'starpilot_controls', None)
+    if native is not None:
+      result = native.update_cruise(v_cruise, v_ego, controlsState.enabled, map_stop_now)
+      controller = native.starpilot_vcruise
+      self.forcing_stop = controller.forcing_stop
+      self.tracked_model_length = controller.tracked_model_length
+      self.override_force_stop = controller.override_force_stop
+      self.override_force_stop_timer = controller.override_force_stop_timer
+      self.force_stop_timer = controller.force_stop_timer
+      self.slc_target, self.slc_offset = controller.slc_target, controller.slc_offset
+      self.overridden_speed = controller.slc.overridden_speed
+      self.override_slc = self.overridden_speed > 0.0
+      self.vtsc_target = controller.csc_target
+      self.mtsc_target = v_cruise
+      if self.map_stop_constraint is not None and self.map_stop_constraint.active:
+        result = min(result, max(self.map_stop_constraint.target_speed_mps or 0.0, 0.0))
+        if self.map_stop_constraint.state == MapStopState.HOLDING:
+          self.forcing_stop = True
+          self.tracked_model_length = max(self.map_stop_constraint.along_route_distance_m or 0.0, 0.0)
+      return result
+
     force_stop = self.frogpilot_planner.cem.stop_light_detected and controlsState.enabled and frogpilot_toggles.force_stops
     force_stop &= self.frogpilot_planner.model_stopped
     force_stop &= self.override_force_stop_timer <= 0

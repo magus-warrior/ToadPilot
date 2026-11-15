@@ -101,7 +101,8 @@ class SteeringResponse:
     jerk = float(np.clip(self.jerk_filter.update(float(np.clip(
       (future - expected) / max(delay, self.dt), -2.5, 2.5))), -2.5, 2.5))
     setpoint = expected + jerk * delay
-    unwinding = (setpoint - self.previous_setpoint) / self.dt < -1.0 and abs(setpoint) < 0.3
+    # Freeze on rapid unwind toward zero, symmetrically in either direction.
+    unwinding = (abs(setpoint) - abs(self.previous_setpoint)) / self.dt < -1.0 and abs(setpoint) < 0.3
     self.previous_setpoint = setpoint
     kp = float(np.interp(speed, *self.pid._k_p))
     low_speed = (float(np.interp(speed, [0., 10., 20., 30.], [12., 10.5, 8., 5.])) / max(speed, 1.)) ** 2

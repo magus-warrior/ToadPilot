@@ -111,3 +111,29 @@ def test_real_linear_camry_controller_uses_new_loop_and_learned_bias(tmp_path):
   control.update(False, state, VehicleModel(cp), params, False, 0., False, None, frogpilot_toggles=toggles)
   output, _, log = control.update(True, state, VehicleModel(cp), params, False, 0., False, None, frogpilot_toggles=toggles)
   assert log.active and output > 0 and math.isfinite(output)
+
+
+@pytest.mark.parametrize('speed,offset,roll', [
+  pytest.param(4., 0., 0., id='town'),
+  pytest.param(20., 0., 0., id='highway'),
+  pytest.param(30., 0., 0., id='fast'),
+  pytest.param(20., .09, 0., id='offset'),
+  pytest.param(20., 0., .01, id='roll'),
+  pytest.param(30., .09, .01, id='offset_and_roll'),
+])
+def test_steering_response_mirrors_left_and_right_transitions(speed, offset, roll):
+  left, right = SteeringResponse(), SteeringResponse()
+  mismatch = []
+  for i in range(1000):
+    target = .25 * math.sin(2 * math.pi * .8 * i * .01) if i >= 100 else 0.
+    outputs = []
+    for sign, response in ((1., left), (-1., right)):
+      output, data = response.update(
+        active=True, speed=speed, desired_curvature=sign * target / speed**2,
+        measured_curvature=sign * .8 * target / speed**2,
+        roll=sign * roll, delay=.22, factor=2.37, offset=sign * offset,
+        friction=.13, deadzone=0., steer_max=1., limited=False, override=False)
+      assert data['valid'] and math.isfinite(output) and abs(output) <= 1.
+      outputs.append(output)
+    mismatch.append(abs(sum(outputs)))
+  assert max(mismatch) < 1e-12

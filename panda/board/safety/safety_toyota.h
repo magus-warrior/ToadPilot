@@ -170,6 +170,14 @@ bool toyota_alt_brake = false;
 bool toyota_stock_longitudinal = false;
 bool toyota_lta = false;
 bool toyota_toadpilot_high_torque = false;
+// Body IO is permitted only with fresh, stationary Park observations. These
+// optional signals do not change driving RX checks or steering/accel limits.
+bool toyota_body_park = false;
+bool toyota_body_stopped = false;
+bool toyota_body_gear_seen = false;
+bool toyota_body_speed_seen = false;
+uint32_t toyota_body_gear_ts = 0U;
+uint32_t toyota_body_speed_ts = 0U;
 int toyota_dbc_eps_torque_factor = 100;   // conversion factor for STEER_TORQUE_EPS in %: see dbc file
 
 static uint32_t toyota_compute_checksum(const CANPacket_t *to_push) {
@@ -211,6 +219,12 @@ static bool toyota_get_quality_flag_valid(const CANPacket_t *to_push) {
 static void toyota_rx_hook(const CANPacket_t *to_push) {
   if (GET_BUS(to_push) == 0U) {
     int addr = GET_ADDR(to_push);
+
+    if ((addr == 0x3BC) && (GET_LEN(to_push) == 8)) {
+      toyota_body_park = (GET_BYTE(to_push, 1) & 0x3FU) == 32U;
+      toyota_body_gear_ts = microsecond_timer_get();
+      toyota_body_gear_seen = true;
+    }
 
     // get eps motor torque (0.66 factor in dbc)
     if (addr == 0x260) {
@@ -280,6 +294,13 @@ static void toyota_rx_hook(const CANPacket_t *to_push) {
 
     // sample speed
     if (addr == 0xaa) {
+      toyota_body_stopped = true;
+      for (uint8_t i = 0U; i < 8U; i += 2U) {
+        int body_wheel = (GET_BYTE(to_push, i) << 8U) | GET_BYTE(to_push, (i + 1U));
+        toyota_body_stopped = toyota_body_stopped && (body_wheel == 6767);
+      }
+      toyota_body_speed_seen = true;
+      toyota_body_speed_ts = microsecond_timer_get();
       int speed = 0;
       // sum 4 wheel speeds. conversion: raw * 0.01 - 67.67
       for (uint8_t i = 0U; i < 8U; i += 2U) {
@@ -452,7 +473,25 @@ static bool toyota_tx_hook(const CANPacket_t *to_send) {
     bool invalid_uds_msg = (GET_BYTES(to_send, 0, 4) != 0x003E020FU) || (GET_BYTES(to_send, 4, 4) != 0x0U);
     // AleSato added some more hack'sss
     bool valid_uds_msgs = (GET_BYTES(to_send, 0, 4) == 0x11300540U);  // automatic door locking and unlocking
-    if (invalid_uds_msg && !valid_uds_msgs) {
+    const uint8_t sub = GET_BYTE(to_send, 0);
+    const bool body_ecu = ((sub >= 0x90U) && (sub <= 0x93U)) || (sub == 0xADU);
+    const bool body_padding = GET_BYTES(to_send, 6, 2) == 0U;
+    const bool body_io = (GET_BYTE(to_send, 1) == 4U) && (GET_BYTE(to_send, 2) == 0x30U) &&
+                         (GET_BYTE(to_send, 3) == 1U) && body_padding;
+    const bool body_release = body_io && (GET_BYTE(to_send, 4) == 0U) && (GET_BYTE(to_send, 5) == 0U);
+    const bool body_move = body_io && (GET_BYTE(to_send, 4) >= 1U) && (GET_BYTE(to_send, 4) <= 6U) &&
+                          ((GET_BYTE(to_send, 5) == 0x40U) || (GET_BYTE(to_send, 5) == 0x80U) ||
+                           ((sub == 0xADU) && (GET_BYTE(to_send, 5) == 0x20U)));
+    const bool body_probe = (GET_BYTE(to_send, 1) == 1U) && (GET_BYTE(to_send, 2) == 0x3EU) &&
+                           (GET_BYTE(to_send, 3) == 0U) && (GET_BYTES(to_send, 4, 4) == 0U);
+    const uint32_t body_now = microsecond_timer_get();
+    const bool body_parked = toyota_body_gear_seen && toyota_body_speed_seen && toyota_body_park &&
+                             toyota_body_stopped && !controls_allowed &&
+                             (get_ts_elapsed(body_now, toyota_body_gear_ts) <= 2000000U) &&
+                             (get_ts_elapsed(body_now, toyota_body_speed_ts) <= 500000U);
+    // Always permit release, including after loss of Park or cancellation.
+    const bool valid_body = body_ecu && (body_release || (body_parked && (body_move || body_probe)));
+    if (invalid_uds_msg && !valid_uds_msgs && !valid_body) {
       tx = 0;
     }
   }
@@ -461,6 +500,12 @@ static bool toyota_tx_hook(const CANPacket_t *to_send) {
 }
 
 static safety_config toyota_init(uint16_t param) {
+  toyota_body_park = false;
+  toyota_body_stopped = false;
+  toyota_body_gear_seen = false;
+  toyota_body_speed_seen = false;
+  toyota_body_gear_ts = 0U;
+  toyota_body_speed_ts = 0U;
 #ifdef ALLOW_DEBUG
   toyota_secoc = GET_FLAG(param, TOYOTA_PARAM_SECOC);
 #endif

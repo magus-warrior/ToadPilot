@@ -37,6 +37,8 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.hw import Paths
 
 app = Flask(__name__)
+from openpilot.selfdrive.frogpilot.window_control.web import register as register_vehicle_controls
+register_vehicle_controls(app)
 
 @app.route("/")
 def home_page():

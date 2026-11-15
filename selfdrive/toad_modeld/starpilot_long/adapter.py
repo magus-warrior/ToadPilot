@@ -6,6 +6,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.longitudinal_planner import planner_required_services
 from openpilot.selfdrive.frogpilot.frogpilot_variables import THRESHOLD
+from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 from openpilot.selfdrive.toad_modeld.starpilot_long.compat import StateView, View, vehicle_view
 from openpilot.selfdrive.toad_modeld.starpilot_long.lead_behavior import should_disable_far_lead_throttle
 from openpilot.selfdrive.toad_modeld.starpilot_long.mpc import LEAD_DANGER_FACTOR, STOP_DISTANCE, desired_follow_distance
@@ -31,10 +32,15 @@ class StarPilotPlanner:
     speed = sm['carState'].vEgo
     model_x = sm['modelV2'].position.x
     length = float(model_x[-1]) if len(model_x) else 0.
-    tracking = bool(self.tracking_filter.update(bool(lead.status and lead.dRel < length + STOP_DISTANCE)) >= THRESHOLD ** 2)
+    experimental = bool(sm['controlsState'].experimentalMode)
+    # An end-to-end stop/short path must not remove a measured lead from ACC.
+    lead_visible = bool(lead.status and (not experimental or lead.dRel < length + STOP_DISTANCE))
+    tracking = bool(self.tracking_filter.update(lead_visible) >= THRESHOLD ** 2)
     following = tracking and lead.dRel < sm['frogpilotPlan'].tFollow * 2 * speed
     disable_throttle = False
-    if tracking and lead.status:
+    # StarPilot's additional coast veto is part of experimental driving.
+    # Ordinary ACC leaves acceleration control to cruise and the lead MPC.
+    if sm['controlsState'].experimentalMode and tracking and lead.status:
       gap = desired_follow_distance(speed, lead.vLead, sm['frogpilotPlan'].tFollow)
       disable_throttle = should_disable_far_lead_throttle(
         speed, lead.dRel, gap, max(0., speed - lead.vLead), following,
@@ -42,7 +48,11 @@ class StarPilotPlanner:
     plan = View(sm['frogpilotPlan'], trackingLead=tracking, dangerFactor=LEAD_DANGER_FACTOR,
                 disableThrottle=disable_throttle)
     self.state = StateView(sm, plan=plan)
-    self.core.update(self.state, toggles)
+    # The legacy selector labels only v7 as tinygrad. Registered on-device
+    # models also publish action commands, which the pinned planner requires
+    # this flag to consume. Keep the override local to this adapter.
+    planner_toggles = View(toggles, tinygrad_model=True) if is_modern_model(toggles) else toggles
+    self.core.update(self.state, planner_toggles)
     self.a_desired_trajectory_full = self.core.a_desired_trajectory.copy()
 
   def publish(self, classic_model, radarless_model, sm, pm, toggles):
@@ -50,7 +60,9 @@ class StarPilotPlanner:
       raise ValueError('StarPilot planner requires a registered modern model')
     message = messaging.new_message('longitudinalPlan')
     required = planner_required_services(sm['controlsState'].experimentalMode, radarless_model)
-    message.valid = sm.all_checks(service_list=required) and bool(sm['modelV2'].action.longitudinalValid)
+    message.valid = sm.all_checks(service_list=required)
+    if sm['controlsState'].experimentalMode:
+      message.valid = message.valid and bool(sm['modelV2'].action.longitudinalValid)
     output = message.longitudinalPlan
     core = self.core
     output.modelMonoTime = sm.logMonoTime['modelV2']

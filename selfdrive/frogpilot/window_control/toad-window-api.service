@@ -1,0 +1,22 @@
+[Unit]
+Description=Local authenticated Comma parked body-control API
+After=network.target
+
+[Service]
+Type=simple
+User=comma
+Group=comma
+WorkingDirectory=/data/openpilot
+Environment=PYTHONPATH=/data/openpilot
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+ExecStart=/usr/local/pyenv/versions/3.11.4/bin/python -m openpilot.selfdrive.frogpilot.window_control.server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=240
+KillMode=mixed
+UMask=0077
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

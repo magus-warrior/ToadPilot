@@ -113,6 +113,14 @@ class Car:
 
     update_frogpilot_toggles()
 
+    self.body_bridge = None
+    if self.CP.carFingerprint == 'TOYOTA_CAMRY_TSS2' and not REPLAY and not self.CP.passive:
+      from openpilot.selfdrive.frogpilot.window_control.bridge import BodyBridge
+      try:
+        self.body_bridge = BodyBridge()
+      except OSError:
+        cloudlog.exception('Body controls socket unavailable')
+
   def state_update(self) -> car.CarState:
     """carState update loop, driven by can"""
 
@@ -193,9 +201,16 @@ class Car:
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos, self.frogpilot_toggles)
+      if self.body_bridge is not None:
+        controls_fresh = self.sm.valid['carControl'] and time.monotonic() - self.sm.recv_time['carControl'] < .25
+        can_sends.extend(self.body_bridge.update(CS, CC, controls_fresh))
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
+    elif self.body_bridge is not None:
+      body_sends = self.body_bridge.update(CS, CC, False)
+      if body_sends:
+        self.pm.send('sendcan', can_list_to_can_capnp(body_sends, msgtype='sendcan', valid=CS.canValid))
 
   def step(self):
     CS, FPCS = self.state_update()

@@ -1,0 +1,47 @@
+{
+  "all_down": {
+    "commands": [
+      {
+        "window": "all",
+        "action": "down"
+      }
+    ],
+    "request_id": "example-all-down-1"
+  },
+  "driver_up": {
+    "commands": [
+      {
+        "window": "driver",
+        "action": "up"
+      }
+    ],
+    "confirm_clear": true,
+    "request_id": "example-driver-up-1"
+  },
+  "driver_timed_down": {
+    "commands": [
+      {
+        "window": "driver",
+        "action": "down",
+        "duration_s": 1.0
+      }
+    ],
+    "request_id": "example-driver-timed-down-1"
+  },
+  "calibrate_passenger_then_25_percent_open": {
+    "commands": [
+      {
+        "window": "passenger",
+        "action": "calibrate"
+      },
+      {
+        "window": "passenger",
+        "action": "position",
+        "open_percent": 25
+      }
+    ],
+    "confirm_clear": true,
+    "request_id": "example-passenger-25-1"
+  },
+  "stop": {}
+}

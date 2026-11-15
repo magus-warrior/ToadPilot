@@ -1,0 +1,204 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Comma window control",
+    "version": "2.1.0",
+    "description": "Normal Toyota safety mode with stationary Park interlocks. Four windows support up/down/step/timed percentages (estimates). Moonroof slide_open/close_slide/tilt_up/tilt_down directions verified on this ECU. Closing uses 0x20, not the older 0x80 encoding. Closed feedback stops close/lower; no intermediate roof position feedback. Factory motor IO bypasses jam protection. Roof endpoints allow up to twelve seconds, in individual CAN pulses of six seconds maximum. Host watchdog releases every pulse."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8766"
+    },
+    {
+      "url": "/api/vehicle",
+      "description": "Fleet Manager port 8082, bearer authenticated for PWA/ESP clients"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Command": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "window",
+          "action"
+        ],
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "front_left",
+              "front_right",
+              "rear_left",
+              "rear_right",
+              "driver",
+              "passenger",
+              "all",
+              "front",
+              "rear",
+              "moonroof"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "open",
+              "close",
+              "position",
+              "calibrate",
+              "slide_open",
+              "close_slide",
+              "tilt_up",
+              "tilt_down"
+            ],
+            "description": "Windows: up/down/position/calibrate. Moonroof only: slide_open/close_slide/tilt_up/tilt_down. Roof closing stops on its closed-state signal; intermediate slide/tilt position is not measured."
+          },
+          "duration_s": {
+            "type": "number",
+            "minimum": 0.25,
+            "maximum": 6,
+            "description": "Optional timed move; omit for an endpoint. Up/down only."
+          },
+          "open_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "position only: 0=closed, 100=open; intermediate targets require calibration and are timed estimates."
+          }
+        }
+      },
+      "JobRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commands"
+        ],
+        "properties": {
+          "commands": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/Command"
+            }
+          },
+          "confirm_clear": {
+            "type": "boolean",
+            "description": "Required true for upward window motion and all moonroof motion; factory IO bypasses jam protection."
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "description": "Deduplicates retries; reuse with different commands is rejected. Results retained for the latest 50 jobs."
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/v1/windows": {
+      "get": {
+        "summary": "Read vehicle/window state, calibration and verification",
+        "responses": {
+          "200": {
+            "description": "Status; a partly-open window has no measured opening percentage."
+          }
+        }
+      }
+    },
+    "/v1/window-jobs": {
+      "post": {
+        "summary": "Submit a bounded window job",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; poll /v1/jobs/{id}. Motors are explicitly released on completion, cancellation, stale controls or leaving Park."
+          },
+          "400": {
+            "description": "Invalid input, missing clearance assertion or required calibration"
+          },
+          "409": {
+            "description": "Busy, not parked, stale vehicle state or recovery required"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "summary": "Read job progress and result",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status/results"
+          },
+          "404": {
+            "description": "Unknown/expired job"
+          }
+        }
+      }
+    },
+    "/v1/stop": {
+      "post": {
+        "summary": "Cancel the active job and release motor output",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stop requested, or no active job"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "Read this API contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI specification"
+          }
+        }
+      }
+    }
+  }
+}
