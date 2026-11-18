@@ -16,5 +16,6 @@ class CameraTiming:
              abs(main_sof - extra_sof) <= 10_000_000 and
              (self.last_main is None or main_sof > self.last_main) and
              (self.last_extra is None or extra_sof > self.last_extra))
-    self.last_main, self.last_extra = main_sof, extra_sof
+    if valid:
+      self.last_main, self.last_extra = main_sof, extra_sof
     return valid

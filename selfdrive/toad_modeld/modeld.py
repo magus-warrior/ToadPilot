@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+import signal
+import sys
 import time
 import numpy as np
 
@@ -48,14 +50,23 @@ class FrameMeta:
       self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
 
+class CameraDisconnected(RuntimeError):
+  pass
+
+
+def recv_camera_frame(client):
+  frame = client.recv()
+  if frame is None and not client.is_connected():
+    raise CameraDisconnected
+  return frame
+
+
 def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
   frogpilot_toggles = get_frogpilot_toggles()
   if check_camera_timing and not shadow:
     raise ValueError('Camera timing override is only for shadow validation')
   if shadow:
     model_id = model_id or MODEL_ID
-    if check_camera_timing:
-      frogpilot_toggles.toadpilot_camera_timing_checks = True
   else:
     if not is_modern_model(frogpilot_toggles):
       raise RuntimeError('Modern model process started for a different selected model')
@@ -74,42 +85,42 @@ def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
   cl_context = None
   cloudlog.warning("CL context ready; loading model")
 
-  # FrogPilot variables
-  frogpilot_toggles = get_frogpilot_toggles()
-
-  if not is_modern_model(frogpilot_toggles) and not shadow:
-    raise RuntimeError("Modern model process started for a different selected model")
-
   # visionipc clients
+  road = VisionStreamType.VISION_STREAM_ROAD
+  wide = VisionStreamType.VISION_STREAM_WIDE_ROAD
   while True:
     available_streams = VisionIpcClient.available_streams("camerad", block=False)
-    if available_streams:
-      use_extra_client = VisionStreamType.VISION_STREAM_WIDE_ROAD in available_streams and VisionStreamType.VISION_STREAM_ROAD in available_streams
-      main_wide_camera = VisionStreamType.VISION_STREAM_ROAD not in available_streams
+    if road in available_streams or wide in available_streams:
       break
     time.sleep(.1)
 
-  vipc_client_main_stream = VisionStreamType.VISION_STREAM_WIDE_ROAD if main_wide_camera else VisionStreamType.VISION_STREAM_ROAD
+  main_wide_camera = road not in available_streams
+  use_extra_client = road in available_streams and wide in available_streams
+  vipc_client_main_stream = wide if main_wide_camera else road
   vipc_client_main = VisionIpcClient("camerad", vipc_client_main_stream, True, cl_context)
-  vipc_client_extra = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_WIDE_ROAD, False, cl_context)
+  vipc_client_extra = VisionIpcClient("camerad", wide, False, cl_context) if use_extra_client else None
   cloudlog.warning(f"vision stream set up, main_wide_camera: {main_wide_camera}, use_extra_client: {use_extra_client}")
 
   while not vipc_client_main.connect(False):
     time.sleep(0.1)
+  if not vipc_client_main.num_buffers:
+    raise CameraDisconnected
   while use_extra_client and not vipc_client_extra.connect(False):
     time.sleep(0.1)
+  if use_extra_client and not vipc_client_extra.num_buffers:
+    raise CameraDisconnected
 
   cloudlog.warning(f"connected main cam with buffer size: {vipc_client_main.buffer_len} ({vipc_client_main.width} x {vipc_client_main.height})")
   if use_extra_client:
     cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
 
   model = ModelState(vipc_client_main.width, vipc_client_main.height, model_id)
-  warm_road = vipc_client_main.recv()
-  while warm_road is None:
-    warm_road = vipc_client_main.recv()
-  warm_wide = vipc_client_extra.recv() if use_extra_client else warm_road
-  while warm_wide is None:
-    warm_wide = vipc_client_extra.recv()
+  while (warm_road := recv_camera_frame(vipc_client_main)) is None:
+    pass
+  warm_wide = warm_road
+  if use_extra_client:
+    while (warm_wide := recv_camera_frame(vipc_client_extra)) is None:
+      pass
   model.warmup(warm_road, warm_wide)
   previous_action = log.ModelDataV2.Action(longitudinalValid=True)
   completed_frames = 0
@@ -133,8 +144,6 @@ def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
   model_transform_main = np.eye(3, dtype=np.float32)
   model_transform_extra = np.eye(3, dtype=np.float32)
   live_calib_seen = False
-  buf_main, buf_extra = None, None
-  meta_main = FrameMeta()
   meta_extra = FrameMeta()
 
 
@@ -152,27 +161,27 @@ def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
-    while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-      buf_main = vipc_client_main.recv()
-      meta_main = FrameMeta(vipc_client_main)
-      if buf_main is None:
+    while True:
+      buf_main = recv_camera_frame(vipc_client_main)
+      if buf_main is None or vipc_client_main.timestamp_sof >= meta_extra.timestamp_sof + 25000000:
         break
 
     if buf_main is None:
       cloudlog.debug("vipc_client_main no frame")
       continue
+    meta_main = FrameMeta(vipc_client_main)
 
     if use_extra_client:
       # Keep receiving extra frames until frame id matches main camera
       while True:
-        buf_extra = vipc_client_extra.recv()
-        meta_extra = FrameMeta(vipc_client_extra)
-        if buf_extra is None or meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
+        buf_extra = recv_camera_frame(vipc_client_extra)
+        if buf_extra is None or meta_main.timestamp_sof < vipc_client_extra.timestamp_sof + 25000000:
           break
 
       if buf_extra is None:
         cloudlog.debug("vipc_client_extra no frame")
         continue
+      meta_extra = FrameMeta(vipc_client_extra)
 
       if abs(meta_main.timestamp_sof - meta_extra.timestamp_sof) > 10000000:
         cloudlog.error(f"frames out of sync! main: {meta_main.frame_id} ({meta_main.timestamp_sof / 1e9:.5f}),\
@@ -232,7 +241,8 @@ def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
       shadow_drops += vipc_dropped_frames
       shadow_camera_rejections += int(not camera_valid)
 
-    inputs_valid = live_calib_seen and (not getattr(frogpilot_toggles, 'toadpilot_camera_timing_checks', False) or camera_valid)
+    timing_required = check_camera_timing or getattr(frogpilot_toggles, 'toadpilot_camera_timing_checks', False)
+    inputs_valid = live_calib_seen and (not timing_required or camera_valid)
     if model_output is not None and not dropped_frame:
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
@@ -268,8 +278,6 @@ def main(shadow=False, max_frames=0, model_id=None, check_camera_timing=False):
     # Update FrogPilot parameters
     if sm['frogpilotPlan'].togglesUpdated:
       frogpilot_toggles = get_frogpilot_toggles()
-      if shadow and check_camera_timing:
-        frogpilot_toggles.toadpilot_camera_timing_checks = True
 
 
   if shadow:
@@ -288,4 +296,14 @@ if __name__ == '__main__':
   args = parser.parse_args()
   if args.model and not args.shadow:
     parser.error("--model is available only with --shadow")
-  main(shadow=args.shadow, max_frames=args.max_frames, model_id=args.model, check_camera_timing=args.check_camera_timing)
+  try:
+    main(shadow=args.shadow, max_frames=args.max_frames, model_id=args.model, check_camera_timing=args.check_camera_timing)
+  except CameraDisconnected:
+    cloudlog.warning("Camera buffers changed; restarting modeld to rebuild GPU mappings and model history")
+    # Old MSGQ subscriptions can still wake this PID during exec. MSGQ installs
+    # its normal handler again when the new process opens its first queue.
+    signal.signal(signal.SIGUSR2, signal.SIG_IGN)
+    # VisionIPC and the GPU runtime can have open native descriptors. Keep the
+    # manager's PID and standard streams, and release the old camera session.
+    os.closerange(3, max(map(int, os.listdir('/proc/self/fd'))) + 1)
+    os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])

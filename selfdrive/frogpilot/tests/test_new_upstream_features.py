@@ -153,6 +153,20 @@ def test_camera_guard_rejects_skew_stale_repeated_and_missing_frames():
   assert guard.update(1_100_000_000, 1_120_000_000, 1_100_000_000, 1_120_000_000, 1_150_000_000)
 
 
+def test_rejected_camera_pair_does_not_change_accepted_timestamps():
+  guard = CameraTiming()
+
+  def update(main_ms, extra_ms):
+    return guard.update(main_ms * 10**6, (main_ms + 20) * 10**6,
+                        extra_ms * 10**6, (extra_ms + 20) * 10**6, 1_150_000_000)
+
+  assert update(1000, 1000)
+  assert not update(950, 950)
+  assert not update(1000, 1000)
+  assert not update(1100, 1150)
+  assert update(1050, 1050)
+
+
 def coordinator_step(coordinator, **changes):
   args = dict(mpc_accel=1.0, mpc_stop=False, mpc_source='lead0',
               action=NS(desiredAcceleration=0.5, longitudinalValid=True, shouldStop=False),

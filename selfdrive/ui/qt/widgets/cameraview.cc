@@ -6,6 +6,7 @@
 #include <GLES3/gl3.h>
 #endif
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <string>
@@ -221,6 +222,7 @@ void CameraWidget::stopVipcThread() {
 }
 
 void CameraWidget::availableStreamsUpdated(std::set<VisionStreamType> streams) {
+  std::lock_guard lk(frame_lock);
   available_streams = streams;
 }
 
@@ -280,6 +282,20 @@ void CameraWidget::updateCalibration(const mat3 &calib) {
 }
 
 void CameraWidget::paintGL() {
+  drawFrame(std::nullopt);
+}
+
+decltype(CameraWidget::frames)::const_reverse_iterator CameraWidget::selectFrame(std::optional<uint32_t> frame_id) const {
+  if (frame_id) {
+    auto match = std::find_if(frames.crbegin(), frames.crend(), [frame_id](const auto &frame) {
+      return frame.first == *frame_id;
+    });
+    if (match != frames.crend()) return match;
+  }
+  return frames.crbegin();
+}
+
+bool CameraWidget::drawFrame(std::optional<uint32_t> frame_id) {
   // QPainter shares this context and can leave errors from its native-painting
   // transition. Check only errors produced by our camera rendering below.
   while (glGetError() != GL_NO_ERROR) {}
@@ -287,23 +303,17 @@ void CameraWidget::paintGL() {
   glClear(GL_STENCIL_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
   std::lock_guard lk(frame_lock);
-  if (frames.empty()) return;
-
-  int frame_idx = frames.size() - 1;
-
-  // Always draw latest frame until sync logic is more stable
-  // for (frame_idx = 0; frame_idx < frames.size() - 1; frame_idx++) {
-  //   if (frames[frame_idx].first == draw_frame_id) break;
-  // }
+  auto selected = selectFrame(frame_id);
+  if (selected == frames.crend()) return false;
+  auto [selected_id, frame] = *selected;
 
   // Log duplicate/dropped frames
-  if (frames[frame_idx].first == prev_frame_id) {
-    qDebug() << "Drawing same frame twice" << frames[frame_idx].first;
-  } else if (frames[frame_idx].first != prev_frame_id + 1) {
-    qDebug() << "Skipped frame" << frames[frame_idx].first;
+  if (selected_id == prev_frame_id) {
+    qDebug() << "Drawing same frame twice" << selected_id;
+  } else if (selected_id != prev_frame_id + 1) {
+    qDebug() << "Skipped frame" << selected_id;
   }
-  prev_frame_id = frames[frame_idx].first;
-  VisionBuf *frame = frames[frame_idx].second;
+  prev_frame_id = selected_id;
   assert(frame != nullptr);
 
   updateFrameMat();
@@ -351,6 +361,7 @@ void CameraWidget::paintGL() {
   glActiveTexture(GL_TEXTURE0);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+  return frame_id && selected_id == *frame_id;
 }
 
 void CameraWidget::vipcConnected(VisionIpcClient *vipc_client) {

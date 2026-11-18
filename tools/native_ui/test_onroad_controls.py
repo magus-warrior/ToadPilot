@@ -15,7 +15,7 @@ BUILD = ROOT / '.native-build'
 def main():
   makefile = BUILD / 'Makefile.onroad-test'
   makefile.write_text('''include Makefile
-test_onroad_controls.o: ../tools/native_ui/test_onroad_controls.cc ../selfdrive/ui/qt/onroad/curve_status.h ../selfdrive/ui/qt/onroad/speed_limit_button.h
+test_onroad_controls.o: ../tools/native_ui/test_onroad_controls.cc ../selfdrive/ui/qt/onroad/curve_status.h ../selfdrive/ui/qt/onroad/speed_limit_button.h ../selfdrive/ui/qt/widgets/cameraview.h
 \t$(CXX) -c $(CXXFLAGS) $(INCPATH) -o $@ $<
 test-onroad-controls: test_onroad_controls.o
 \t$(LINK) $(LFLAGS) -o $@ $(filter-out main.o,$(OBJECTS)) test_onroad_controls.o $(LIBS) -lQt5Test

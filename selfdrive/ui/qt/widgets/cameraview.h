@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -37,7 +38,6 @@ public:
   explicit CameraWidget(std::string stream_name, VisionStreamType stream_type, bool zoom, QWidget* parent = nullptr);
   ~CameraWidget();
   void setBackgroundColor(const QColor &color) { bg = color; }
-  void setFrameId(int frame_id) { draw_frame_id = frame_id; }
   void setStreamType(VisionStreamType type) { requested_stream_type = type; }
   VisionStreamType getStreamType() { return active_stream_type; }
   void stopVipcThread();
@@ -50,6 +50,7 @@ signals:
 
 protected:
   void paintGL() override;
+  bool drawFrame(std::optional<uint32_t> frame_id);
   void initializeGL() override;
   void resizeGL(int w, int h) override { updateFrameMat(); }
   void showEvent(QShowEvent *event) override;
@@ -91,7 +92,7 @@ protected:
 
   std::recursive_mutex frame_lock;
   std::deque<std::pair<uint32_t, VisionBuf*>> frames;
-  uint32_t draw_frame_id = 0;
+  decltype(frames)::const_reverse_iterator selectFrame(std::optional<uint32_t> frame_id) const;
   uint32_t prev_frame_id = 0;
 
 protected slots:

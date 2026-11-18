@@ -120,7 +120,7 @@ void update_model(UIState *s,
   float path_offset_z = sm["liveCalibration"].getLiveCalibration().getHeight()[0];
   auto plan_position = plan.getPosition();
   scene.model_length = model.getPosition().getX()[33 - 1];
-  if (plan_position.getX().size() < model.getPosition().getX().size()) {
+  if (plan.getFrameId() != model.getFrameId() || plan_position.getX().size() < model.getPosition().getX().size()) {
     plan_position = model.getPosition();
   }
   float max_distance = scene.unlimited_road_ui_length ? *(plan_position.getX().end() - 1) :

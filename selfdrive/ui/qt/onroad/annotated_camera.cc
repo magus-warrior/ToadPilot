@@ -809,6 +809,7 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
   const double start_draw_t = millis_since_boot();
   const cereal::ModelDataV2::Reader &model = sm["modelV2"].getModelV2();
   const float v_ego = sm["carState"].getCarState().getVEgo();
+  bool draw_world_objects = false;
 
   // draw camera frame
   {
@@ -843,25 +844,31 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
                                 cameraView == 3 || wide_cam_requested ? VISION_STREAM_WIDE_ROAD :
                                 VISION_STREAM_ROAD);
 
-    s->scene.wide_cam = CameraWidget::getStreamType() == VISION_STREAM_WIDE_ROAD;
+    const auto stream = CameraWidget::getStreamType();
+    s->scene.wide_cam = stream == VISION_STREAM_WIDE_ROAD;
     if (s->scene.calibration_valid) {
       auto calib = s->scene.wide_cam ? s->scene.view_from_wide_calib : s->scene.view_from_calib;
       CameraWidget::updateCalibration(calib);
     } else {
       CameraWidget::updateCalibration(DEFAULT_CALIBRATION);
     }
+    std::optional<uint32_t> model_frame_id;
+    if (s->scene.world_objects_visible && sm.valid("modelV2") && sm.alive("modelV2") &&
+        (stream == VISION_STREAM_ROAD || stream == VISION_STREAM_WIDE_ROAD)) {
+      model_frame_id = s->scene.wide_cam ? model.getFrameIdExtra() : model.getFrameId();
+    }
     painter.beginNativePainting();
-    CameraWidget::setFrameId(model.getFrameId());
-    CameraWidget::paintGL();
+    draw_world_objects = CameraWidget::drawFrame(model_frame_id);
     painter.endNativePainting();
   }
 
   painter.setPen(Qt::NoPen);
 
-  if (s->scene.world_objects_visible) {
+  if (draw_world_objects) {
     update_model(s, model, sm["uiPlan"].getUiPlan());
     drawLaneLines(painter, s, v_ego);
 
+    leadTextRect = QRect();
     if (s->scene.longitudinal_control && sm.rcv_frame("radarState") > s->scene.started_frame && !s->scene.hide_lead_marker) {
       auto radar_state = sm["radarState"].getRadarState();
       update_leads(s, radar_state, model.getPosition());
@@ -873,8 +880,6 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
         drawLead(painter, lead_two, s->scene.lead_vertices[1], v_ego, s->scene.lead_marker_color);
       } else if (lead_one.getStatus()) {
         drawLead(painter, lead_one, s->scene.lead_vertices[0], v_ego, s->scene.lead_marker_color);
-      } else {
-        leadTextRect = QRect();
       }
       if (lead_left.getStatus()) {
         drawLead(painter, lead_left, s->scene.lead_vertices[2], v_ego, blueColor(), true);
@@ -909,7 +914,7 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
   pm->send("uiDebug", msg);
 
   // Paint FrogPilot widgets
-  paintFrogPilotWidgets(painter);
+  paintFrogPilotWidgets(painter, draw_world_objects);
 }
 
 void AnnotatedCameraWidget::showEvent(QShowEvent *event) {
@@ -1136,7 +1141,7 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
   vtscSpeed = vtscEnabled ? scene.vtsc_speed * speedConversion : setSpeed;
 }
 
-void AnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &painter) {
+void AnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &painter, bool draw_world_objects) {
   if (cemStatus && !hideBottomIcons) {
     drawCEMStatus(painter);
   } else {
@@ -1155,7 +1160,7 @@ void AnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &painter) {
     drawLongitudinalPaused(painter);
   }
 
-  if (radarTracks) {
+  if (radarTracks && draw_world_objects) {
     drawRadarTracks(painter);
   }
 

@@ -80,7 +80,7 @@ private:
   void drawRoadName(QPainter &p);
   void drawTurnSignals(QPainter &p);
   void initializeFrogPilotWidgets();
-  void paintFrogPilotWidgets(QPainter &painter);
+  void paintFrogPilotWidgets(QPainter &painter, bool draw_world_objects);
   void updateFrogPilotVariables(int alert_height, const UIScene &scene);
   void updateSignals();
 
