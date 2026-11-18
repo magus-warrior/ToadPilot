@@ -199,7 +199,6 @@ void CameraWidget::showEvent(QShowEvent *event) {
 }
 
 void CameraWidget::stopVipcThread() {
-  makeCurrent();
   if (vipc_thread) {
     vipc_thread->requestInterruption();
     vipc_thread->quit();
@@ -208,6 +207,9 @@ void CameraWidget::stopVipcThread() {
   }
 
 #ifdef QCOM2
+  // A parked UI can exit before the camera has ever allocated an EGL image.
+  if (egl_images.empty()) return;
+  makeCurrent();
   EGLDisplay egl_display = eglGetCurrentDisplay();
   assert(egl_display != EGL_NO_DISPLAY);
   for (auto &pair : egl_images) {

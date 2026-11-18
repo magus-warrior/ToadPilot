@@ -33,6 +33,7 @@ signals:
   void reviewTrainingGuide();
   void showDriverView();
   void expandToggleDescription(const QString &param);
+  void openDrivingResponse();
 
   // FrogPilot signals
   void closeMapBoxInstructions();
@@ -43,8 +44,6 @@ signals:
   void updateMetric(bool metric, bool bootRun=false);
 
 private:
-  QPushButton *sidebar_alert_widget;
-  QWidget *sidebar_widget;
   QButtonGroup *nav_btns;
   QStackedWidget *panel_widget;
 
@@ -52,11 +51,11 @@ private:
   Params params;
   Params paramsTracking{"/cache/tracking"};
 
-  bool mapboxInstructionsOpen;
-  bool mapSelectionOpen;
-  bool panelOpen;
-  bool parentToggleOpen;
-  bool subParentToggleOpen;
+  bool mapboxInstructionsOpen = false;
+  bool mapSelectionOpen = false;
+  bool panelOpen = false;
+  bool parentToggleOpen = false;
+  bool subParentToggleOpen = false;
 };
 
 class DevicePanel : public ListWidget {

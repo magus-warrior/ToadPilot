@@ -343,6 +343,7 @@ class LongitudinalPlanner:
         self.coordinated_output = self.coordinator.update(
           mpc_accel=mpc_accel, mpc_stop=mpc_stop, mpc_source=self.mpc.source, action=sm['modelV2'].action,
           v_ego=v_ego, v_cruise=v_cruise, minimum=self.model_accel_limits[0], maximum=self.model_accel_limits[1],
+          strength=getattr(frogpilot_toggles, 'toadpilot_pickup_strength', 'brisk'),
           dt=self.dt, boost_enabled=getattr(frogpilot_toggles, 'toadpilot_accel_boost', False) is True,
           enabled=sm['controlsState'].enabled and v_cruise_initialized and not force_slow_decel,
           gas_pressed=sm['carState'].gasPressed, brake_pressed=sm['carState'].brakePressed)

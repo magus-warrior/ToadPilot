@@ -862,6 +862,8 @@ class FrogPilotVariables:
     toggle.toadpilot_smooth_braking = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.smooth_braking
     toggle.toadpilot_live_steering_delay = toggle.toadpilot_enabled and toadpilot_config.live_steering_delay
     toggle.toadpilot_modern_longitudinal = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.modern_longitudinal
+    toggle.toadpilot_pickup_strength = toadpilot_config.pickup_strength
+    toggle.toadpilot_matched_lead_prediction = toadpilot_config.matched_lead_prediction
     toggle.toadpilot_accel_boost = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.accel_boost
     toggle.toadpilot_hill_compensation = toggle.toadpilot_enabled and openpilot_longitudinal and toadpilot_config.hill_compensation
     toggle.toadpilot_camera_timing_checks = toggle.toadpilot_enabled and toadpilot_config.camera_timing_checks

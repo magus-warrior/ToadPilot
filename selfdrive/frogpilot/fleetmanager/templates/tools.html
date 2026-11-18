@@ -421,8 +421,16 @@ Tools
         <input type="checkbox" id="toadModernLongitudinal">
       </label>
       <label class="toadpilot-check" for="toadAccelBoost">
-        <span><strong>Learn from accelerator overrides</strong><br><small>With Modern longitudinal coordination, repeated accelerator overrides can add up to 0.2 m/s² to mild model requests. Resets on disengagement; lead and cruise limits still apply.</small></span>
+        <span><strong>Learn from accelerator overrides</strong><br><small>With Modern longitudinal coordination, repeated accelerator presses above 10 mph can increase a mild acceleration request. Learning resets on disengagement.</small></span>
         <input type="checkbox" id="toadAccelBoost">
+      </label>
+      <label class="toadpilot-check" for="toadPickupStrength">
+        <span><strong>Pickup strength</strong><br><small>Maximum learned acceleration above 10 mph in Experimental Mode.</small></span>
+        <select id="toadPickupStrength"><option value="gentle">Gentle · +0.10 m/s²</option><option value="brisk">Brisk · +0.20 m/s²</option></select>
+      </label>
+      <label class="toadpilot-check" for="toadMatchedLead">
+        <span><strong>Lead forecast</strong><br><small>StarPilot can use the camera frame matched by radar, or forecast from the current lead measurement alone.</small></span>
+        <select id="toadMatchedLead"><option value="matched">Matched camera</option><option value="measured">Measured motion</option></select>
       </label>
       <label class="toadpilot-check" for="toadHillCompensation">
         <span><strong>Toyota hill-response compensation</strong><br><small>Camry: anticipates changes in road slope to improve acceleration tracking. Inactive during stop holding and pedal overrides.</small></span>
@@ -602,6 +610,8 @@ Tools
   const toadStarPilotResponse = document.getElementById("toadStarPilotResponse");
   const toadLiveSteeringDelay = document.getElementById("toadLiveSteeringDelay");
   const toadModernLongitudinal = document.getElementById("toadModernLongitudinal");
+  const toadMatchedLead = document.getElementById("toadMatchedLead");
+  const toadPickupStrength = document.getElementById("toadPickupStrength");
   const toadAccelBoost = document.getElementById("toadAccelBoost");
   const toadHillCompensation = document.getElementById("toadHillCompensation");
   const toadCameraTimingChecks = document.getElementById("toadCameraTimingChecks");
@@ -633,6 +643,8 @@ Tools
     toadLiveSteeringDelay,
     toadModernLongitudinal,
     toadAccelBoost,
+    toadMatchedLead,
+    toadPickupStrength,
     toadHillCompensation,
     toadCameraTimingChecks,
     toadSmoothBraking,
@@ -793,6 +805,8 @@ Tools
       toadStarPilotResponse.checked = config.starpilot_response === true;
       toadLiveSteeringDelay.checked = config.live_steering_delay === true;
       toadModernLongitudinal.checked = config.modern_longitudinal === true;
+      toadPickupStrength.value = config.pickup_strength || "brisk";
+      toadMatchedLead.value = config.matched_lead_prediction === false ? "measured" : "matched";
       toadAccelBoost.checked = config.accel_boost === true;
       toadHillCompensation.checked = config.hill_compensation === true;
       toadCameraTimingChecks.checked = config.camera_timing_checks === true;
@@ -1301,6 +1315,8 @@ Tools
       live_steering_delay: toadLiveSteeringDelay.checked,
       modern_longitudinal: toadModernLongitudinal.checked,
       accel_boost: toadAccelBoost.checked,
+      pickup_strength: toadPickupStrength.value,
+      matched_lead_prediction: toadMatchedLead.value === "matched",
       hill_compensation: toadHillCompensation.checked,
       camera_timing_checks: toadCameraTimingChecks.checked,
       smooth_braking: toadSmoothBraking.checked,

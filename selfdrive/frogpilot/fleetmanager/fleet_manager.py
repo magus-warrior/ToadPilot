@@ -355,6 +355,7 @@ def get_toggle_values_route():
   toggle_values = fleet.get_all_toggle_values()
   return jsonify(toggle_values)
 
+@app.route("/toadpilot/driving-preferences", methods=["POST"])
 @app.route("/toadpilot", methods=['GET', 'POST'])
 def toadpilot_route():
   try:
@@ -367,7 +368,8 @@ def toadpilot_route():
     if not isinstance(request_data, dict):
       return jsonify({"error": "TOADPILOT configuration must be a JSON object."}), 400
 
-    response = jsonify(fleet.set_toadpilot_config(request_data))
+    save = fleet.set_driving_preferences if request.path.endswith("/driving-preferences") else fleet.set_toadpilot_config
+    response = jsonify(save(request_data))
     response.headers["Cache-Control"] = "no-store"
     return response, 200
   except ValueError as error:

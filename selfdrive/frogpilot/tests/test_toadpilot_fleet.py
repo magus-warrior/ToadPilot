@@ -37,6 +37,8 @@ VALID_CONFIG = {
   "live_steering_delay": False,
   "modern_longitudinal": False,
   "accel_boost": False,
+  "pickup_strength": "brisk",
+  "matched_lead_prediction": True,
   "hill_compensation": False,
   "camera_timing_checks": False,
   "starpilot_response": False,
@@ -297,6 +299,54 @@ class TestToadPilotFleetStatus(unittest.TestCase):
 
 
 class TestToadPilotFleetMutations(unittest.TestCase):
+  def test_parked_driving_preferences_preserve_saved_choices(self):
+    persistent = MemoryParams({"IsOffroad": True})
+    memory = MemoryParams()
+    with patch.object(helpers, "params", persistent), patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles"), patch.object(helpers, "get_toadpilot_state"):
+      helpers.set_toadpilot_config({**VALID_CONFIG, "profile": "full", "starpilot_response": True})
+      for strength in ("gentle", "brisk"):
+        helpers.set_driving_preferences({"pickup": strength})
+        saved = helpers.read_toadpilot_config(persistent)
+        self.assertTrue(saved.accel_boost and saved.modern_longitudinal)
+        self.assertEqual(saved.pickup_strength, strength)
+      helpers.set_driving_preferences({"matched_lead_prediction": False})
+      helpers.set_driving_preferences({"pickup": "off"})
+      saved = helpers.read_toadpilot_config(persistent)
+      self.assertFalse(saved.accel_boost or saved.matched_lead_prediction)
+      self.assertTrue(saved.starpilot_response)
+      self.assertEqual(saved.profile, "full")
+      helpers.set_toadpilot_config({k: 12 if k == "version" else v for k, v in VALID_CONFIG.items()
+                                  if k not in ("pickup_strength", "matched_lead_prediction")})
+      self.assertFalse(helpers.read_toadpilot_config(persistent).matched_lead_prediction)
+      for invalid in ({"pickup": "maximum"}, {"matched_lead_prediction": 1}, {"profile": "observe"}):
+        with self.assertRaises(ValueError):
+          helpers.set_driving_preferences(invalid)
+      memory.values["IsOnroad"] = True
+      with self.assertRaisesRegex(ValueError, "offroad"):
+        helpers.set_driving_preferences({"pickup": "brisk"})
+      self.assertFalse(helpers.read_toadpilot_config(persistent).accel_boost)
+
+  def test_takeoff_selector_only_changes_the_style(self):
+    persistent = MemoryParams({"IsOffroad": True, START_ACCEL_RAMP_PARAM: b"0.65"})
+    memory = MemoryParams()
+    with patch.object(helpers, "params", persistent), patch.object(helpers, "params_memory", memory), \
+         patch.object(helpers, "update_frogpilot_toggles"):
+      initial = helpers.set_toadpilot_config({**VALID_CONFIG, "modern_longitudinal": True, "accel_boost": True,
+                                              "pickup_strength": "gentle", "takeoff_style": "planner"})
+      for style in ("existing", "planner"):
+        saved = helpers.set_driving_preferences({"takeoff_style": style})
+        self.assertEqual(saved["config"], {**initial["config"], "takeoff_style": style})
+        self.assertEqual(helpers.get_toadpilot_state()["config"], saved["config"])
+        self.assertEqual(saved["saved_launch_boost"], 0.65)
+        self.assertEqual(persistent.get(START_ACCEL_RAMP_PARAM), b"0.65")
+      with self.assertRaises(ValueError):
+        helpers.set_driving_preferences({"takeoff_style": "brisk"})
+      memory.values["IsOnroad"] = True
+      with self.assertRaisesRegex(ValueError, "offroad"):
+        helpers.set_driving_preferences({"takeoff_style": "existing"})
+      self.assertEqual(helpers.read_toadpilot_config(persistent).takeoff_style, "planner")
+
   def test_steering_experiment_request_is_default_off_and_can_only_change_offroad(self):
     requested = {**VALID_CONFIG, "experimental_steering_response_requested": True}
     persistent = MemoryParams()

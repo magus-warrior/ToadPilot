@@ -13,15 +13,19 @@ from openpilot.selfdrive.frogpilot.controls.lib.longitudinal_features import Sto
 from openpilot.selfdrive.frogpilot.toadpilot import ToadPilotConfig, decode_toadpilot_config
 
 
+# A saved v8 file has a fixed shape even when the installed schema grows.
+V8_CONFIG = {
+  "version": 8, "enabled": False, "profile": "observe", "auto_tune": False,
+  "lane_centering_assist": True, "smooth_lane_transitions": True, "straight_line_smoothing": True,
+  "experimental_max_torque": 1500, "improved_stop_and_go": True, "automatic_traffic_mode": True,
+  "traffic_mode_entry_time": 1.0, "traffic_mode_max_speed_mph": 30, "map_stop_assist": True,
+  "curve_assist_in_experimental": False, "smart_saturation_warning": True, "telemetry": True,
+}
+
+
 class TestLongitudinalFeatureConfig(unittest.TestCase):
   def test_v8_migrates_with_new_features_on_and_preserves_choices(self):
-    old = asdict(ToadPilotConfig(profile="observe", auto_tune=False, enabled=False))
-    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks', 'starpilot_response', 'takeoff_style']:
-      old.pop(key)
-    old.pop("smooth_braking")
-    old.pop("responsive_takeoff")
-    old.pop("smooth_stop_finish")
-    old["version"] = 8
+    old = V8_CONFIG
     new = decode_toadpilot_config(json.dumps(old))
     self.assertTrue(new.responsive_takeoff)
     self.assertTrue(new.smooth_stop_finish)
@@ -179,11 +183,7 @@ class TestSmoothStopFinish(unittest.TestCase):
 
 class TestSmoothBraking(unittest.TestCase):
   def test_migration_default_and_saved_off(self):
-    old = asdict(ToadPilotConfig(responsive_takeoff=False, smooth_stop_finish=False))
-    for key in ['live_steering_delay', 'modern_longitudinal', 'accel_boost', 'hill_compensation', 'camera_timing_checks', 'starpilot_response', 'takeoff_style']:
-      old.pop(key)
-    old.pop('smooth_braking')
-    old['version'] = 9
+    old = {**V8_CONFIG, "version": 9, "enabled": True, "responsive_takeoff": False, "smooth_stop_finish": False}
     config = decode_toadpilot_config(json.dumps(old))
     self.assertTrue(config.enabled)
     self.assertTrue(config.smooth_braking)

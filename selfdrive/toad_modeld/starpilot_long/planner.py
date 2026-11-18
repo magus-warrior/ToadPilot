@@ -1,6 +1,8 @@
 # Adapted from StarPilotHQ/StarPilot 4a553da9ac22a14e34513c011aed04c1e93b4619.
 # MIT license, copyright holders as recorded in the repository LICENSE.
 #!/usr/bin/env python3
+from collections import deque
+from types import SimpleNamespace
 import math
 import numpy as np
 import time
@@ -10,6 +12,7 @@ from openpilot.common.conversions import Conversions as CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.toad_modeld.longitudinal import ACCEL_LEARNING_MIN_SPEED, AccelBoost
 from openpilot.selfdrive.toad_modeld.starpilot_long.compat import is_tinygrad_model_version, get_force_stop_distance_bias
 FT_TO_M, OFFSET_FT_MIN, OFFSET_FT_MAX = 0.3048, -20, 20
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
@@ -574,6 +577,8 @@ class LongitudinalPlanner:
                               sync_model_lead_filters=use_model_lead_filter_sync(CP))
     self.fcw = False
     self.dt = dt
+    self.pickup_learner = None
+    self.lead_frames = deque(maxlen=3)
     self.model_allow_throttle = True
     self.model_allow_throttle_transition_t = 0.0
     self.allow_throttle = True
@@ -2024,6 +2029,61 @@ class LongitudinalPlanner:
       floor = min(LC_MERGE_ACCEL_BIAS, cruise_cap)
     return floor
 
+  def matched_leads(self, sm, enabled):
+    # Keep only the two six-point forecasts, never an entire camera message.
+    timestamp = sm.logMonoTime['modelV2']
+    if not enabled or timestamp <= 0 or not sm.all_checks(['modelV2']):
+      self.lead_frames.clear()
+      return ()
+    if self.lead_frames and timestamp < self.lead_frames[-1][0]:
+      self.lead_frames.clear()
+    if not self.lead_frames or self.lead_frames[-1][0] != timestamp:
+      snapshots = []
+      leads = sm['modelV2'].leadsV3
+      for index in range(min(2, len(leads))):
+        lead = leads[index]
+        if len(lead.x) == len(lead.v) == len(ModelConstants.LEAD_T_IDXS) and 0.5 < lead.prob <= 1.0:
+          snapshots.append(SimpleNamespace(prob=lead.prob, x=tuple(lead.x), v=tuple(lead.v)))
+        else:
+          snapshots.append(None)
+      self.lead_frames.append((timestamp, tuple(snapshots)))
+    matched = sm['radarState'].mdMonoTime
+    if not 0 <= timestamp - matched <= 3 * DT_MDL * 1e9 or not sm.all_checks(['radarState']):
+      return ()
+    return next((leads for frame, leads in reversed(self.lead_frames) if frame == matched), ())
+
+  def get_learned_pickup(self, sm, model_accel, mpc_accel, braking, cruise_speed, profile_max, action_t, strength="brisk"):
+    car = sm['carState']
+    plan = sm['starpilotPlan']
+    # The MPC already includes the cruise and lead constraints. Limit the extra
+    # pickup to the remaining speed headroom and selected profile as well.
+    ceiling = min(profile_max, (cruise_speed - car.vEgo) / action_t)
+    active = sm['carControl'].longActive
+    auxiliary = sm['starpilotCarState']
+    radar = sm['radarState']
+    eligible = (
+      (active or car.gasPressed) and not car.brakePressed and not car.standstill and
+      car.vEgo >= ACCEL_LEARNING_MIN_SPEED and car.vCruise != V_CRUISE_UNSET and
+      0. < model_accel < ceiling and not braking and self.allow_throttle and self.mpc.solution_status == 0 and
+      all(map(math.isfinite, (mpc_accel, profile_max, cruise_speed, car.vEgo))) and
+      not auxiliary.pauseLongitudinal and not auxiliary.forceCoast and
+      not plan.stopSignConfirmed and plan.approachStopLength == 0. and
+      sm['modelV2'].action.longitudinalValid and
+      sm.all_checks(['carState', 'carControl', 'controlsState', 'liveParameters', 'radarState', 'modelV2',
+                     'starpilotPlan', 'starpilotCarState']) and
+      all(not lead.status or (0. < lead.dRel < math.inf and car.vEgo < lead.vLead < math.inf and
+                              -EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_BRAKE <= lead.aLeadK < math.inf)
+          for lead in (radar.leadOne, radar.leadTwo))
+    )
+    if not eligible:
+      self.pickup_learner.cancel_override()
+      return model_accel
+    learned = self.pickup_learner.update(True, car.gasPressed, car.vEgo, model_accel, mpc_accel,
+                                         ceiling, self.dt, strength)
+    if not active or car.gasPressed:
+      return model_accel
+    return max(model_accel, min(learned, ceiling, mpc_accel))
+
   def update(self, sm, starpilot_toggles):
     if self.is_preap:
       self._preap_param_frame += 1
@@ -2032,6 +2092,13 @@ class LongitudinalPlanner:
 
     self.generation = getattr(starpilot_toggles, "model_version", None)
     experimental_mode = bool(sm['selfdriveState'].experimentalMode)
+    learning_enabled = (experimental_mode and sm['selfdriveState'].enabled and
+                        getattr(starpilot_toggles, 'toadpilot_modern_longitudinal', False) and
+                        getattr(starpilot_toggles, 'toadpilot_accel_boost', False))
+    if not learning_enabled:
+      self.pickup_learner = None
+    elif self.pickup_learner is None:
+      self.pickup_learner = AccelBoost()
     self.mode = 'blended' if experimental_mode else 'acc'
     self.mpc.mode = 'acc'
     if not self.mlsim:
@@ -2420,7 +2487,8 @@ class LongitudinalPlanner:
                     smooth_duplicate_vision=nonurgent_duplicate_vision_follow and not panic_bypass,
                     stop_x=force_stop_x,
                     silverado_early_follow=early_truck_follow,
-                    modelV2=sm['modelV2'] if experimental_mode else None,
+                    model_leads=self.matched_leads(sm, experimental_mode and
+                                                  getattr(starpilot_toggles, 'toadpilot_matched_lead_prediction', True)),
                     lead_obstacle_bias=stopped_lead_obstacle_bias,
                     tracked_lead_catchup_headway_margins=self.tracked_lead_catchup_headway_margins,
                     tracked_lead_catchup_bias_gain=self.tracked_lead_catchup_bias_gain,
@@ -2498,8 +2566,13 @@ class LongitudinalPlanner:
         output_a_target = output_a_target_mpc
         output_should_stop = output_should_stop_mpc
       else:
-        output_a_target = min(output_a_target_mpc, output_a_target_e2e)
         output_should_stop = output_should_stop_e2e or output_should_stop_mpc
+        if self.pickup_learner is not None and experimental_mlsim:
+          braking = profile_stop_active or output_should_stop or panic_bypass or self.fcw
+          output_a_target_e2e = self.get_learned_pickup(
+            sm, output_a_target_e2e, output_a_target_mpc, braking, v_cruise, comfort_accel_limits[1], action_t,
+            getattr(starpilot_toggles, 'toadpilot_pickup_strength', 'brisk'))
+        output_a_target = min(output_a_target_mpc, output_a_target_e2e)
         cem_following_lead = self.is_cem_following_lead(
           tracking_lead,
           self.lead_one.dRel,

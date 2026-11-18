@@ -19,19 +19,15 @@ void ToadPilotApi::request(const QString &path, const QJsonObject &data, bool po
   });
 }
 
-void ToadPilotApi::setAccelerationLearning(bool enabled, Callback done) {
-  request("/toadpilot", {}, false, [this, enabled, done](const QJsonObject &state, const QString &error) {
-    if (!error.isEmpty()) { done(state, error); return; }
-    if (!state.value("environment").toObject().value("offroad_confirmed").toBool()) {
-      done(state, tr("Park before changing acceleration learning."));
-      return;
+void ToadPilotApi::setDrivingPreference(const QString &key, const QJsonValue &choice, Callback done) {
+  request("/toadpilot/driving-preferences", {{key, choice}}, true, [key, choice, done](const QJsonObject &state, QString error) {
+    const auto config = state.value("config").toObject();
+    bool confirmed = config.contains(key) && config.value(key) == choice;
+    if (key == "pickup" && config.value("accel_boost").isBool()) {
+      confirmed = choice.toString() == "off" ? !config.value("accel_boost").toBool()
+          : config.value("accel_boost").toBool() && config.value("modern_longitudinal").toBool() && config.value("pickup_strength") == choice;
     }
-    auto config = state.value("config").toObject();
-    if (config.isEmpty()) { done(state, tr("No saved configuration was received.")); return; }
-    config["accel_boost"] = enabled;
-    config["modern_longitudinal"] = enabled;
-    request("/toadpilot", config, true, [config, done](const QJsonObject &saved, const QString &saveError) {
-      done(saved, !saveError.isEmpty() ? saveError : saved.value("config").toObject() == config ? QString() : tr("The saved settings were not confirmed."));
-    });
+    if (error.isEmpty() && !confirmed) error = tr("Could not confirm the saved choice.");
+    done(state, error);
   });
 }

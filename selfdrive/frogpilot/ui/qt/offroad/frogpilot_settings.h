@@ -55,7 +55,7 @@ signals:
 
 private:
   void closePanel();
-  void createPanelButtons(FrogPilotListWidget *list);
+  void createPanelButtons(FrogPilotListWidget *list, SettingsWindow *settings);
   void hideEvent(QHideEvent *event) override;
   void updateState();
 

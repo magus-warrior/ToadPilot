@@ -381,35 +381,27 @@ void SettingsWindow::showEvent(QShowEvent *event) {
 
 void SettingsWindow::setCurrentPanel(int index, const QString &param) {
   panel_widget->setCurrentIndex(index);
-  nav_btns->buttons()[index]->setChecked(true);
-  if (!param.isEmpty()) {
+  nav_btns->button(index)->setChecked(true);
+  if (index == 4 && param == "DrivingResponse") {
+    emit openDrivingResponse();
+  } else if (index == 2 && !param.isEmpty()) {
     emit expandToggleDescription(param);
   }
 }
 
 SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
 
-  // setup two main layouts
-  sidebar_widget = new QWidget;
-  QVBoxLayout *sidebar_layout = new QVBoxLayout(sidebar_widget);
-  panel_widget = new QStackedWidget();
+  auto *navigation = new QHBoxLayout;
+  navigation->setContentsMargins(0, 0, 0, 0);
+  navigation->setSpacing(14);
+  panel_widget = new QStackedWidget;
+  panel_widget->setObjectName("settingsBody");
 
-  // close button
-  QPushButton *close_btn = new QPushButton(tr("← Back"));
-  close_btn->setStyleSheet(R"(
-    QPushButton {
-      font-size: 50px;
-      border-radius: 25px;
-      background-color: #292929;
-      font-weight: 500;
-    }
-    QPushButton:pressed {
-      background-color: #ADADAD;
-    }
-  )");
-  close_btn->setFixedSize(300, 125);
-  sidebar_layout->addSpacing(10);
-  sidebar_layout->addWidget(close_btn, 0, Qt::AlignRight);
+  auto *close_btn = new QPushButton(tr("← Back"));
+  close_btn->setObjectName("settingsBack");
+  close_btn->setMinimumSize(194, 86);
+  navigation->addWidget(close_btn);
+  navigation->addSpacing(22);
   QObject::connect(close_btn, &QPushButton::clicked, [this]() {
     if (mapboxInstructionsOpen) {
       closeMapBoxInstructions();
@@ -463,24 +455,10 @@ SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
     QPushButton *btn = new QPushButton(name);
     btn->setCheckable(true);
     btn->setChecked(nav_btns->buttons().size() == 0);
-    btn->setStyleSheet(R"(
-      QPushButton {
-        color: grey;
-        border: none;
-        background: none;
-        font-size: 65px;
-        font-weight: 500;
-      }
-      QPushButton:checked {
-        color: white;
-      }
-      QPushButton:pressed {
-        color: #ADADAD;
-      }
-    )");
-    btn->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-    nav_btns->addButton(btn);
-    sidebar_layout->addWidget(btn, 0, Qt::AlignRight);
+    btn->setObjectName("settingsTab");
+    btn->setMinimumHeight(86);
+    nav_btns->addButton(btn, panel_widget->count());
+    navigation->addWidget(btn, 1);
 
     const int lr_margin = name != tr("Network") ? 50 : 0;  // Network panel handles its own margins
     panel->setContentsMargins(lr_margin, 25, lr_margin, 25);
@@ -547,26 +525,28 @@ SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
       panel_widget->setCurrentWidget(w);
     });
   }
-  sidebar_layout->setContentsMargins(50, 50, 100, 50);
-
-  // main settings layout, sidebar + main panel
-  QHBoxLayout *main_layout = new QHBoxLayout(this);
-
-  sidebar_widget->setFixedWidth(500);
-  main_layout->addWidget(sidebar_widget);
-  main_layout->addWidget(panel_widget);
+  auto *spectrum = new QFrame(this);
+  spectrum->setObjectName("settingsSpectrum");
+  spectrum->setFixedHeight(4);
+  auto *main_layout = new QVBoxLayout(this);
+  main_layout->setContentsMargins(32, 24, 32, 20);
+  main_layout->setSpacing(18);
+  main_layout->addLayout(navigation);
+  main_layout->addWidget(spectrum);
+  main_layout->addWidget(panel_widget, 1);
 
   setStyleSheet(R"(
-    * {
-      color: white;
-      font-size: 50px;
+    * { color: white; font-size: 50px; }
+    SettingsWindow { background-color: #0d0a1e; }
+    QStackedWidget#settingsBody, ScrollView { background-color: #1a162c; border-radius: 22px; }
+    QFrame#settingsSpectrum {
+      background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #ff528f,stop:.20 #ffaf5e,
+        stop:.40 #ebf981,stop:.60 #66f3d6,stop:.80 #68a7ff,stop:1 #c377ff);
     }
-    SettingsWindow {
-      background-color: black;
-    }
-    QStackedWidget, ScrollView {
-      background-color: #292929;
-      border-radius: 30px;
-    }
+    QPushButton#settingsTab, QPushButton#settingsBack { color: #d8ceee; background: #211b36;
+      border: 2px solid #4b405f; border-radius: 16px; padding: 0 16px; font-size: 38px; font-weight: 600; }
+    QPushButton#settingsBack { color: #86f6e7; background: #122329; border-color: #385b61; }
+    QPushButton#settingsTab:checked { color: #110c23; background: #d5adff; border-color: #efd8ff; }
+    QPushButton#settingsTab:pressed, QPushButton#settingsBack:pressed { background: #665187; color: white; }
   )");
 }

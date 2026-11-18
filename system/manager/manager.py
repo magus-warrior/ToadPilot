@@ -25,6 +25,20 @@ from openpilot.selfdrive.frogpilot.toadpilot import (latch_toadpilot_steering_re
                                                      persist_toadpilot_torque_last_route)
 
 
+def initialize_defaults(params, params_cache, defaults, reset):
+  for key, default in defaults:
+    current = params.get(key)
+    cached = params_cache.get(key)
+    if reset or current is None:
+      if reset or cached is None:
+        params.put(key, default)
+        params_cache.remove(key)
+      else:
+        params.put(key, cached)
+    elif cached != current:
+      params_cache.put(key, current)
+
+
 def manager_init() -> None:
   save_bootlog()
 
@@ -61,17 +75,8 @@ def manager_init() -> None:
   if params.get_bool("RecordFrontLock"):
     params.put_bool("RecordFront", True)
 
-  # set unset params
-  reset_toggles = params.get_bool("DoToggleReset")
-  for k, v in default_params + [(k, v) for k, v, _ in frogpilot_default_params]:
-    if params.get(k) is None or reset_toggles:
-      if params_cache.get(k) is None or reset_toggles:
-        params.put(k, v)
-        params_cache.remove(k)
-      else:
-        params.put(k, params_cache.get(k))
-    else:
-      params_cache.put(k, params.get(k))
+  initialize_defaults(params, params_cache, default_params + [(k, v) for k, v, _ in frogpilot_default_params],
+                      params.get_bool("DoToggleReset"))
   params.remove("DoToggleReset")
 
   frogpilot_boot_functions(build_metadata, params_cache)

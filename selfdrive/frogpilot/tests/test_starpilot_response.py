@@ -16,9 +16,11 @@ def test_v11_settings_migrate_without_activating_or_losing_existing_takeoff():
   old = asdict(ToadPilotConfig(profile='observe', responsive_takeoff=True, live_steering_delay=True))
   old.pop('starpilot_response')
   old.pop('takeoff_style')
+  old.pop('pickup_strength')
+  old.pop('matched_lead_prediction')
   old['version'] = 11
   config = decode_toadpilot_config(json.dumps(old))
-  assert config.version == 12 and not config.starpilot_response
+  assert config.version == 13 and not config.starpilot_response
   assert config.takeoff_style == 'existing'
   for name, value in old.items():
     if name != 'version':

@@ -7,6 +7,22 @@
 void Sidebar::drawMetric(QPainter &p, const QPair<QString, QString> &label, QColor c, int y) {
   const QRect rect = {30, y, 240, 126};
 
+  if (!onroad) {
+    p.setPen(QPen(QColor("#463958"), 2));
+    p.setBrush(QColor("#211b32"));
+    p.drawRoundedRect(rect, 18, 18);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawEllipse(QPoint(rect.right() - 24, rect.top() + 26), 7, 7);
+    p.setPen(QColor("#c8bcdc"));
+    p.setFont(InterFont(24, QFont::DemiBold));
+    p.drawText(rect.adjusted(19, 10, -27, -68), Qt::AlignLeft | Qt::AlignVCenter, label.first);
+    p.setPen(Qt::white);
+    p.setFont(InterFont(34, QFont::DemiBold));
+    p.drawText(rect.adjusted(19, 48, -10, -8), Qt::AlignLeft | Qt::AlignVCenter, label.second);
+    return;
+  }
+
   p.setPen(Qt::NoPen);
   p.setBrush(QBrush(c));
   p.setClipRect(rect.x() + 4, rect.y(), 18, rect.height(), Qt::ClipOperation::ReplaceClip);
@@ -336,7 +352,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   p.setPen(Qt::NoPen);
   p.setRenderHint(QPainter::Antialiasing);
 
-  p.fillRect(rect(), QColor(57, 57, 57));
+  p.fillRect(rect(), onroad ? QColor(57, 57, 57) : QColor("#151123"));
 
   // buttons
   if (!isSettingsGif) {

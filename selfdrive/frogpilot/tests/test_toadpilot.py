@@ -2,7 +2,7 @@ import json
 import os
 import unittest
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
@@ -72,7 +72,7 @@ class TestToadPilotConfig(unittest.TestCase):
 
   def test_normalizes_valid_config(self):
     config = normalize_toadpilot_config({
-      "version": 12,
+      "version": 13,
       "enabled": True,
       "profile": "full",
       "auto_tune": False,
@@ -151,6 +151,15 @@ class TestToadPilotConfig(unittest.TestCase):
       with self.subTest(config=config), self.assertRaises(ValueError):
         normalize_toadpilot_config(config)
 
+  def test_v12_driving_preferences_migrate_without_resetting_choices(self):
+    original = ToadPilotConfig(profile="full", modern_longitudinal=True, accel_boost=True, starpilot_response=True)
+    legacy = asdict(original)
+    del legacy["matched_lead_prediction"], legacy["pickup_strength"]
+    legacy["version"] = 12
+    self.assertEqual(decode_toadpilot_config(json.dumps(legacy)), original)
+    del legacy["telemetry"]
+    self.assertFalse(decode_toadpilot_config(json.dumps(legacy)).enabled)
+
   def test_invalid_encoded_config_falls_back_to_safe_default(self):
     for raw_config in (b"not-json", b'{"enabled":true,"profile":"unknown"}'):
       with self.subTest(raw_config=raw_config):
@@ -172,7 +181,7 @@ class TestToadPilotConfig(unittest.TestCase):
 
     config = decode_toadpilot_config(json.dumps(legacy))
 
-    self.assertEqual(config.version, 12)
+    self.assertEqual(config.version, 13)
     self.assertTrue(config.enabled)
     self.assertEqual(config.profile, "adaptive")
     self.assertTrue(config.lane_centering_assist)
@@ -199,7 +208,7 @@ class TestToadPilotConfig(unittest.TestCase):
 
     expected = {
       **explicit,
-      "version": 12,
+      "version": 13,
       "smooth_lane_transitions": True,
       "straight_line_smoothing": True,
       "experimental_max_torque": 1500,
@@ -222,7 +231,7 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": False,
     }
 
-    expected = {**explicit, "version": 12, "straight_line_smoothing": True, "experimental_max_torque": 1500,
+    expected = {**explicit, "version": 13, "straight_line_smoothing": True, "experimental_max_torque": 1500,
                 "improved_stop_and_go": True, "automatic_traffic_mode": True, "map_stop_assist": True}
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
@@ -240,7 +249,7 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": False,
     }
 
-    expected = {**explicit, "version": 12, "straight_line_smoothing": True, "experimental_max_torque": 1500,
+    expected = {**explicit, "version": 13, "straight_line_smoothing": True, "experimental_max_torque": 1500,
                 "automatic_traffic_mode": True, "map_stop_assist": True}
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
@@ -259,7 +268,7 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": True,
     }
 
-    expected = {**explicit, "version": 12, "experimental_max_torque": 1500,
+    expected = {**explicit, "version": 13, "experimental_max_torque": 1500,
                 "automatic_traffic_mode": True, "map_stop_assist": True}
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
@@ -279,7 +288,7 @@ class TestToadPilotConfig(unittest.TestCase):
       "telemetry": True,
     }
 
-    expected = {**explicit, "version": 12, "automatic_traffic_mode": True, "map_stop_assist": True}
+    expected = {**explicit, "version": 13, "automatic_traffic_mode": True, "map_stop_assist": True}
     self.assertEqual(decode_toadpilot_config(json.dumps(explicit)), ToadPilotConfig(**expected))
 
   def test_malformed_or_hybrid_v2_config_fails_closed(self):

@@ -163,6 +163,11 @@ def build_model_lead_trajectory(model_lead, radar_lead, v_ego):
   if model_lead is None or radar_lead is None or not bool(getattr(radar_lead, "status", False)):
     return None
 
+  # radard publishes zero model probability when it substitutes an unmatched
+  # radar track. The camera trajectory in that slot belongs to another lead.
+  if getattr(radar_lead, "radar", False) and not (getattr(radar_lead, "modelProb", 0.) > 0.):
+    return None
+
   try:
     if float(model_lead.prob) <= 0.5:
       return None
@@ -955,7 +960,7 @@ class LongitudinalMpc:
   def update(self, radarstate, v_cruise, x, v, a, j, danger_factor, t_follow,
              personality=log.LongitudinalPersonality.standard, tracking_lead=True,
              optional_far_lead_comfort=True, smooth_duplicate_vision=False,
-             stop_x=None, silverado_early_follow=False, modelV2=None,
+             stop_x=None, silverado_early_follow=False, model_leads=(),
              lead_obstacle_bias=(0.0, 0.0), tracked_lead_catchup_headway_margins=None,
              tracked_lead_catchup_bias_gain=None, tracked_lead_catchup_bias_cap=None,
              tracked_lead_catchup_speed_range=None, tracked_lead_catchup_fade_margins=None,
@@ -964,7 +969,6 @@ class LongitudinalMpc:
     lead_one = radarstate.leadOne
     lead_two = radarstate.leadTwo
     self.status = tracking_lead and (lead_one.status or lead_two.status)
-    model_leads = getattr(modelV2, "leadsV3", ()) if modelV2 is not None else ()
     lead_xv_0 = self.process_lead(lead_one, tracking_lead, t_follow=t_follow, lead_index=0,
                                   smooth_duplicate_vision=smooth_duplicate_vision,
                                   model_lead=model_leads[0] if len(model_leads) > 0 else None)

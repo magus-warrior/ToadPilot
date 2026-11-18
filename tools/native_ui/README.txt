@@ -27,6 +27,8 @@ Full UI previews (isolated queues and parameter copies; no model/config saves):
   python3 tools/native_ui/smoke.py
   ABRASAX_PREVIEW_PANEL=models python3 tools/native_ui/smoke.py
   ABRASAX_PREVIEW_PANEL=gas python3 tools/native_ui/smoke.py
+Onroad speed-limit button and curve-display checks (isolated settings):
+  python3 tools/native_ui/test_onroad_controls.py
 TOADPILOT_API may point at an isolated Fleet Manager while developing.
 
 The extra ToadPilot page was removed. FrogPilot's Driving Controls / Driving
@@ -44,10 +46,15 @@ It sends no cruise-cancel commands and makes no live model change. A pending
 request can be cancelled in the model row and expires after 120 seconds. Fleet
 Manager restart also cancels pending requests. No moving-vehicle reboot has been
 performed during validation; tests inject all control states and mock writes.
-The Gas / Brake menu exposes accelerator-override learning. Its switch updates
-learning and its required coordination option together, preserving other config
-fields and confirming the saved response. Below 10 mph the original blended
-planner remains active, preserving the existing hybrid launch / stop-go path.
+Gas / Brake > Driving response offers Planner or Saved boost for takeoff from a
+stop. It displays the saved launch acceleration from Fleet Manager.
+Pickup above 10 mph offers Off, Gentle (+0.10 m/s²) and Brisk
+(+0.20 m/s²) pickup for eligible accelerator presses above 10 mph in
+Experimental Mode. Enabling learning also enables longitudinal coordination.
+Lead forecast selects either the exact camera forecast matched by radar or
+extrapolation from the current lead measurement. Both are saved through Fleet
+Manager while parked. The preview for the settings menu uses
+ABRASAX_PREVIEW_PANEL=controls.
 Legacy steering assistance remains disabled in the saved device configuration.
 
 The onroad status strip shows the model, mode, assistance status and recording
@@ -77,7 +84,8 @@ activated. Never truncate a live queue or mix queue sizes across processes.
 
 Logo: original unmodified PNG from
 https://abrasax.technology/static/img/abrasax_logo.png?v=transparent-20261012
-Used on white backgrounds in offroad home/sidebar and Fleet Manager.
+Used on white backgrounds in the sidebar and Fleet Manager. The parked dashboard
+uses the static rainbow-circuit.jpg artwork from assets/toad_neon.
 The boot surface uses assets/other_images/abrasax_boot_logo.png, rendered from
 the original artwork by tools/native_ui/render_boot_logo.cc with a white
 background and the compositor's portrait orientation. setup_frogpilot installs

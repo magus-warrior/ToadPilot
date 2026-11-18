@@ -96,7 +96,7 @@ TOADPILOT_HIGH_AUTHORITY_BINS = (
   ("0.65-0.80", 0.65, 0.80),
   ("0.80-1.00", 0.80, math.nextafter(1.0, math.inf)),
 )
-TOADPILOT_CONFIG_VERSION = 12
+TOADPILOT_CONFIG_VERSION = 13
 
 TOADPILOT_PROFILES = {
   # Observe keeps the stock controller output unchanged while diagnostics run.
@@ -133,6 +133,8 @@ class ToadPilotConfig:
   live_steering_delay: bool = False
   modern_longitudinal: bool = False
   accel_boost: bool = False
+  pickup_strength: str = "brisk"
+  matched_lead_prediction: bool = True
   hill_compensation: bool = False
   camera_timing_checks: bool = False
   starpilot_response: bool = False
@@ -190,7 +192,10 @@ def normalize_toadpilot_config(data, base=None, partial=False):
   if type(normalized["takeoff_style"]) is not str or normalized["takeoff_style"] not in ("existing", "planner"):
     raise ValueError("Takeoff style must be existing or planner.")
 
-  for field in ("enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
+  if normalized["pickup_strength"] not in ("gentle", "brisk"):
+    raise ValueError("Pickup strength must be gentle or brisk.")
+
+  for field in ("matched_lead_prediction", "enabled", "auto_tune", "lane_centering_assist", "smooth_lane_transitions", "straight_line_smoothing", "improved_stop_and_go",
                 "automatic_traffic_mode", "map_stop_assist", "responsive_takeoff", "smooth_stop_finish", "smooth_braking",
                 "live_steering_delay", "modern_longitudinal", "accel_boost", "hill_compensation", "camera_timing_checks", "starpilot_response",
                 "curve_assist_in_experimental", "smart_saturation_warning", "telemetry"):
@@ -325,6 +330,10 @@ def decode_toadpilot_config(raw):
         if set(data) != _V11_CONFIG_FIELDS:
           raise ValueError("Malformed TOADPILOT version 11 configuration.")
         data = {**data, "version": TOADPILOT_CONFIG_VERSION}
+      if source_version == 12 and set(data) != _V11_CONFIG_FIELDS | {"starpilot_response", "takeoff_style"}:
+        raise ValueError("Malformed TOADPILOT version 12 configuration.")
+      if 1 <= source_version <= 12:
+        data.update(version=TOADPILOT_CONFIG_VERSION, matched_lead_prediction=True, pickup_strength="brisk")
       if 1 <= source_version <= 11:
         data = {**data, "starpilot_response": False, "takeoff_style": "existing"}
       if 1 <= source_version <= 10:
@@ -445,6 +454,8 @@ def config_from_toggles(toggles):
       "live_steering_delay": getattr(toggles, "toadpilot_live_steering_delay", False),
       "modern_longitudinal": getattr(toggles, "toadpilot_modern_longitudinal", False),
       "accel_boost": getattr(toggles, "toadpilot_accel_boost", False),
+      "pickup_strength": getattr(toggles, "toadpilot_pickup_strength", "brisk"),
+      "matched_lead_prediction": getattr(toggles, "toadpilot_matched_lead_prediction", True),
       "hill_compensation": getattr(toggles, "toadpilot_hill_compensation", False),
       "camera_timing_checks": getattr(toggles, "toadpilot_camera_timing_checks", False),
       "starpilot_response": getattr(toggles, "toadpilot_starpilot_response", False),

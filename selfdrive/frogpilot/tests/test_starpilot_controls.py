@@ -248,3 +248,20 @@ def test_speed_limit_adapter_retains_confirmation_and_override_preferences(tmp_p
   sm['carState'].gasPressed=True;sm['carState'].vEgo=25.
   update(ctx,parent,sm,toggles,nav,25.,100.05)
   assert following.overridden_speed==pytest.approx(25. if manual_override else 30.)
+
+
+@pytest.mark.parametrize('show_limits', [True, False])
+def test_speed_limit_toggle_releases_and_restores_active_cruise_cap(tmp_path, show_limits):
+  ctx,parent,_,sm,toggles,nav=controls_setup(tmp_path,force=False)
+  toggles.speed_limit_controller=True
+  toggles.show_speed_limits=show_limits
+  following=ctx.starpilot_vcruise.slc
+  following.target=12.
+  following.delegate=NS(experimental_mode=False,desired_speed_limit=12.,speed_limit_changed=False,
+                        update=lambda *args:None,get_offset=lambda *args:0.,source='Map Data')
+  sm['modelV2'].position.x=(np.asarray(ModelConstants.T_IDXS)*15.).tolist()
+  assert update(ctx,parent,sm,toggles,nav,15.,100.).vCruise==pytest.approx(12.)
+  toggles.speed_limit_controller=False
+  assert update(ctx,parent,sm,toggles,nav,15.,100.05).vCruise==pytest.approx(30.)
+  toggles.speed_limit_controller=True
+  assert update(ctx,parent,sm,toggles,nav,15.,100.10).vCruise==pytest.approx(12.)

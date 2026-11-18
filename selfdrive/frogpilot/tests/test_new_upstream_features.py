@@ -27,9 +27,11 @@ def test_schema_migration_preserves_every_saved_choice_and_defaults_new_features
     old.pop(key)
   old.pop('starpilot_response')
   old.pop('takeoff_style')
+  old.pop('pickup_strength')
+  old.pop('matched_lead_prediction')
   old['version'] = 10
   result = asdict(decode_toadpilot_config(json.dumps(old)))
-  assert result['version'] == 12
+  assert result['version'] == 13
   assert all(result[key] == value for key, value in old.items() if key != 'version')
   assert all(result[key] is False for key in FIELDS)
 

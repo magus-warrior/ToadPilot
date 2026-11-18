@@ -32,7 +32,7 @@ bool nnffLogFileExists(const QString &carFingerprint) {
   return false;
 }
 
-void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
+void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list, SettingsWindow *settings) {
   FrogPilotDevicePanel *frogpilotDevicePanel = new FrogPilotDevicePanel(this);
   FrogPilotLateralPanel *frogpilotLateralPanel = new FrogPilotLateralPanel(this);
   FrogPilotLongitudinalPanel *frogpilotLongitudinalPanel = new FrogPilotLongitudinalPanel(this);
@@ -46,8 +46,8 @@ void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
   FrogPilotWheelPanel *frogpilotWheelPanel = new FrogPilotWheelPanel(this);
 
   std::vector<std::vector<std::tuple<QString, QWidget*>>> panelButtons = {
-    {{tr("MANAGE"), frogpilotSoundsPanel}},
     {{tr("DRIVING MODEL"), frogpilotModelPanel}, {tr("GAS / BRAKE"), frogpilotLongitudinalPanel}, {tr("STEERING"), frogpilotLateralPanel}},
+    {{tr("MANAGE"), frogpilotSoundsPanel}},
     {{tr("MAP DATA"), frogpilotMapsPanel}, {tr("NAVIGATION"), frogpilotNavigationPanel}},
     {{tr("DATA"), new FrogPilotDataPanel(this)}, {tr("DEVICE CONTROLS"), frogpilotDevicePanel}, {tr("UTILITIES"), new FrogPilotUtilitiesPanel(this)}},
     {{tr("APPEARANCE"), frogpilotVisualsPanel}, {tr("THEME"), frogpilotThemesPanel}},
@@ -55,8 +55,8 @@ void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
   };
 
   std::vector<std::tuple<QString, QString, QString>> panelInfo = {
-    {tr("Alerts and Sounds"), tr("FrogPilot settings for alert volumes and custom notifications to stay informed about important driving events."), "../frogpilot/assets/toggle_icons/icon_sound.png"},
     {tr("Driving Controls"), tr("FrogPilot settings for acceleration, braking, and steering."), "../frogpilot/assets/toggle_icons/icon_steering.png"},
+    {tr("Alerts and Sounds"), tr("FrogPilot settings for alert volumes and custom notifications to stay informed about important driving events."), "../frogpilot/assets/toggle_icons/icon_sound.png"},
     {tr("Navigation"), tr("Download map data for <b>Curve Speed Control</b>, <b>Speed Limit Controller</b>, and set up <b>Navigate on openpilot (NOO)</b>."), "../frogpilot/assets/toggle_icons/icon_map.png"},
     {tr("System Management"), tr("Data storage management, debugging tools, device settings, screen behavior settings, system backups, and utilities to maintain, optimize, and troubleshoot FrogPilot."), "../frogpilot/assets/toggle_icons/icon_system.png"},
     {tr("Theme and Appearance"), tr("FrogPilot settings for the current theme, driving-screen, and the overall user interface."), "../frogpilot/assets/toggle_icons/icon_display.png"},
@@ -85,17 +85,39 @@ void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
     }
 
     FrogPilotButtonsControl *panelButton = new FrogPilotButtonsControl(title, description, icon, labels);
-    if (title == tr("Driving Controls")) drivingPanelButtons = panelButton;
+    const bool driving = title == tr("Driving Controls");
+    if (driving) drivingPanelButtons = panelButton;
+    if (driving) {
+      panelButton->setObjectName("drivingMenu");
+      panelButton->setStyleSheet("QFrame#drivingMenu { background: #241a37; border: 2px solid #69537f; border-radius: 24px; }");
+      panelButton->setContentsMargins(15, 0, 15, 0);
+    }
+    const QString menuStyle = QString(R"(
+      QPushButton { font-size: 32px; font-weight: 600; padding: 14px; border-radius: 16px;
+                    color: %1; background: %2; border: 2px solid %3; }
+      QPushButton:pressed { color: #18102b; background: #95f5e5; }
+      QPushButton:disabled { color: #b3a8c0; background: #2c2537; border-color: #504358; }
+    )").arg(driving ? "#b2fff1" : "#eee6ff", driving ? "#1a3441" : "#302443", driving ? "#538e97" : "#635076");
+    for (auto *button : panelButton->findChild<QButtonGroup *>()->buttons()) {
+      button->setMinimumHeight(80);
+      button->setStyleSheet(menuStyle);
+    }
     if (title == tr("System Management")) systemPanelButtons = panelButton;
     if (title == tr("Vehicle Controls")) vehiclePanelButtons = panelButton;
 
-    QObject::connect(panelButton, &FrogPilotButtonsControl::buttonClicked, [this, widgets](int id) {
+    auto openSelectedPanel = [this, widgets](int id) {
       mainLayout->setCurrentWidget(widgets[id]);
 
       panelOpen = true;
 
       openPanel();
-    });
+    };
+    connect(panelButton, &FrogPilotButtonsControl::buttonClicked, this, openSelectedPanel);
+    if (driving) {
+      connect(settings, &SettingsWindow::openDrivingResponse, this, [this, openSelectedPanel] {
+        if (hasOpenpilotLongitudinal) openSelectedPanel(1);
+      });
+    }
 
     list->addItem(panelButton);
   }
@@ -164,7 +186,7 @@ FrogPilotSettingsWindow::FrogPilotSettingsWindow(SettingsWindow *parent) : QFram
   togglePreset->setCheckedButton(params.getInt("TuningLevel"));
   list->addItem(togglePreset, true);
 
-  createPanelButtons(list);
+  createPanelButtons(list, parent);
 
   QObject::connect(parent, &SettingsWindow::closeMapBoxInstructions, this, &FrogPilotSettingsWindow::closeMapBoxInstructions);
   QObject::connect(parent, &SettingsWindow::closeMapSelection, this, &FrogPilotSettingsWindow::closeMapSelection);

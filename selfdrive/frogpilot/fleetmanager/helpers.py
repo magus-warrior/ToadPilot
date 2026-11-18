@@ -28,6 +28,7 @@ import requests
 import subprocess
 import time
 import traceback
+from threading import Lock
 
 import openpilot.system.sentry as sentry
 
@@ -57,7 +58,7 @@ from openpilot.selfdrive.frogpilot.controls.lib.start_accel_ramp import (START_A
                                                                         START_ACCEL_RAMP_STEP,
                                                                         parse_start_accel_ramp,
                                                                         validate_start_accel_ramp)
-from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_FINGERPRINT, TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES,
+from openpilot.selfdrive.frogpilot.toadpilot import (TOADPILOT_CONFIG_VERSION, TOADPILOT_FINGERPRINT, TOADPILOT_LEGACY_STEERING_RESPONSE_PROFILES,
                                                      TOADPILOT_NAVIGATION_STATUS_KEY,
                                                      TOADPILOT_RESET_TUNE_KEY,
                                                      TOADPILOT_STATUS_KEY, TOADPILOT_STEERING_RESPONSE_PROFILE,
@@ -845,6 +846,7 @@ def get_toadpilot_state():
   road_state = _get_toadpilot_road_state()
   return {
     "config": asdict(config),
+    "saved_launch_boost": parse_start_accel_ramp(params.get(START_ACCEL_RAMP_PARAM)),
     "capability": capability,
     "effective_enabled": bool(config.enabled and capability["supported"]),
     "learner": _get_toadpilot_learner(),
@@ -896,7 +898,38 @@ def set_toadpilot_model(data):
   return get_toadpilot_models()
 
 
+_toadpilot_config_lock = Lock()
+
+
+def set_driving_preferences(preferences):
+  if not preferences or set(preferences) - {"pickup", "matched_lead_prediction", "takeoff_style"}:
+    raise ValueError("Choose a driving preference.")
+  fields = {}
+  if "pickup" in preferences:
+    pickup = preferences["pickup"]
+    if pickup not in ("off", "gentle", "brisk"):
+      raise ValueError("Choose Off, Gentle or Brisk pickup.")
+    fields["accel_boost"] = pickup != "off"
+    if pickup != "off":
+      fields.update(modern_longitudinal=True, pickup_strength=pickup)
+  for key in ("matched_lead_prediction", "takeoff_style"):
+    if key in preferences:
+      fields[key] = preferences[key]
+  with _toadpilot_config_lock:
+    _require_toadpilot_offroad()
+    config = normalize_toadpilot_config(fields, base=read_toadpilot_config(params), partial=True)
+    _require_toadpilot_offroad()
+    write_toadpilot_config(config, params)
+    update_frogpilot_toggles()
+    return get_toadpilot_state()
+
+
 def set_toadpilot_config(request_data):
+  with _toadpilot_config_lock:
+    return _save_toadpilot_config(request_data)
+
+
+def _save_toadpilot_config(request_data):
   _require_toadpilot_not_onroad()
 
   request_data = dict(request_data)
@@ -922,9 +955,15 @@ def set_toadpilot_config(request_data):
   if missing_fields:
     raise ValueError(f"Missing TOADPILOT setting(s): {', '.join(sorted(missing_fields))}")
 
-  config = normalize_toadpilot_config(request_data)
+  # Older Fleet pages still submit v12 and omit the new preferences.
+  if type(request_data.get("version")) is int and request_data["version"] == 12:
+    request_data["version"] = TOADPILOT_CONFIG_VERSION
+  current = read_toadpilot_config(params)
+  config = normalize_toadpilot_config(request_data, base=current, partial=True)
+  driving_fields = ("pickup_strength", "matched_lead_prediction", "accel_boost")
+  preference_changed = any(getattr(current, key) != getattr(config, key) for key in driving_fields)
   _require_toadpilot_not_onroad()
-  if steering_request_changed:
+  if steering_request_changed or preference_changed:
     _require_toadpilot_offroad()
   write_toadpilot_config(config, params)
   if steering_request_changed:

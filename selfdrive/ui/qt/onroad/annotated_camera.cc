@@ -7,6 +7,8 @@
 
 #include "common/swaglog.h"
 #include "selfdrive/ui/qt/onroad/buttons.h"
+#include "selfdrive/ui/qt/onroad/curve_status.h"
+#include "selfdrive/ui/qt/onroad/speed_limit_button.h"
 #include "selfdrive/ui/qt/util.h"
 
 // Window that shows camera view and variety of info drawn on top
@@ -23,6 +25,9 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget* par
   // Neokii screen recorder
   screenRecorder = new ScreenRecorder(this);
   buttons_layout->addWidget(screenRecorder);
+
+  auto *speed_limit_btn = new SpeedLimitButton(this);
+  buttons_layout->addWidget(speed_limit_btn);
 
   experimental_btn = new ExperimentalButton(this);
   buttons_layout->addWidget(experimental_btn);
@@ -108,6 +113,14 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
 
   // Update FrogPilot widgets
   updateFrogPilotVariables(alert_height, s.scene);
+  // The dashboard set speed includes a cluster correction. Compare controller
+  // values in the same units so that correction does not look like a curve.
+  cscStatus = s.scene.csc_status && s.scene.enabled && is_cruise_set &&
+              curveSpeedLimited(cs.getVCruise(), s.scene.mtsc_enabled, s.scene.mtsc_speed,
+                                s.scene.vtsc_enabled, s.scene.vtsc_speed);
+  auto *speed_limit_btn = static_cast<SpeedLimitButton *>(findChild<QPushButton *>("speedLimitControllerButton"));
+  speed_limit_btn->updateState(s.scene.longitudinal_control, s.scene.speed_limit_controller);
+  speed_limit_btn->setVisible(s.scene.longitudinal_control && !hideBottomIcons);
 }
 
 void AnnotatedCameraWidget::drawHud(QPainter &p) {
@@ -1032,7 +1045,7 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
   cemStatus = scene.cem_status;
   conditionalStatus = scene.conditional_status;
 
-  cscStatus = scene.csc_status && (setSpeed - mtscSpeed > 1 || setSpeed - vtscSpeed > 1) && is_cruise_set;
+
 
   compass = scene.compass;
 

@@ -2,10 +2,12 @@
 import numpy as np
 import pytest
 
+from openpilot.selfdrive.controls import radard
 from openpilot.selfdrive.frogpilot.tests.test_starpilot_planner import planner_setup, Publisher
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.toad_modeld.artifact import MODELS
 from openpilot.selfdrive.toad_modeld.starpilot_long.adapter import StarPilotPlanner
+from openpilot.selfdrive.toad_modeld.starpilot_long.mpc import T_IDXS
 
 
 def setup_case(tmp_path, *, model='toad-south-carolina', speed=25., experimental=True):
@@ -37,6 +39,90 @@ def step(p, sm, toggles, count=50):
     assert p.mpc.solution_status == 0
     samples.append(publisher.message.longitudinalPlan.aTarget)
   return publisher.message.longitudinalPlan, np.asarray(samples)
+
+
+@pytest.mark.parametrize('stopped_car_ahead', [False, True])
+def test_lead_prediction_tracks_the_vehicle_selected_by_radar(tmp_path, stopped_car_ahead):
+  ego = .8 if stopped_car_ahead else 2.5
+  planner, sm, toggles = setup_case(tmp_path, model='toad-pop-v2', speed=ego)
+  sm['carControl'].longActive = True
+  toggles.lead_detection_probability = .17
+  toggles.allow_far_lead_tracking = False
+  toggles.increased_stopped_distance = 0.
+
+  model = sm['modelV2']
+  model.action.desiredAcceleration = .4
+  moving_distance = 40. if stopped_car_ahead else 18.
+  camera_accel = 0. if stopped_car_ahead else .5
+  horizon = np.asarray(ModelConstants.LEAD_T_IDXS)
+  model_lead = model.init('leadsV3', 2)[0]
+  model_lead.prob = .95
+  model_lead.x = (moving_distance + radard.RADAR_TO_CAMERA + 6. * horizon + .5 * camera_accel * horizon ** 2).tolist()
+  model_lead.y, model_lead.v, model_lead.a = [0.] * 6, (6. + camera_accel * horizon).tolist(), [camera_accel] * 6
+  model_lead.xStd, model_lead.yStd, model_lead.vStd = [1.] * 6, [1.] * 6, [1.] * 6
+
+  kalman = radard.KalmanParams(.05)
+  moving = radard.Track(11, 6., kalman)
+  moving.update(moving_distance, 0., 6. - ego, 6., True)
+  tracks = {11: moving}
+  if stopped_car_ahead:
+    stopped = radard.Track(22, 0., kalman)
+    stopped.update(8., 0., -ego, 0., True)
+    tracks[22] = stopped
+  fused = radard.get_lead(ego, True, tracks, model_lead, ego, model, False, toggles, 0.)
+  sm['radarState'].mdMonoTime = sm.logMonoTime['modelV2'] = 10_000_000_000
+  sm['radarState'].leadOne = fused
+  plan, _ = step(planner, sm, toggles, count=55)
+  position_at_two_seconds = np.interp(2., T_IDXS, planner.mpc.lead_xv_0[:, 0])
+  if stopped_car_ahead:
+    assert fused['radarTrackId'] == 22 and fused['modelProb'] == 0.
+    assert position_at_two_seconds == pytest.approx(8.)
+    assert plan.aTarget < 0.
+  else:
+    assert fused['radarTrackId'] == 11 and fused['modelProb'] > .5
+    # Radar measures a steady 6 m/s. The matched camera forecast accelerates.
+    assert planner.mpc.lead_xv_0[-1, 0] == pytest.approx(moving_distance + 60. + 25.)
+    assert planner.mpc.lead_xv_0[-1, 1] == pytest.approx(11.)
+    assert plan.aTarget > 0.
+
+
+def test_lead_frame_switch_and_measured_mode(tmp_path):
+  planner, sm, toggles = setup_case(tmp_path, model='toad-pop-v2', speed=.8)
+  sm['carControl'].longActive = True
+  radar, model = sm['radarState'], sm['modelV2']
+  model.action.desiredAcceleration = .4
+  lead = radar.leadOne
+  lead.status = lead.radar = True
+  lead.modelProb, lead.dRel, lead.vLead, lead.aLeadTau = .95, 8., 0., 1.5
+  sm.logMonoTime = {'modelV2': 10_000_000_000}
+  radar.mdMonoTime = sm.logMonoTime['modelV2']
+  camera = model.init('leadsV3', 2)[0]
+  camera.prob, camera.x, camera.v = .95, [8.] * 6, [0.] * 6
+  step(planner, sm, toggles, count=55)
+  sm.logMonoTime['modelV2'] += 50_000_000
+  times = np.asarray(ModelConstants.LEAD_T_IDXS)
+  camera.x, camera.v = (40. + 6. * times).tolist(), [6.] * 6
+  plan, _ = step(planner, sm, toggles, count=1)
+  assert np.allclose(planner.mpc.lead_xv_0[:, 0], 8.)
+  assert plan.aTarget < -.05
+  # The old snapshot is owned, even when the incoming message is reused.
+  assert planner.core.matched_leads(planner.state, True)[0].x == (8.,) * 6
+  radar.mdMonoTime = sm.logMonoTime['modelV2']
+  lead.dRel = 40.
+  lead.vLead = lead.vLeadK = 6.
+  camera.x, camera.v = (40. + 6. * times + .25 * times**2).tolist(), (6. + .5 * times).tolist()
+  radar.mdMonoTime = sm.logMonoTime['modelV2'] = sm.logMonoTime['modelV2'] + 50_000_000
+  sm['modelV2'].position.x = (np.asarray(ModelConstants.T_IDXS) * 8.).tolist()
+  planner.tracking_filter.x = 1.
+  step(planner, sm, toggles, count=1)
+  assert planner.mpc.lead_xv_0[-1, 1] == pytest.approx(11.)
+  toggles.toadpilot_matched_lead_prediction = False
+  step(planner, sm, toggles, count=1)
+  assert planner.mpc.lead_xv_0[-1, 1] == pytest.approx(6.)
+  toggles.toadpilot_matched_lead_prediction = True
+  for offset in (-500_000_000, -1, 1):
+    radar.mdMonoTime = sm.logMonoTime['modelV2'] + offset
+    assert not planner.core.matched_leads(planner.state, True)
 
 
 @pytest.mark.parametrize('model', MODELS)

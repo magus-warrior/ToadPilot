@@ -120,15 +120,15 @@ PairingPopup::PairingPopup(QWidget *parent) : DialogBase(parent) {
 PrimeUserWidget::PrimeUserWidget(QWidget *parent) : QFrame(parent) {
   setObjectName("primeWidget");
   QVBoxLayout *mainLayout = new QVBoxLayout(this);
-  mainLayout->setContentsMargins(56, 40, 56, 40);
-  mainLayout->setSpacing(20);
+  mainLayout->setContentsMargins(28, 12, 28, 12);
+  mainLayout->setSpacing(4);
 
   QLabel *subscribed = new QLabel(tr("✓ SUBSCRIBED"));
-  subscribed->setStyleSheet("font-size: 41px; font-weight: bold; color: #86FF4E;");
+  subscribed->setStyleSheet("font-size: 27px; font-weight: bold; color: #d7f297;");
   mainLayout->addWidget(subscribed);
 
   QLabel *commaPrime = new QLabel(tr("comma prime"));
-  commaPrime->setStyleSheet("font-size: 75px; font-weight: bold;");
+  commaPrime->setStyleSheet("font-size: 36px; font-weight: bold;");
   mainLayout->addWidget(commaPrime);
 }
 
@@ -181,16 +181,16 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
   QFrame* finishRegistration = new QFrame;
   finishRegistration->setObjectName("primeWidget");
   QVBoxLayout* finishRegistationLayout = new QVBoxLayout(finishRegistration);
-  finishRegistationLayout->setSpacing(38);
-  finishRegistationLayout->setContentsMargins(64, 48, 64, 48);
+  finishRegistationLayout->setSpacing(14);
+  finishRegistationLayout->setContentsMargins(28, 22, 28, 22);
 
   QLabel* registrationTitle = new QLabel(tr("Finish Setup"));
-  registrationTitle->setStyleSheet("font-size: 75px; font-weight: bold;");
+  registrationTitle->setStyleSheet("font-size: 40px; font-weight: bold;");
   finishRegistationLayout->addWidget(registrationTitle);
 
   QLabel* registrationDescription = new QLabel(tr("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."));
   registrationDescription->setWordWrap(true);
-  registrationDescription->setStyleSheet("font-size: 50px; font-weight: light;");
+  registrationDescription->setStyleSheet("font-size: 30px; color: #d4c8e5; font-weight: 400;");
   finishRegistationLayout->addWidget(registrationDescription);
 
   finishRegistationLayout->addStretch();
@@ -198,14 +198,14 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
   QPushButton* pair = new QPushButton(tr("Pair device"));
   pair->setStyleSheet(R"(
     QPushButton {
-      font-size: 55px;
+      font-size: 30px;
       font-weight: 500;
-      border-radius: 10px;
-      background-color: #465BEA;
-      padding: 64px;
+      border-radius: 16px;
+      background-color: #65428b;
+      padding: 16px;
     }
     QPushButton:pressed {
-      background-color: #3049F4;
+      background-color: #815aa7;
     }
   )");
   finishRegistationLayout->addWidget(pair);
@@ -223,7 +223,7 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
   QWidget *content = new QWidget;
   QVBoxLayout *content_layout = new QVBoxLayout(content);
   content_layout->setContentsMargins(0, 0, 0, 0);
-  content_layout->setSpacing(30);
+  content_layout->setSpacing(14);
 
   primeUser = new PrimeUserWidget;
   content_layout->addWidget(primeUser);
@@ -240,8 +240,8 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
 
   setStyleSheet(R"(
     #primeWidget {
-      border-radius: 10px;
-      background-color: #333333;
+      border-radius: 16px;
+      background-color: #201930;
     }
   )");
 

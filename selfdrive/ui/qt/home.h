@@ -33,7 +33,9 @@ private:
   Params params;
 
   QTimer* timer;
-  ElidedLabel* version;
+  ElidedLabel* modelName;
+  QLabel* vehicleName;
+  QPushButton* gasBrake;
   QStackedLayout* center_layout;
   UpdateAlert *update_widget;
   OffroadAlert* alerts_widget;

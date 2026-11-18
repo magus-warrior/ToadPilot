@@ -28,7 +28,14 @@ class AccelBoost:
     self.boost_this_override = 0.0
     self.boost_eligible = False
 
-  def update(self, enabled, gas_pressed, v_ego, model_accel, mpc_accel, cruise_accel, dt):
+  def cancel_override(self):
+    """Require a new pedal press after an interruption, retaining previously earned boost."""
+    self.boost_eligible = False
+    self.boost_this_override = 0.0
+
+  def update(self, enabled, gas_pressed, v_ego, model_accel, mpc_accel, cruise_accel, dt, strength="brisk"):
+    limit = 0.1 if strength == "gentle" else 0.2
+    self.total_boost = min(self.total_boost, limit)
     speed_scale = float(np.interp(v_ego, [ACCEL_LEARNING_MIN_SPEED, 2 * ACCEL_LEARNING_MIN_SPEED], [0.0, 1.0]))
     boost_scale = speed_scale * float(np.interp(model_accel, [-1.0, -0.5, 5.0], [0.0, 1.0, 1.0], right=0.0))
     model_limited = model_accel + self.total_boost * boost_scale < min(mpc_accel, cruise_accel) - 0.1
@@ -39,7 +46,7 @@ class AccelBoost:
       self.total_boost = 0.0
     elif gas_pressed and self.boost_eligible:
       increase = max(0.0, min(0.025 * dt * speed_scale,
-                              0.05 - self.boost_this_override, 0.2 - self.total_boost))
+                              0.05 - self.boost_this_override, limit - self.total_boost))
       self.total_boost += increase
       self.boost_this_override += increase
     return model_accel + self.total_boost * boost_scale
@@ -55,7 +62,7 @@ class LongitudinalCoordinator:
     self.boost = AccelBoost()
 
   def update(self, *, mpc_accel, mpc_stop, mpc_source, action, v_ego, v_cruise,
-             minimum, maximum, dt, boost_enabled, enabled, gas_pressed, brake_pressed):
+             minimum, maximum, dt, boost_enabled, enabled, gas_pressed, brake_pressed, strength="brisk"):
     model_accel = float(action.desiredAcceleration)
     if (not action.longitudinalValid or minimum > maximum or dt <= 0 or
         not all(math.isfinite(v) for v in (mpc_accel, model_accel, v_ego, v_cruise, minimum, maximum, dt))):
@@ -67,7 +74,7 @@ class LongitudinalCoordinator:
     jerk = float(np.interp(v_ego, [0., 10., 25., 40.], [1.6, 1.2, 0.8, 0.6]))
     self.cruise_accel = float(np.clip(target, self.cruise_accel - jerk * dt, self.cruise_accel + jerk * dt))
     model_accel = self.boost.update(boost_enabled and enabled and not brake_pressed and not action.shouldStop,
-                                    gas_pressed, v_ego, model_accel, mpc_accel, self.cruise_accel, dt)
+                                    gas_pressed, v_ego, model_accel, mpc_accel, self.cruise_accel, dt, strength)
     candidates = [(mpc_accel, mpc_source), (self.cruise_accel, 'cruise'), (model_accel, 'e2e')]
     accel, source = min(candidates, key=lambda candidate: candidate[0])
     stop = bool(mpc_stop or action.shouldStop or (v_ego < 0.3 and self.cruise_accel < 0.1))

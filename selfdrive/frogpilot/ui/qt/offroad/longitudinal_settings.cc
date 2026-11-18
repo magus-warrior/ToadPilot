@@ -6,26 +6,89 @@ FrogPilotLongitudinalPanel::FrogPilotLongitudinalPanel(FrogPilotSettingsWindow *
 
   FrogPilotListWidget *longitudinalList = new FrogPilotListWidget(this);
 
-  learningButton = new ButtonControl(tr("Learn From Accelerator Overrides"), tr("LOADING"),
-    tr("Experimental: learn a small acceleration adjustment when you press the gas because the driving model is holding back. "
-       "Active above 10 mph with a supported model in Experimental Mode. Enables model/cruise/lead coordination; lead and stop requests still limit acceleration. "
-       "The hybrid launch boost setting is separate. Changes apply on the next drive."));
-  learningButton->setEnabled(false);
-  longitudinalList->addItem(learningButton);
-  QObject::connect(learningButton, &ButtonControl::clicked, this, [this] {
-    if (learningRequestPending || uiState()->scene.started) return;
-    if (!learningStateKnown) { refreshAccelerationLearning(); return; }
-    learningRequestPending = true;
-    learningButton->setEnabled(false);
-    learningButton->setValue(tr("Saving…"));
-    learningApi.setAccelerationLearning(!learningEnabled, [this](const QJsonObject &, const QString &error) {
-      learningRequestPending = false;
-      if (!error.isEmpty() && isVisible()) ConfirmationDialog::alert(error, this);
-      refreshAccelerationLearning();
-    });
+  auto *card = new QFrame(longitudinalList);
+  card->setObjectName("drivingResponseCard");
+  card->setStyleSheet(R"(
+    QFrame#drivingResponseCard { background: #231b35; border: 2px solid #66527a; border-radius: 26px; }
+    QLabel { background: transparent; color: #f5edff; }
+    QLabel#responseTitle { font-size: 44px; font-weight: 650; }
+    QLabel#responseLabel { font-size: 36px; font-weight: 600; }
+    QLabel#responseHelp { font-size: 28px; color: #d1c3e2; }
+    QFrame#responseRule { background-color: #66527a; }
+    QPushButton#responseChoice { font-size: 30px; font-weight: 600; color: #eee6ff; background: #342943;
+                                border: 2px solid #705c80; border-radius: 15px; padding: 10px 20px; }
+    QPushButton#responseChoice:checked { color: #11272d; background: #91f4e3; border-color: #bbfff2; }
+    QPushButton#responseChoice:pressed { background: #d7adff; color: #19112b; }
+    QPushButton#responseChoice:disabled:!checked { color: #b4a8c3; }
+    QPushButton#preferenceStatus { color: #d5b8f1; font-size: 25px; background: transparent; border: none; padding: 8px; }
+    QPushButton#preferenceStatus:enabled { color: #91f4e3; text-decoration: underline; }
+  )");
+  auto *cardLayout = new QVBoxLayout(card);
+  cardLayout->setContentsMargins(34, 22, 34, 26);
+  cardLayout->setSpacing(14);
+  auto *header = new QHBoxLayout();
+  auto *title = new QLabel(tr("Driving response"), card);
+  title->setObjectName("responseTitle");
+  header->addWidget(title);
+  header->addStretch();
+  preferenceStatus = new QPushButton(tr("Loading…"), card);
+  preferenceStatus->setObjectName("preferenceStatus");
+  preferenceStatus->setEnabled(false);
+  header->addWidget(preferenceStatus);
+  cardLayout->addLayout(header);
+  connect(preferenceStatus, &QPushButton::clicked, this, &FrogPilotLongitudinalPanel::refreshDrivingPreferences);
+
+  auto addChoices = [&](const QString &name, const QString &help, QButtonGroup &group, const QStringList &choices) {
+    auto *line = new QFrame(card);
+    line->setObjectName("responseRule");
+    line->setFixedHeight(2);
+    cardLayout->addWidget(line);
+    auto *row = new QHBoxLayout();
+    row->setSpacing(12);
+    auto *label = new QLabel(name, card);
+    label->setObjectName("responseLabel");
+    row->addWidget(label, 1);
+    for (int id = 0; id < choices.size(); ++id) {
+      auto *button = new QPushButton(choices[id], card);
+      button->setObjectName("responseChoice");
+      button->setAccessibleName(name + " / " + choices[id]);
+      button->setMinimumHeight(74);
+      button->setCheckable(true);
+      button->setEnabled(false);
+      group.addButton(button, id);
+      row->addWidget(button);
+    }
+    cardLayout->addLayout(row);
+    auto *detail = new QLabel(help, card);
+    detail->setObjectName("responseHelp");
+    detail->setWordWrap(true);
+    cardLayout->addWidget(detail);
+    return label;
+  };
+  addChoices(tr("Takeoff from stop"), tr("Planner follows the requested acceleration. Saved boost applies your launch setting when the planner asks to move."),
+             takeoffGroup, {tr("Planner"), tr("Saved boost")});
+  pickupLabel = addChoices(tr("Pickup above 10 mph"), tr("Learns from accelerator presses in Experimental Mode. Gentle adds up to 0.10 m/s² and Brisk up to 0.20 m/s²."),
+                           pickupGroup, {tr("Off"), tr("Gentle"), tr("Brisk")});
+  addChoices(tr("Lead forecast"), tr("StarPilot can use the camera frame radar matched or predict from the lead’s measured motion."),
+             forecastGroup, {tr("Matched camera"), tr("Measured motion")});
+  longitudinalList->addItem(card);
+  connect(&takeoffGroup, QOverload<int>::of(&QButtonGroup::buttonClicked), this, [this](int id) {
+    saveDrivingPreference("takeoff_style", id == 0 ? QStringLiteral("planner") : QStringLiteral("existing"));
   });
-  QObject::connect(uiState(), &UIState::offroadTransition, this, [this](bool offroad) {
-    learningButton->setEnabled(offroad && !learningRequestPending);
+  connect(&pickupGroup, QOverload<int>::of(&QButtonGroup::buttonClicked), this, [this](int id) {
+    const QStringList choices{"off", "gentle", "brisk"};
+    saveDrivingPreference("pickup", choices.at(id));
+  });
+  connect(&forecastGroup, QOverload<int>::of(&QButtonGroup::buttonClicked), this, [this](int id) {
+    saveDrivingPreference("matched_lead_prediction", id == 0);
+  });
+  connect(uiState(), &UIState::offroadTransition, this, [this](bool offroad) {
+    setPreferenceButtonsEnabled(false);
+    if (offroad && isVisible()) refreshDrivingPreferences();
+    if (!offroad) {
+      preferenceStatus->setText(tr("Park to edit"));
+      preferenceStatus->setEnabled(false);
+    }
   });
 
   ScrollView *longitudinalPanel = new ScrollView(longitudinalList, this);
@@ -616,7 +679,7 @@ FrogPilotLongitudinalPanel::FrogPilotLongitudinalPanel(FrogPilotSettingsWindow *
 }
 
 void FrogPilotLongitudinalPanel::showEvent(QShowEvent *event) {
-  refreshAccelerationLearning();
+  refreshDrivingPreferences();
   frogpilotToggleLevels = parent->frogpilotToggleLevels;
   hasDashSpeedLimits = parent->hasDashSpeedLimits;
   hasPCMCruise = parent->hasPCMCruise;
@@ -629,30 +692,71 @@ void FrogPilotLongitudinalPanel::showEvent(QShowEvent *event) {
   updateToggles();
 }
 
-void FrogPilotLongitudinalPanel::refreshAccelerationLearning() {
-  if (learningRequestPending) return;
-  learningRequestPending = true;
-  learningButton->setEnabled(false);
-  learningApi.request("/toadpilot", {}, false, [this](const QJsonObject &state, const QString &error) {
-    learningRequestPending = false;
-    if (!error.isEmpty()) {
-      learningStateKnown = false;
-      learningButton->setValue(tr("Unavailable"));
-      learningButton->setText(tr("RETRY"));
-      // Retry refresh rather than toggling an unknown state.
-      learningButton->setEnabled(!uiState()->scene.started);
-      return;
+void FrogPilotLongitudinalPanel::setPreferenceButtonsEnabled(bool enabled) {
+  for (auto *group : {&takeoffGroup, &pickupGroup, &forecastGroup}) {
+    for (auto *button : group->buttons()) button->setEnabled(enabled);
+  }
+}
+
+void FrogPilotLongitudinalPanel::showDrivingPreferences(const QJsonObject &state, const QString &error) {
+  preferenceRequestPending = false;
+  const auto config = state.value("config").toObject();
+  const bool parked = !uiState()->scene.started;
+  const QString takeoff = config.value("takeoff_style").toString();
+  const bool known = (takeoff == "planner" || takeoff == "existing") && error.isEmpty() && config.value("matched_lead_prediction").isBool()
+                     && config.value("pickup_strength").isString() && config.value("accel_boost").isBool();
+  const bool editable = parked && known && state.value("environment").toObject().value("offroad_confirmed").toBool();
+  setPreferenceButtonsEnabled(editable);
+  preferenceStatus->setEnabled(parked && !known);
+  if (!known) {
+    for (auto *group : {&takeoffGroup, &pickupGroup, &forecastGroup}) {
+      group->setExclusive(false);
+      if (auto *selected = group->checkedButton()) selected->setChecked(false);
+      group->setExclusive(true);
     }
-    const auto config = state.value("config").toObject();
-    learningStateKnown = true;
-    learningEnabled = config.value("accel_boost").toBool() && config.value("modern_longitudinal").toBool();
-    learningButton->setValue(learningEnabled ? tr("On") : tr("Off"));
-    learningButton->setText(learningEnabled ? tr("DISABLE") : tr("ENABLE"));
-    learningButton->setEnabled(state.value("environment").toObject().value("offroad_confirmed").toBool() && !uiState()->scene.started);
+    preferenceStatus->setText(parked ? tr("Retry settings") : tr("Park to edit"));
+    return;
+  }
+  const auto boost = state.value("saved_launch_boost");
+  auto *boostButton = takeoffGroup.button(1);
+  boostButton->setText(boost.isDouble() ? tr("Saved boost · %1 m/s²").arg(boost.toDouble(), 0, 'f', 2) : tr("Saved boost"));
+  boostButton->setAccessibleName(tr("Takeoff from stop") + " / " + boostButton->text());
+  takeoffGroup.button(takeoff == "planner" ? 0 : 1)->setChecked(true);
+  const bool learns = config.value("accel_boost").toBool() && config.value("modern_longitudinal").toBool();
+  pickupGroup.button(learns ? (config.value("pickup_strength").toString() == "gentle" ? 1 : 2) : 0)->setChecked(true);
+  forecastGroup.button(config.value("matched_lead_prediction").toBool() ? 0 : 1)->setChecked(true);
+  preferenceStatus->setText(editable ? tr("Applies next drive") : tr("Park to edit"));
+}
+
+void FrogPilotLongitudinalPanel::refreshDrivingPreferences() {
+  if (preferenceRequestPending) return;
+  preferenceRequestPending = true;
+  setPreferenceButtonsEnabled(false);
+  preferenceStatus->setEnabled(false);
+  preferenceStatus->setText(tr("Loading…"));
+  drivingApi.request("/toadpilot", {}, false, [this](const QJsonObject &state, const QString &error) {
+    showDrivingPreferences(state, error);
+  });
+}
+
+void FrogPilotLongitudinalPanel::saveDrivingPreference(const QString &key, const QJsonValue &choice) {
+  if (preferenceRequestPending || uiState()->scene.started) return;
+  preferenceRequestPending = true;
+  setPreferenceButtonsEnabled(false);
+  preferenceStatus->setEnabled(false);
+  preferenceStatus->setText(tr("Saving…"));
+  drivingApi.setDrivingPreference(key, choice, [this](const QJsonObject &state, const QString &error) {
+    showDrivingPreferences(state, error);
+    if (!error.isEmpty() && isVisible()) {
+      ConfirmationDialog::alert(error, this);
+      refreshDrivingPreferences();
+    }
   });
 }
 
 void FrogPilotLongitudinalPanel::updateMetric(bool metric, bool bootRun) {
+  pickupLabel->setText(metric ? tr("Pickup above 16 km/h") : tr("Pickup above 10 mph"));
+  for (auto *button : pickupGroup.buttons()) button->setAccessibleName(pickupLabel->text() + " / " + button->text());
   static bool previousMetric;
   if (metric != previousMetric && !bootRun) {
     double distanceConversion = metric ? FOOT_TO_METER : METER_TO_FOOT;

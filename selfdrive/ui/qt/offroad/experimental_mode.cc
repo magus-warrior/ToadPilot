@@ -15,7 +15,7 @@ ExperimentalModeButton::ExperimentalModeButton(QWidget *parent) : QPushButton(pa
   // go to toggles and expand experimental mode description
   connect(this, &QPushButton::clicked, [=]() { emit openSettings(2, "ExperimentalMode"); });
 
-  setFixedHeight(125);
+  setFixedHeight(96);
   QHBoxLayout *main_layout = new QHBoxLayout;
   main_layout->setContentsMargins(horizontal_padding, 0, horizontal_padding, 0);
 
@@ -34,10 +34,9 @@ ExperimentalModeButton::ExperimentalModeButton(QWidget *parent) : QPushButton(pa
     }
 
     QLabel {
-      font-size: 45px;
-      font-weight: 300;
+      font-size: 37px;
+      font-weight: 600;
       text-align: left;
-      font-family: JetBrainsMono;
       color: #000000;
     }
   )");
@@ -49,17 +48,17 @@ void ExperimentalModeButton::paintEvent(QPaintEvent *event) {
   p.setRenderHint(QPainter::Antialiasing);
 
   QPainterPath path;
-  path.addRoundedRect(rect(), 10, 10);
+  path.addRoundedRect(rect(), 16, 16);
 
   // gradient
   bool pressed = isDown();
   QLinearGradient gradient(rect().left(), 0, rect().right(), 0);
   if (experimental_mode) {
-    gradient.setColorAt(0, QColor(255, 155, 63, pressed ? 0xcc : 0xff));
-    gradient.setColorAt(1, QColor(219, 56, 34, pressed ? 0xcc : 0xff));
+    gradient.setColorAt(0, QColor(255, 196, 109, pressed ? 0xcc : 0xff));
+    gradient.setColorAt(1, QColor(255, 121, 156, pressed ? 0xcc : 0xff));
   } else {
-    gradient.setColorAt(0, QColor(20, 255, 171, pressed ? 0xcc : 0xff));
-    gradient.setColorAt(1, QColor(35, 149, 255, pressed ? 0xcc : 0xff));
+    gradient.setColorAt(0, QColor(134, 245, 214, pressed ? 0xcc : 0xff));
+    gradient.setColorAt(1, QColor(123, 191, 255, pressed ? 0xcc : 0xff));
   }
   p.fillPath(path, gradient);
 
@@ -72,5 +71,5 @@ void ExperimentalModeButton::paintEvent(QPaintEvent *event) {
 void ExperimentalModeButton::showEvent(QShowEvent *event) {
   experimental_mode = params.getBool("ExperimentalMode");
   mode_icon->setPixmap(experimental_mode ? experimental_pixmap : chill_pixmap);
-  mode_label->setText(experimental_mode ? tr("EXPERIMENTAL MODE ON") : tr("CHILL MODE ON"));
+  mode_label->setText(experimental_mode ? tr("Experimental mode") : tr("Chill mode"));
 }

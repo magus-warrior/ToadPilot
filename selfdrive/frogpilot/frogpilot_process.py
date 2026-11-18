@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import errno
 import json
 import time
 
@@ -7,7 +8,7 @@ import openpilot.system.sentry as sentry
 
 from cereal import messaging
 from openpilot.common.params import Params
-from openpilot.common.realtime import Priority, config_realtime_process
+from openpilot.common.realtime import Priority, config_realtime_process, set_core_affinity
 from openpilot.common.time import system_time_valid
 
 from openpilot.selfdrive.frogpilot.assets.model_manager import ModelManager, MODEL_DOWNLOAD_ALL_PARAM, MODEL_DOWNLOAD_PARAM
@@ -62,8 +63,25 @@ def update_checks(manually_updated, model_manager, now, sm, theme_manager, frogp
 
   time.sleep(1)
 
+PARKED_CORES = [0, 1, 2, 3]
+
+
+def update_process_affinity(started, onroad_core_selected):
+  if started == onroad_core_selected:
+    return onroad_core_selected
+  try:
+    set_core_affinity([5] if started else PARKED_CORES)
+  except OSError as error:
+    # Retry once hardwared has finished bringing the driving cores online.
+    if started and error.errno == errno.EINVAL:
+      return False
+    raise
+  return started
+
+
 def frogpilot_thread():
-  config_realtime_process(5, Priority.CTRL_LOW)
+  config_realtime_process(PARKED_CORES, Priority.CTRL_LOW)
+  onroad_core_selected = False
 
   error_log = ERROR_LOGS_PATH / "error.txt"
   if error_log.is_file():
@@ -100,6 +118,7 @@ def frogpilot_thread():
     now = datetime.datetime.now()
 
     started = sm["deviceState"].started
+    onroad_core_selected = update_process_affinity(started, onroad_core_selected)
 
     if params_memory.get_bool("FrogPilotTogglesUpdated") or theme_updated:
       frogpilot_variables.update(theme_manager.theme_assets["holiday_theme"], started)

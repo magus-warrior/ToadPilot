@@ -34,10 +34,10 @@ def plannerd_thread():
   cloudlog.info("plannerd is waiting for CarParams")
   params = Params()
   with car.CarParams.from_bytes(params.get("CarParams", block=True)) as msg:
-    CP = msg
+    # Keep an owned copy of the startup parameters for the lifetime of the planner.
+    CP = msg.as_builder()
   cloudlog.info("plannerd got CarParams: %s", CP.carName)
 
-  longitudinal_planner = LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'uiPlan'])
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2',
                             'frogpilotCarState', 'frogpilotPlan'],
