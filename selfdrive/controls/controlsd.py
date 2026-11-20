@@ -939,7 +939,8 @@ class Controls:
         actuators.speed = long_plan.speeds[-1]
 
       if isinstance(self.LaC, FrogPilotCamryTorque):
-        target = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+        requested_curvature = model_v2.action.desiredCurvature
+        target = get_lateral_target_curvature(CC.latActive, self.curvature, requested_curvature)
         self.desired_curvature, self.curvature_limited = clip_curvature(
           CS.vEgo, self.desired_curvature, target, planner_curves=True, roll=lp.roll)
         actuators.curvature = self.desired_curvature
