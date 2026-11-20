@@ -28,6 +28,7 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.selfdrive.controls.lib.frogpilot_camry_torque import FrogPilotCamryTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl, should_stop_for_long_control
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.selfdrive.toad_modeld.path_recovery import ModelPathRecovery, recovery_enabled, recovery_inputs_valid
@@ -198,7 +199,10 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'pid':
       self.LaC = LatControlPID(self.CP, self.CI)
     elif self.CP.lateralTuning.which() == 'torque':
-      self.LaC = LatControlTorque(self.CP, self.CI)
+      if self.CP.carName == "toyota" and self.CP.carFingerprint == TOADPILOT_FINGERPRINT:
+        self.LaC = FrogPilotCamryTorque(self.CP, self.CI)
+      else:
+        self.LaC = LatControlTorque(self.CP, self.CI)
 
     self.starpilot_path_recovery = ModelPathRecovery()
     self.toadpilot_lane_centering = ToadPilotLaneCentering()
@@ -799,6 +803,7 @@ class Controls:
     self.toadpilot_steering_last_publish_monotonic = now_monotonic
 
     payload = {
+      "steering_controller": type(self.LaC).__name__,
       "schema_version": 1,
       "published_at_unix": round(time.time(), 3),
       "route_started_at_unix": round(self.toadpilot_diagnostic_route_started_at_unix, 3),
@@ -860,7 +865,9 @@ class Controls:
     self.curvature = -self.VM.calc_curvature(steer_angle_without_offset, CS.vEgo, lp.roll)
 
     # Update Torque Params
-    if self.CP.lateralTuning.which() == 'torque':
+    if isinstance(self.LaC, FrogPilotCamryTorque):
+      self.LaC.update_tune(self.sm, self.frogpilot_toggles)
+    elif self.CP.lateralTuning.which() == 'torque':
       torque_params = self.sm['liveTorqueParameters']
       if self.sm.all_checks(['liveTorqueParameters']) and (torque_params.useParams or self.frogpilot_toggles.force_auto_tune):
         self.LaC.update_live_torque_params(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered,
@@ -931,86 +938,95 @@ class Controls:
       if len(long_plan.speeds):
         actuators.speed = long_plan.speeds[-1]
 
-      # Steering PID loop and lateral MPC
-      toadpilot_config = config_from_toggles(self.frogpilot_toggles)
-      path_recovery_selected = recovery_enabled(self.CP, self.LaC, self.frogpilot_toggles)
-      centering_requested = (
-        self.toadpilot_lane_centering_capable and toadpilot_config.enabled and
-        toadpilot_config.profile != "observe" and toadpilot_config.lane_centering_assist and not path_recovery_selected
-      )
-      lane_context = (
-        extract_toadpilot_lane_context(model_v2, CS.vEgo, CAMERA_OFFSET)
-        if centering_requested else ToadPilotLaneContext(reason="not_requested")
-      )
-      centering_steer_saturated = toadpilot_steer_saturated(
-        self.steer_limited, self.sm["carOutput"].actuatorsOutput.steer,
-      )
-      straight_requested_curvature = self.toadpilot_straight_line_smoother.update(
-        toadpilot_config,
-        model_v2.action.desiredCurvature,
-        CS.vEgo,
-        CC.latActive and self.toadpilot_lane_centering_capable,
-        CS.steeringPressed,
-        centering_steer_saturated,
-        model_v2.meta.laneChangeState != LaneChangeState.off,
-        CS.leftBlinker or CS.rightBlinker,
-        brake_pressed=CS.brakePressed,
-        longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
-      )
-      requested_curvature = self.toadpilot_lane_centering.update(
-        toadpilot_config,
-        straight_requested_curvature,
-        CS.vEgo,
-        lane_context,
-        CC.latActive and self.toadpilot_lane_centering_capable,
-        CS.steeringPressed,
-        CS.steeringRateDeg,
-        centering_steer_saturated,
-        self.experimental_mode,
-        model_v2.meta.laneChangeState != LaneChangeState.off,
-        CS.leftBlinker or CS.rightBlinker,
-        a_ego=CS.aEgo,
-        brake_pressed=CS.brakePressed,
-        longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
-      )
-      # Default-on recovery for the active StarPilot loop. Keep it before the
-      # existing curvature limiter so jerk/acceleration and Toyota/Panda limits
-      # remain authoritative. Legacy centering options are not required.
-      requested_curvature = self.starpilot_path_recovery.update(
-        model_v2, speed=CS.vEgo, curvature=requested_curvature, now=time.monotonic(),
-        model_time=self.sm.logMonoTime['modelV2'] * 1e-9,
-        model_valid=recovery_inputs_valid(self.sm, CS),
-        enabled=path_recovery_selected, active=CC.latActive, override=CS.steeringPressed,
-        blinker=CS.leftBlinker or CS.rightBlinker, limited=centering_steer_saturated,
-      )
-      # Reset toward the measured curvature while lateral control is inactive so
-      # engagement cannot bypass the curvature-rate limit. Keep TOADPILOT's
-      # requested curvature unchanged whenever lateral control is active.
-      target_curvature = get_lateral_target_curvature(CC.latActive, self.curvature, requested_curvature)
-      self.desired_curvature, self.curvature_limited = clip_curvature(
-        CS.vEgo, self.desired_curvature, target_curvature, self.planner_curves, lp.roll,
-      )
-      # Keep model-curvature limiting distinct from downstream car/safety
-      # clipping (`steer_limited`), which TOADPILOT uses for torque saturation.
-      actuators.curvature = self.desired_curvature
-      if self.CP.lateralTuning.which() == 'torque':
-        self.LaC.update_live_delay(
-          self.sm['liveDelay'], self.sm.valid['liveDelay'] and self.sm.alive['liveDelay'],
-          time.monotonic() - self.sm.logMonoTime['liveDelay'] * 1e-9, self.frogpilot_toggles)
-      toadpilot_centering_status = {
-        **self.toadpilot_lane_centering.snapshot(),
-        **self.toadpilot_straight_line_smoother.snapshot(),
-        **self.starpilot_path_recovery.status,
-        "path_recovery_applied_curvature": self.desired_curvature,
-      }
-      actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
-                                                                             self.steer_limited, self.desired_curvature,
-                                                                             self.curvature_limited,
-                                                                             self.sm['liveLocationKalman'],
-                                                                             model_data=self.sm['modelV2'], frogpilot_toggles=self.frogpilot_toggles,
-                                                                             experimental_mode=self.experimental_mode,
-                                                                             toadpilot_longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
-                                                                             toadpilot_centering_status=toadpilot_centering_status)
+      if isinstance(self.LaC, FrogPilotCamryTorque):
+        target = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+        self.desired_curvature, self.curvature_limited = clip_curvature(
+          CS.vEgo, self.desired_curvature, target, planner_curves=True, roll=lp.roll)
+        actuators.curvature = self.desired_curvature
+        actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(
+          CC.latActive, CS, self.VM, lp, self.steer_limited, self.desired_curvature, self.curvature_limited,
+          self.LaC.delay(self.sm), self.sm['liveLocationKalman'], model_v2, self.frogpilot_toggles)
+      else:
+        # Steering PID loop and lateral MPC
+        toadpilot_config = config_from_toggles(self.frogpilot_toggles)
+        path_recovery_selected = recovery_enabled(self.CP, self.LaC, self.frogpilot_toggles)
+        centering_requested = (
+          self.toadpilot_lane_centering_capable and toadpilot_config.enabled and
+          toadpilot_config.profile != "observe" and toadpilot_config.lane_centering_assist and not path_recovery_selected
+        )
+        lane_context = (
+          extract_toadpilot_lane_context(model_v2, CS.vEgo, CAMERA_OFFSET)
+          if centering_requested else ToadPilotLaneContext(reason="not_requested")
+        )
+        centering_steer_saturated = toadpilot_steer_saturated(
+          self.steer_limited, self.sm["carOutput"].actuatorsOutput.steer,
+        )
+        straight_requested_curvature = self.toadpilot_straight_line_smoother.update(
+          toadpilot_config,
+          model_v2.action.desiredCurvature,
+          CS.vEgo,
+          CC.latActive and self.toadpilot_lane_centering_capable,
+          CS.steeringPressed,
+          centering_steer_saturated,
+          model_v2.meta.laneChangeState != LaneChangeState.off,
+          CS.leftBlinker or CS.rightBlinker,
+          brake_pressed=CS.brakePressed,
+          longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
+        )
+        requested_curvature = self.toadpilot_lane_centering.update(
+          toadpilot_config,
+          straight_requested_curvature,
+          CS.vEgo,
+          lane_context,
+          CC.latActive and self.toadpilot_lane_centering_capable,
+          CS.steeringPressed,
+          CS.steeringRateDeg,
+          centering_steer_saturated,
+          self.experimental_mode,
+          model_v2.meta.laneChangeState != LaneChangeState.off,
+          CS.leftBlinker or CS.rightBlinker,
+          a_ego=CS.aEgo,
+          brake_pressed=CS.brakePressed,
+          longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
+        )
+        # Default-on recovery for the active StarPilot loop. Keep it before the
+        # existing curvature limiter so jerk/acceleration and Toyota/Panda limits
+        # remain authoritative. Legacy centering options are not required.
+        requested_curvature = self.starpilot_path_recovery.update(
+          model_v2, speed=CS.vEgo, curvature=requested_curvature, now=time.monotonic(),
+          model_time=self.sm.logMonoTime['modelV2'] * 1e-9,
+          model_valid=recovery_inputs_valid(self.sm, CS),
+          enabled=path_recovery_selected, active=CC.latActive, override=CS.steeringPressed,
+          blinker=CS.leftBlinker or CS.rightBlinker, limited=centering_steer_saturated,
+        )
+        # Reset toward the measured curvature while lateral control is inactive so
+        # engagement cannot bypass the curvature-rate limit. Keep TOADPILOT's
+        # requested curvature unchanged whenever lateral control is active.
+        target_curvature = get_lateral_target_curvature(CC.latActive, self.curvature, requested_curvature)
+        self.desired_curvature, self.curvature_limited = clip_curvature(
+          CS.vEgo, self.desired_curvature, target_curvature, self.planner_curves, lp.roll,
+        )
+        # Keep model-curvature limiting distinct from downstream car/safety
+        # clipping (`steer_limited`), which TOADPILOT uses for torque saturation.
+        actuators.curvature = self.desired_curvature
+        if self.CP.lateralTuning.which() == 'torque':
+          self.LaC.update_live_delay(
+            self.sm['liveDelay'], self.sm.valid['liveDelay'] and self.sm.alive['liveDelay'],
+            time.monotonic() - self.sm.logMonoTime['liveDelay'] * 1e-9, self.frogpilot_toggles)
+        toadpilot_centering_status = {
+          **self.toadpilot_lane_centering.snapshot(),
+          **self.toadpilot_straight_line_smoother.snapshot(),
+          **self.starpilot_path_recovery.status,
+          "path_recovery_applied_curvature": self.desired_curvature,
+        }
+        actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
+                                                                               self.steer_limited, self.desired_curvature,
+                                                                               self.curvature_limited,
+                                                                               self.sm['liveLocationKalman'],
+                                                                               model_data=self.sm['modelV2'], frogpilot_toggles=self.frogpilot_toggles,
+                                                                               experimental_mode=self.experimental_mode,
+                                                                               toadpilot_longitudinal_stopping=bool(long_plan.shouldStop or self.sm['frogpilotPlan'].forcingStop),
+                                                                               toadpilot_centering_status=toadpilot_centering_status)
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
       if self.sm.recv_frame['testJoystick'] > 0:
