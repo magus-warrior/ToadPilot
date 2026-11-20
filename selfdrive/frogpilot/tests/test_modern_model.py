@@ -33,9 +33,9 @@ class TestModernModel(unittest.TestCase):
 
   def test_v15_curvature_is_acceleration_scaled(self):
     alpha = 1 - math.exp(-0.05 / 0.1)
-    for speed in (1, 10, 30):
+    for speed in (0.5, 1, 2.5, 10, 30):
       curvature, acceleration, stop = convert_action([2.0, 1.0], speed)
-      self.assertAlmostEqual(curvature, alpha * 2.0 / speed ** 2)
+      self.assertAlmostEqual(curvature, alpha * 2.0 / max(2.5, speed) ** 2)
       self.assertAlmostEqual(acceleration, 1 - math.exp(-0.05 / 0.3))
       self.assertFalse(stop)
 

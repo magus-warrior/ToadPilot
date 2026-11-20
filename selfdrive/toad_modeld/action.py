@@ -10,7 +10,8 @@ def convert_action(raw_action, v_ego, previous_curvature=0.0, previous_accel=0.0
   raw_curvature, raw_accel = map(float, raw_action)
   if not all(math.isfinite(v) for v in (raw_curvature, raw_accel, v_ego, previous_curvature, previous_accel)):
     raise ValueError('Non-finite RDF4 action')
-  curvature = raw_curvature / max(1.0, v_ego) ** 2
+  # FrogPilot uses a 2.5 m/s floor for the acceleration action head at takeoff.
+  curvature = raw_curvature / max(2.5, v_ego) ** 2
   lat_alpha = 1 - math.exp(-MODEL_DT / LAT_SMOOTH_SECONDS)
   long_alpha = 1 - math.exp(-MODEL_DT / LONG_SMOOTH_SECONDS)
   curvature = (lat_alpha * curvature + (1 - lat_alpha) * previous_curvature) if v_ego > 0.3 else previous_curvature
