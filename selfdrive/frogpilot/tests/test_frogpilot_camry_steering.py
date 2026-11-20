@@ -2,6 +2,8 @@ from types import SimpleNamespace as State
 
 import pytest
 
+from cereal import car
+
 from openpilot.selfdrive.controls.lib.frogpilot_camry_torque import FrogPilotCamryTorque
 
 
@@ -35,3 +37,16 @@ def test_friction_is_in_lateral_acceleration_units_and_bad_tune_is_ignored():
   assert ctrl.pid.pos_limit == 2.5 and ctrl.pid.neg_limit == -2.5
   ctrl.update_live_torque_params(float("nan"), 0., .2)
   assert ctrl.pid.pos_limit == 2.5 and ctrl.torque_params.friction == .1
+
+
+@pytest.mark.parametrize("curvature", [-.001, 0., .001])
+def test_active_camry_command_serializes(curvature):
+  ctrl = controller()
+  state = State(vEgo=12., steeringAngleDeg=0., steeringPressed=False, steeringTorque=0.)
+  vm = State(calc_curvature=lambda angle, speed, roll: 0.)
+  params = State(angleOffsetDeg=0., roll=0.)
+  command = car.CarControl.new_message()
+  command.actuators.steer, command.actuators.steeringAngleDeg, _ = ctrl.update(
+    True, state, vm, params, False, curvature, False, .22, None, None, None)
+  with car.CarControl.from_bytes(command.to_bytes()) as decoded:
+    assert decoded.actuators.steer == pytest.approx(command.actuators.steer)

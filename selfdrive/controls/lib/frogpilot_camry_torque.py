@@ -150,4 +150,4 @@ class FrogPilotCamryTorque(LatControl):
     # TODO left is positive in this convention
     steer = self.yield_to_driver(-output_torque, active, CS, lat_delay)
     pid_log.output = float(steer)
-    return steer, 0.0, pid_log
+    return float(steer), 0.0, pid_log
