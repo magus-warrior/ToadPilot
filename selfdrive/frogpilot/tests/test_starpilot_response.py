@@ -76,6 +76,49 @@ def test_steering_offset_fades_at_creep_and_output_stays_bounded():
   assert out == 0. and not data['valid']
 
 
+@pytest.mark.parametrize('direction', [-1, 1])
+def test_driver_can_countersteer_through_response_delay(direction):
+  response = SteeringResponse()
+  # Curvatures and speed at 10:45:05.594, mirrored for the opposite direction.
+  args = dict(active=True, speed=2.80, desired_curvature=.00399 * direction,
+              measured_curvature=.00986 * direction, roll=0., delay=.22, factor=2.37,
+              offset=0., friction=.13, deadzone=0., steer_max=1., limited=False, override=False)
+  for _ in range(100):
+    original, _ = response.update(**args)
+  assert original * direction > .4
+  against = dict(args, override=True, driver_torque=-150 * direction)
+  for _ in range(100):
+    assert response.update(**against)[0] == 0.
+  for _ in range(round(args['delay'] / response.dt)):
+    assert response.update(**args)[0] == 0.
+  assert response.update(**args)[0] == pytest.approx(original)
+  assert response.update(**against)[0] == 0.
+  # A deliberate reversal gets immediate assistance in the new direction.
+  assert response.update(**dict(against, driver_torque=150 * direction))[0] == pytest.approx(original)
+  assert response.update(**dict(against, driver_torque=0.))[0] == 0.
+  assert response.update(**dict(args, active=False))[0] == 0.
+  assert response.update(**args)[0] == pytest.approx(original)
+
+
+@pytest.mark.parametrize('speed', [1.14335, 2.8, 4.99])
+@pytest.mark.parametrize('direction', [-1, 1])
+def test_crawl_uses_frogpilot_current_target_and_gain(speed, direction):
+  response = SteeringResponse()
+  target = direction * .0014
+  measured = direction * .00077
+  args = dict(active=True, speed=speed, measured_curvature=measured, roll=0., delay=.22,
+              factor=2.37, offset=0., friction=.13, deadzone=0., steer_max=1., limited=False, override=False)
+  for _ in range(40):
+    response.update(desired_curvature=-target, **args)
+  out, data = response.update(desired_curvature=target, **args)
+  error = (target - measured) * speed ** 2
+  gain = 1. + ((15. - .2 * speed) / max(speed, 1.)) ** 2
+  ff = target * speed ** 2 + error / .30 * .13 * 2.37
+  assert out == pytest.approx(-(gain * error + ff) / 2.37)
+  assert data['setpoint'] == pytest.approx(target * speed ** 2)
+  assert response.pid.i == 0.
+
+
 @pytest.mark.parametrize('style,expected', [('existing', 1.), ('planner', .3)])
 def test_real_longcontrol_keeps_existing_launch_as_backup_and_honors_new_stops(style, expected):
   cp = NS(enableGasInterceptor=False, startingState=False, stopAccel=-2., startAccel=0.,
@@ -113,6 +156,9 @@ def test_real_linear_camry_controller_uses_new_loop_and_learned_bias(tmp_path):
   control.update(False, state, VehicleModel(cp), params, False, 0., False, None, frogpilot_toggles=toggles)
   output, _, log = control.update(True, state, VehicleModel(cp), params, False, 0., False, None, frogpilot_toggles=toggles)
   assert log.active and output > 0 and math.isfinite(output)
+  state.steeringPressed, state.steeringTorque = True, -150.
+  output, _, log = control.update(True, state, VehicleModel(cp), params, False, 0., False, None, frogpilot_toggles=toggles)
+  assert output == log.output == 0.
 
 
 @pytest.mark.parametrize('speed,offset,roll', [

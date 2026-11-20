@@ -292,7 +292,10 @@ class RadarD:
       self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
-    self.radar_state_valid = sm.all_checks() and len(radar_errors) == 0
+    # The optional traffic-mode plan has a neutral fallback. Its validity
+    # must not invalidate radar tracks from healthy required inputs.
+    self.radar_state_valid = rr is not None and not radar_errors and sm.all_checks(['modelV2', 'carState', 'frogpilotCarState'])
+    plan_valid = sm.all_checks(['frogpilotPlan'])
     self.radar_state = log.RadarState.new_message()
     self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']
     self.radar_state.radarErrors = list(radar_errors)
@@ -306,8 +309,7 @@ class RadarD:
       model_v_ego = self.v_ego
     leads_v3 = sm['modelV2'].leadsV3
     if len(leads_v3) > 1:
-      traffic_mode_blend = (sm['frogpilotPlan'].trafficModeBlend
-                            if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else 0.0)
+      traffic_mode_blend = sm['frogpilotPlan'].trafficModeBlend if plan_valid else 0.0
       self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, traffic_mode_blend, low_speed_override=True)
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'], sm['carState'].standstill, self.frogpilot_toggles, traffic_mode_blend, low_speed_override=False)
 
@@ -316,7 +318,7 @@ class RadarD:
       self.radar_state.leadRight = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=False)
 
     # Update FrogPilot parameters
-    if sm['frogpilotPlan'].togglesUpdated:
+    if plan_valid and sm['frogpilotPlan'].togglesUpdated:
       self.frogpilot_toggles = get_frogpilot_toggles()
 
   def publish(self, pm: messaging.PubMaster, lag_ms: float):

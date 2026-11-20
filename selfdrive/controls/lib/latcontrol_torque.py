@@ -372,7 +372,8 @@ class LatControlTorque(LatControl):
         factor=self.torque_params.latAccelFactor,
         offset=self._bounded_live_value(self.torque_params.latAccelOffset, 0., -0.5, 0.5),
         friction=self.torque_params.friction, deadzone=curvature_deadzone * CS.vEgo ** 2,
-        steer_max=self.steer_max, limited=steer_limited_by_safety, override=CS.steeringPressed)
+        steer_max=self.steer_max, limited=steer_limited_by_safety, override=CS.steeringPressed,
+        driver_torque=CS.steeringTorque if CS.steeringPressed else 0.)
       self.pid.reset()
       self.toadpilot_assist.reset(desired_curvature)
       controller = self.starpilot_response.pid
