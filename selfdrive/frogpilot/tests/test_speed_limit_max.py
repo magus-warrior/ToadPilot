@@ -290,3 +290,23 @@ def test_map_expiry_fallback_and_offset_bands(tmp_path, monkeypatch):
   assert [ctrl.get_offset(n * CV.MPH_TO_MS, cfg) for n in (24, 25, 34, 35, 54, 55, 75)] == [1, 2, 2, 3, 4, 5, 7]
   cfg.is_metric = True
   assert [ctrl.get_offset(n * CV.KPH_TO_MS, cfg) for n in (29, 30, 49, 50, 99, 100, 140)] == [1, 2, 2, 3, 5, 6, 7]
+
+
+@pytest.mark.parametrize("fallback_mph", [19, 80])
+def test_camry_keeps_sign_and_offset_through_disengaged_source_gap(tmp_path, monkeypatch, fallback_mph):
+  monkeypatch.setattr(slc, "params", Params(str(tmp_path / "params")))
+  controller = slc.SpeedLimitController()
+  cfg = NS(car_model="TOYOTA_CAMRY_TSS2", speed_limit_controller=True, is_metric=False,
+           slc_fallback_set_speed=True, speed_limit_offset3=5 * CV.MPH_TO_MS)
+  sign = 40 * CV.MPH_TO_MS
+  fallback = fallback_mph * CV.MPH_TO_MS
+  controller.source = "Dashboard"
+  controller.desired_speed_limit = sign
+  assert sum(controller.resolve_accepted_limit(sign, cfg, True)) * CV.MS_TO_MPH == pytest.approx(45)
+
+  controller.source = "None"
+  for engaged in (False, True):
+    held = controller.resolve_accepted_limit(fallback, cfg, engaged)
+    assert sum(held) * CV.MS_TO_MPH == pytest.approx(45)
+  cfg.speed_limit_controller = False
+  assert controller.resolve_accepted_limit(fallback, cfg, False) == (fallback, 0.)

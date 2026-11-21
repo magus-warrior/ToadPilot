@@ -90,14 +90,17 @@ class SpeedLimitController:
     return 0.
 
   def resolve_accepted_limit(self, target, toggles, engaged):
-    if not engaged:
+    sign_owns_max = (getattr(toggles, "car_model", None) == "TOYOTA_CAMRY_TSS2" and
+                     getattr(toggles, "speed_limit_controller", False))
+    if not (engaged or sign_owns_max):
       self.accepted_limit = None
-    elif self.source == "None" and self.accepted_limit is not None and toggles.slc_fallback_set_speed:
+    elif self.source == "None" and self.accepted_limit is not None and (
+        toggles.slc_fallback_set_speed or (sign_owns_max and getattr(toggles, "slc_fallback_previous_speed_limit", False))):
       # A temporary source gap cannot release an accepted cap back to a higher MAX.
       # Keep the offset with its posted value so it is applied exactly once.
       return self.accepted_limit
     resolved = (target, self.get_offset(target, toggles))
-    if (engaged and self.source != "None" and not self.speed_limit_changed and target > 1
+    if ((engaged or sign_owns_max) and self.source != "None" and not self.speed_limit_changed and target > 1
         and math.isclose(target, self.desired_speed_limit, abs_tol=0.01)):
       self.accepted_limit = resolved
     return resolved
