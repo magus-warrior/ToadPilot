@@ -572,7 +572,6 @@ class StarPilotVCruise:
     slc_active = starpilot_toggles.speed_limit_controller
     slc_display_only = not slc_active and starpilot_toggles.show_speed_limits
     self.slc.update(
-      sm["starpilotCarState"].dashboardSpeedLimit, now, time_validated,
       v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm,
       active=slc_active, display_only=slc_display_only,
     )

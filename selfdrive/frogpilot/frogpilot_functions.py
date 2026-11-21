@@ -7,12 +7,9 @@ import glob
 import os
 import shutil
 import subprocess
-import tarfile
 import threading
 import time
-import zstandard as zstd
 
-from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.time import system_time_valid
 from openpilot.system.hardware import HARDWARE
@@ -22,54 +19,18 @@ from openpilot.selfdrive.frogpilot.assets.theme_manager import HOLIDAY_THEME_PAT
 from openpilot.selfdrive.frogpilot.frogpilot_utilities import delete_file, run_cmd
 from openpilot.selfdrive.frogpilot.frogpilot_variables import ERROR_LOGS_PATH, EXCLUDED_KEYS, MODELS_PATH, THEME_SAVE_PATH, FrogPilotVariables, frogpilot_default_params, get_frogpilot_toggles, params
 
-def backup_directory(backup, destination, success_message, fail_message, minimum_backup_size=0, compressed=False):
+def backup_directory(backup, destination, success_message, fail_message):
   in_progress_destination = destination.parent / (destination.name + "_in_progress")
   in_progress_destination.mkdir(parents=True, exist_ok=True)
-
-  if compressed:
-    destination_compressed = destination.parent / (destination.name + ".tar.zst")
-    if destination_compressed.exists():
-      delete_file(in_progress_destination)
-      print("Backup already exists. Aborting...")
-      return
-
-    run_cmd(["sudo", "rsync", "-avq", f"{backup}/.", in_progress_destination], "", fail_message, report=False)
-
-    tar_file = destination.parent / (destination.name + "_in_progress.tar")
-    with tarfile.open(tar_file, "w") as tar:
-      tar.add(in_progress_destination, arcname=destination.name)
-
+  if destination.exists():
     delete_file(in_progress_destination)
+    print("Backup already exists. Aborting...")
+    return
 
-    compressed_file = destination.parent / (destination.name + "_in_progress.tar.zst")
-    with open(compressed_file, "wb") as f:
-      cctx = zstd.ZstdCompressor(level=2)
-      with open(tar_file, "rb") as tar_f:
-        with cctx.stream_writer(f) as compressor:
-          while True:
-            chunk = tar_f.read(65536)
-            if not chunk:
-              break
-            compressor.write(chunk)
+  run_cmd(["sudo", "rsync", "-avq", f"{backup}/.", in_progress_destination], success_message, fail_message, report=False)
+  in_progress_destination.rename(destination)
 
-    tar_file.unlink(missing_ok=True)
-
-    compressed_file.rename(destination_compressed)
-    print(f"Backup saved: {destination_compressed}")
-
-    compressed_backup_size = destination_compressed.stat().st_size
-    if minimum_backup_size == 0 or compressed_backup_size < minimum_backup_size:
-      params.put_int("MinimumBackupSize", compressed_backup_size)
-  else:
-    if destination.exists():
-      delete_file(in_progress_destination)
-      print("Backup already exists. Aborting...")
-      return
-
-    run_cmd(["sudo", "rsync", "-avq", f"{backup}/.", in_progress_destination], success_message, fail_message, report=False)
-    in_progress_destination.rename(destination)
-
-def cleanup_backups(directory, limit, compressed=False):
+def cleanup_backups(directory, limit):
   directory.mkdir(parents=True, exist_ok=True)
 
   for in_progress in directory.glob("*_in_progress*"):
@@ -78,18 +39,6 @@ def cleanup_backups(directory, limit, compressed=False):
   backups = sorted(directory.glob("*_auto*"), key=lambda x: x.stat().st_mtime, reverse=True)
   for oldest_backup in backups[limit:]:
     delete_file(oldest_backup)
-
-def backup_frogpilot(build_metadata):
-  backup_path = Path("/data/backups")
-  maximum_backups = 3
-  cleanup_backups(backup_path, maximum_backups, compressed=True)
-
-  _, _, free = shutil.disk_usage(backup_path)
-  minimum_backup_size = params.get_int("MinimumBackupSize")
-  if free > minimum_backup_size * maximum_backups:
-    directory = Path(BASEDIR)
-    destination_directory = backup_path / f"{build_metadata.channel}_{build_metadata.openpilot.git_commit_date[12:-16]}_auto"
-    backup_directory(directory, destination_directory, f"Successfully backed up FrogPilot to {destination_directory}", f"Failed to backup FrogPilot to {destination_directory}", minimum_backup_size, compressed=True)
 
 def backup_toggles(params_cache):
   params_backup = Params("/data/params_backup")
@@ -140,7 +89,7 @@ def frogpilot_boot_functions(build_metadata, params_cache):
 
     subprocess.run(["pkill", "-SIGUSR1", "-f", "system.updated.updated"], check=False)
 
-    backup_frogpilot(build_metadata)
+    # Full software snapshots are created on request in Data Management.
     backup_toggles(params_cache)
 
   threading.Thread(target=backup_thread, daemon=True).start()

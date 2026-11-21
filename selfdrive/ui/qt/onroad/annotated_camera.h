@@ -8,6 +8,8 @@
 
 #include "selfdrive/frogpilot/screenrecorder/screenrecorder.h"
 
+class SpeedLimitButton;
+
 class PedalIcons : public QWidget {
   Q_OBJECT
 
@@ -51,7 +53,8 @@ private:
   void drawText(QPainter &p, int x, int y, const QString &text, int alpha = 255, bool overridePen = false);
 
   QVBoxLayout *main_layout;
-  ExperimentalButton *experimental_btn;
+  QRect setSpeedRect() const;
+  SpeedLimitButton *speed_limit_btn;
   QPixmap dm_img;
   float speed;
   QString speedUnit;
@@ -132,7 +135,6 @@ private:
   bool hideMapIcon;
   bool hideMaxSpeed;
   bool hideSpeed;
-  bool hideSpeedLimit;
   bool lateralPaused;
   bool leadInfo;
   bool leftCurve;
@@ -149,12 +151,12 @@ private:
   bool stscControllingCurve;
   bool stscEnabled;
   bool trafficMode;
+  bool turnArrows = false;
   bool turnSignalAnimation;
   bool turnSignalLeft;
   bool turnSignalRight;
   bool useStockColors;
   bool useSI;
-  bool useVienna;
   bool vtscControllingCurve;
   bool vtscEnabled;
 
@@ -174,7 +176,7 @@ private:
   float vtscSpeed;
 
   int alertHeight;
-  int animationFrameIndex;
+  int animationFrameIndex = 0;
   int cameraView;
   int conditionalStatus;
   int desiredFollow;

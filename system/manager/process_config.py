@@ -61,6 +61,9 @@ def run_tinygrad_modeld(started, params, CP: car.CarParams, classic_model, tinyg
 def run_toad_modeld(started, params, CP: car.CarParams, classic_model, tinygrad_model, frogpilot_toggles) -> bool:
   return started and is_modern_model(frogpilot_toggles)
 
+def run_crosswalk_observer(started, params, CP, classic_model, tinygrad_model, frogpilot_toggles):
+  return started and CP.carFingerprint == "TOYOTA_CAMRY_TSS2" and getattr(frogpilot_toggles, "toadpilot_telemetry", False)
+
 def run_toad_lagd(started, params, CP, classic_model, tinygrad_model, frogpilot_toggles):
   return (started and is_modern_model(frogpilot_toggles) and
           getattr(frogpilot_toggles, "toadpilot_live_steering_delay", False) is True)
@@ -118,6 +121,7 @@ procs = [
   # FrogPilot processes
   NativeProcess("classic_modeld", "selfdrive/classic_modeld", ["./classic_modeld"], run_classic_modeld),
   PythonProcess("fleet_manager", "selfdrive.frogpilot.fleetmanager.fleet_manager", always_run),
+  PythonProcess("toad_crosswalk_observer", "selfdrive.frogpilot.crosswalk_observer", run_crosswalk_observer),
   PythonProcess("toad_diagnostics", "selfdrive.frogpilot.diagnostics", always_run),
   PythonProcess("frogpilot_process", "selfdrive.frogpilot.frogpilot_process", always_run),
   PythonProcess("mapd", "selfdrive.frogpilot.navigation.mapd", always_run),

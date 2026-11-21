@@ -15,6 +15,9 @@ V_CRUISE_UNSET = 255
 V_CRUISE_INITIAL = 40
 V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 105
 IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding errors incrementing set speed
+# Cluster and PCM set speeds arrive on separate CAN messages. A difference
+# larger than a five-mph cruise step is not a cluster calibration.
+MAX_PCM_CLUSTER_GAP_KPH = 5 * CV.MPH_TO_KPH
 
 MIN_SPEED = 1.0
 CONTROL_N = 17
@@ -40,12 +43,41 @@ CRUISE_INTERVAL_SIGN = {
 }
 
 
+def posted_cruise_target(plan, is_metric):
+  """Return the accepted posted limit and offset-adjusted MAX in km/h."""
+  if plan is None or plan.speedLimitChanged or plan.slcSpeedLimitSource not in ("Map Data", "Dashboard", "Navigation"):
+    return None
+  limit = plan.slcSpeedLimit
+  candidate = plan.unconfirmedSlcSpeedLimit
+  if not (1 < limit <= V_CRUISE_MAX * CV.KPH_TO_MS and math.isfinite(candidate)):
+    return None
+  # Both 40 km/h from navigation and 25 mph from the dash read as 25 on
+  # an imperial sign. Changing sources in that zone must preserve the MAX.
+  units = CV.MS_TO_KPH if is_metric else CV.MS_TO_MPH
+  posted = round(limit * units)
+  if round(candidate * units) != posted:
+    return None
+  posted_kph = posted * (1. if is_metric else CV.MPH_TO_KPH)
+  target = posted_kph + plan.slcSpeedLimitOffset * CV.MS_TO_KPH
+  if not math.isfinite(target) or target <= 0:
+    return None
+  return round(posted_kph, 1), clip(round(target, 1), V_CRUISE_MIN, V_CRUISE_MAX)
+
+
+def toyota_sign_controls_max(CP, toggles):
+  return (getattr(toggles, "speed_limit_controller", False) and CP.carName == "toyota"
+          and CP.pcmCruise and CP.openpilotLongitudinalControl)
+
+
 class VCruiseHelper:
   def __init__(self, CP):
     self.CP = CP
     self.v_cruise_kph = V_CRUISE_UNSET
     self.v_cruise_cluster_kph = V_CRUISE_UNSET
     self.v_cruise_kph_last = 0
+    self.last_posted_target = None
+    self.pcm_limit_max_kph = None
+    self.pcm_cluster_correction_kph = 0.
     self.button_timers = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0}
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
 
@@ -53,26 +85,87 @@ class VCruiseHelper:
   def v_cruise_initialized(self):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
-  def update_v_cruise(self, CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles):
+  def update_v_cruise(self, CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles, posted_target=None):
     self.v_cruise_kph_last = self.v_cruise_kph
+    if toyota_sign_controls_max(self.CP, frogpilot_toggles):
+      self._update_toyota_sign_max(CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles, posted_target)
+      return
 
-    if CS.cruiseState.available:
-      if not self.CP.pcmCruise:
-        # if stock cruise is completely disabled, then we can use our own set speed logic
-        self._update_v_cruise_non_pcm(CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles)
-        self.v_cruise_cluster_kph = self.v_cruise_kph
-        self.update_button_timers(CS, enabled)
-      else:
-        self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
-        self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
-        if CS.cruiseState.speed == 0:
-          self.v_cruise_kph = V_CRUISE_UNSET
-          self.v_cruise_cluster_kph = V_CRUISE_UNSET
+    follow_limits = enabled and self.CP.openpilotLongitudinalControl and frogpilot_toggles.speed_limit_controller
+    if not follow_limits:
+      self.last_posted_target = None
+      self.pcm_limit_max_kph = None
+
+    buttons_enabled = enabled and (not self.CP.pcmCruise or (CS.canValid and CS.cruiseState.enabled))
+    if self.pcm_limit_max_kph is not None and not CS.canValid:
+      self.update_button_timers(CS, False)
+      return
+
+    if not CS.cruiseState.available:
+      self.v_cruise_kph = self.v_cruise_cluster_kph = V_CRUISE_UNSET
+      self.update_button_timers(CS, False)
+      return
+
+    if self.CP.pcmCruise and self.pcm_limit_max_kph is None:
+      stock = CS.cruiseState.speed * CV.MS_TO_KPH
+      cluster = CS.cruiseState.speedCluster * CV.MS_TO_KPH
+      if not 0 < stock < V_CRUISE_UNSET:
+        self.v_cruise_kph = self.v_cruise_cluster_kph = V_CRUISE_UNSET
+        self.update_button_timers(CS, False)
+        return
+      self.v_cruise_kph = stock
+      self.v_cruise_cluster_kph = cluster if 0 < cluster < V_CRUISE_UNSET else stock
     else:
-      self.v_cruise_kph = V_CRUISE_UNSET
-      self.v_cruise_cluster_kph = V_CRUISE_UNSET
+      # Once the sign owns a PCM MAX, only the driver's buttons and a newly
+      # accepted sign change it. The ECU can re-broadcast a different set speed.
+      if self.pcm_limit_max_kph is not None:
+        self.v_cruise_kph = self.pcm_limit_max_kph
+      self._update_v_cruise_buttons(CS, buttons_enabled, is_metric, speed_limit_changed, frogpilot_toggles)
+      self.v_cruise_cluster_kph = self.v_cruise_kph
+    self.update_button_timers(CS, buttons_enabled)
 
-  def _update_v_cruise_non_pcm(self, CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles):
+    if (follow_limits and CS.canValid and (not self.CP.pcmCruise or CS.cruiseState.enabled)
+        and 0 < self.v_cruise_cluster_kph < V_CRUISE_UNSET and posted_target is not None
+        and posted_target != self.last_posted_target):
+      if self.CP.pcmCruise and self.pcm_limit_max_kph is None:
+        if abs(self.v_cruise_cluster_kph - self.v_cruise_kph) > MAX_PCM_CLUSTER_GAP_KPH:
+          self.v_cruise_cluster_kph = min(self.v_cruise_kph, self.v_cruise_cluster_kph)
+        self.pcm_cluster_correction_kph = max(0., self.v_cruise_cluster_kph - self.v_cruise_kph)
+      target = posted_target[1]
+      if self.last_posted_target is not None or self.v_cruise_cluster_kph < target - 0.05:
+        self.v_cruise_cluster_kph = target
+      self.last_posted_target = posted_target
+
+    if self.CP.pcmCruise and self.last_posted_target is not None:
+      self.pcm_limit_max_kph = self.v_cruise_cluster_kph
+      self.v_cruise_kph = max(V_CRUISE_MIN, self.pcm_limit_max_kph - self.pcm_cluster_correction_kph)
+    elif not self.CP.pcmCruise:
+      self.v_cruise_kph = self.v_cruise_cluster_kph
+
+  def _update_toyota_sign_max(self, CS, enabled, is_metric, speed_limit_changed, toggles, posted_target):
+    valid = CS.canValid and CS.cruiseState.available and math.isfinite(CS.vEgo)
+    engaged = valid and enabled and CS.cruiseState.enabled
+    if not enabled and self.last_posted_target is None:
+      self.pcm_limit_max_kph = None
+
+    new_sign = valid and posted_target is not None and posted_target != self.last_posted_target
+    if new_sign:
+      self.v_cruise_kph = posted_target[1]
+      self.last_posted_target = posted_target
+    elif self.pcm_limit_max_kph is not None:
+      self.v_cruise_kph = self.pcm_limit_max_kph
+    else:
+      # Preview measured road speed before engagement and hold it until a sign arrives.
+      self.v_cruise_kph = clip(CS.vEgo * CV.MS_TO_KPH, 0., V_CRUISE_MAX) if valid else 0.
+
+    buttons_enabled = engaged and self.pcm_limit_max_kph is not None and not (new_sign or speed_limit_changed)
+    self._update_v_cruise_buttons(CS, buttons_enabled, is_metric, speed_limit_changed, toggles)
+    self.update_button_timers(CS, buttons_enabled)
+    if engaged or self.last_posted_target is not None:
+      self.pcm_limit_max_kph = self.v_cruise_kph
+    self.v_cruise_cluster_kph = self.v_cruise_kph
+
+  def _update_v_cruise_buttons(self, CS, enabled, is_metric, speed_limit_changed, frogpilot_toggles):
     # handle button presses. TODO: this should be in state_control, but a decelCruise press
     # would have the effect of both enabling and changing speed is checked after the state transition
     if not enabled:
@@ -84,7 +177,7 @@ class VCruiseHelper:
     v_cruise_delta = 1. if is_metric else IMPERIAL_INCREMENT
 
     for b in CS.buttonEvents:
-      if b.type.raw in self.button_timers and not b.pressed:
+      if b.type.raw in self.button_timers and self.button_timers[b.type.raw] and not b.pressed:
         if self.button_timers[b.type.raw] > CRUISE_LONG_PRESS:
           return  # end long press
         button_type = b.type.raw
@@ -131,6 +224,11 @@ class VCruiseHelper:
     self.v_cruise_kph = clip(round(self.v_cruise_kph, 1), V_CRUISE_MIN, V_CRUISE_MAX)
 
   def update_button_timers(self, CS, enabled):
+    if not enabled:
+      for button in self.button_timers:
+        self.button_timers[button] = 0
+        self.button_change_states[button]["enabled"] = False
+      return
     # increment timer for buttons still pressed
     for k in self.button_timers:
       if self.button_timers[k] > 0:

@@ -11,39 +11,60 @@
 #include "selfdrive/ui/qt/onroad/speed_limit_button.h"
 #include "selfdrive/ui/qt/util.h"
 
+namespace {
+void drawTurnArrow(QPainter &p, QPoint center, bool left, bool blindSpot) {
+  p.save();
+  p.translate(center);
+  if (!left) p.scale(-1, 1);
+  const QColor accent = blindSpot ? QColor("#ff626a") : QColor("#ffcb67");
+  p.setPen(QPen(accent, 3));
+  p.setBrush(QColor(8, 26, 43, 238));
+  p.drawRoundedRect(QRect(-48, -32, 96, 64), 16, 16);
+  QPainterPath arrow;
+  arrow.moveTo(-33, 0);
+  arrow.lineTo(-7, -22);
+  arrow.lineTo(-7, -11);
+  arrow.lineTo(31, -11);
+  arrow.lineTo(31, 11);
+  arrow.lineTo(-7, 11);
+  arrow.lineTo(-7, 22);
+  arrow.closeSubpath();
+  p.fillPath(arrow, accent);
+  if (blindSpot) {
+    p.setPen(QPen(QColor("#28151c"), 4, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(13, -7, 13, 1);
+    p.drawPoint(13, 7);
+  }
+  p.restore();
+}
+}
+
 // Window that shows camera view and variety of info drawn on top
 AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget* parent) : fps_filter(UI_FREQ, 3, 1. / UI_FREQ), CameraWidget("camerad", type, true, parent) {
+  turnSignalAnimation = false;
   pm = std::make_unique<PubMaster, const std::initializer_list<const char *>>({"uiDebug"});
 
   main_layout = new QVBoxLayout(this);
   main_layout->setMargin(UI_BORDER_SIZE);
   main_layout->setSpacing(0);
 
-  QHBoxLayout *buttons_layout = new QHBoxLayout();
-  buttons_layout->setSpacing(0);
+  speed_limit_btn = new SpeedLimitButton(this);
+  speed_limit_btn->hide();
 
-  // Neokii screen recorder
-  screenRecorder = new ScreenRecorder(this);
-  buttons_layout->addWidget(screenRecorder);
-
-  auto *speed_limit_btn = new SpeedLimitButton(this);
-  buttons_layout->addWidget(speed_limit_btn);
-
-  experimental_btn = new ExperimentalButton(this);
-  buttons_layout->addWidget(experimental_btn);
-
-  QVBoxLayout *top_right_layout = new QVBoxLayout();
+  auto *top_right_layout = new QVBoxLayout();
   top_right_layout->setSpacing(0);
-  top_right_layout->addLayout(buttons_layout);
+  screenRecorder = new ScreenRecorder(this);
+  map_settings_btn = new MapSettingsButton(this);
+  auto *buttons = new QHBoxLayout();
+  buttons->addWidget(screenRecorder);
+  buttons->addWidget(map_settings_btn);
+  top_right_layout->addLayout(buttons);
 
   pedal_icons = new PedalIcons(this);
   top_right_layout->addWidget(pedal_icons, 0, Qt::AlignRight);
 
   main_layout->addLayout(top_right_layout, 0);
   main_layout->setAlignment(top_right_layout, Qt::AlignTop | Qt::AlignRight);
-
-  map_settings_btn = new MapSettingsButton(this);
-  main_layout->addWidget(map_settings_btn, 0, Qt::AlignBottom | Qt::AlignRight);
 
   dm_img = loadPixmap("../assets/img_driver_face.png", {img_size + 5, img_size + 5});
 
@@ -77,26 +98,25 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
 
   auto speed_limit_sign = nav_instruction.getSpeedLimitSign();
   if (s.scene.show_speed_limits || s.scene.speed_limit_controller) {
-    speedLimit = slcOverridden ? s.scene.speed_limit_overridden_speed : s.scene.speed_limit;
+    const bool has_source = sm.alive("frogpilotPlan") && sm.valid("frogpilotPlan") &&
+                            !s.scene.speed_limit_source.isEmpty() && s.scene.speed_limit_source != "None";
+    speedLimit = has_source ? s.scene.speed_limit : 0.0f;
   } else {
-    speedLimit = nav_alive ? nav_instruction.getSpeedLimit() : 0.0;
+    speedLimit = nav_alive ? nav_instruction.getSpeedLimit() : 0.0f;
   }
-  speedLimit *= (s.scene.is_metric ? MS_TO_KPH : MS_TO_MPH);
-  if (s.scene.speed_limit_controller && !showSLCOffset && !slcOverridden && speedLimit != 0) {
-    speedLimit += slcSpeedLimitOffset;
-  }
+  speedLimit *= s.scene.is_metric ? MS_TO_KPH : MS_TO_MPH;
 
-  has_us_speed_limit = (nav_alive && speed_limit_sign == cereal::NavInstruction::SpeedLimitSign::MUTCD) || !useVienna && !hideSpeedLimit;
-  has_eu_speed_limit = (nav_alive && speed_limit_sign == cereal::NavInstruction::SpeedLimitSign::VIENNA) || useVienna && !hideSpeedLimit;
+  const bool vienna = nav_alive ? speed_limit_sign == cereal::NavInstruction::SpeedLimitSign::VIENNA : s.scene.speed_limit_vienna;
+  has_us_speed_limit = !s.scene.hide_speed_limit && !vienna;
+  has_eu_speed_limit = !s.scene.hide_speed_limit && vienna;
   is_metric = s.scene.is_metric;
   speedUnit =  s.scene.is_metric ? tr("km/h") : tr("mph");
+  turnArrows = s.scene.frogpilot_toggles.value("signal_icons").toString() == "arrows";
   hideBottomIcons = (cs.getAlertSize() != cereal::ControlsState::AlertSize::NONE);
-  hideBottomIcons |= turnSignalAnimation && (turnSignalLeft || turnSignalRight) && (signalStyle == "traditional" || signalStyle == "traditional_gif");
-  hideBottomIcons |= bigMapOpen;
+  hideBottomIcons |= !turnArrows && turnSignalAnimation && (s.scene.turn_signal_left || s.scene.turn_signal_right) &&
+                     (signalStyle == "traditional" || signalStyle == "traditional_gif");
+  hideBottomIcons |= s.scene.map_open && s.scene.big_map;
   status = s.status;
-
-  // update engageability/experimental mode button
-  experimental_btn->updateState(s);
 
   // update DM icon
   auto dm_state = sm["driverMonitoringState"].getDriverMonitoringState();
@@ -105,10 +125,10 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
   // DM icon transition
   dm_fade_state = std::clamp(dm_fade_state+0.2*(0.5-dmActive), 0.0, 1.0);
 
-  // hide map settings button for alerts and flip for right hand DM
+  // Keep the directions shortcut clear of alerts.
+  hideMapIcon = s.scene.hide_map_icon;
   if (map_settings_btn->isEnabled()) {
     map_settings_btn->setVisible(!hideBottomIcons && !hideMapIcon);
-    main_layout->setAlignment(map_settings_btn, (rightHandDM ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignBottom);
   }
 
   // Update FrogPilot widgets
@@ -118,9 +138,18 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
   cscStatus = s.scene.csc_status && s.scene.enabled && is_cruise_set &&
               curveSpeedLimited(cs.getVCruise(), s.scene.mtsc_enabled, s.scene.mtsc_speed,
                                 s.scene.vtsc_enabled, s.scene.vtsc_speed);
-  auto *speed_limit_btn = static_cast<SpeedLimitButton *>(findChild<QPushButton *>("speedLimitControllerButton"));
-  speed_limit_btn->updateState(s.scene.longitudinal_control, s.scene.speed_limit_controller);
-  speed_limit_btn->setVisible(s.scene.longitudinal_control && !hideBottomIcons);
+  speed_limit_btn->updateState(s.scene.longitudinal_control, s.scene.speed_limit_controller, vienna);
+  speed_limit_btn->setGeometry(setSpeedRect().adjusted(12, 204, -12, -12));
+  speed_limit_btn->setVisible(s.scene.longitudinal_control && !s.scene.hide_speed_limit && !hideBottomIcons && !bigMapOpen);
+}
+
+QRect AnnotatedCameraWidget::setSpeedRect() const {
+  int w = is_metric || has_eu_speed_limit ? 200 : 172;
+  if (has_us_speed_limit && std::nearbyint(speedLimit) >= 100) w = 223;
+  int h = 204;
+  if (has_us_speed_limit) h += 186 + 12;
+  if (has_eu_speed_limit) h += 176 + 12;
+  return QRect(60 + (172 - w) / 2, 45, w, h);
 }
 
 void AnnotatedCameraWidget::drawHud(QPainter &p) {
@@ -138,8 +167,8 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
 
   // Header gradient
   QLinearGradient bg(0, UI_HEADER_HEIGHT - (UI_HEADER_HEIGHT / 2.5), 0, UI_HEADER_HEIGHT);
-  bg.setColorAt(0, QColor::fromRgbF(0, 0, 0, 0.45));
-  bg.setColorAt(1, QColor::fromRgbF(0, 0, 0, 0));
+  bg.setColorAt(0, QColor(5, 17, 31, 130));
+  bg.setColorAt(1, QColor(5, 17, 31, 0));
   p.fillRect(0, 0, width(), UI_HEADER_HEIGHT, bg);
 
   QString mtscSpeedStr = (mtscSpeed > 1) ? QString::number(std::nearbyint(fmin(speed, mtscSpeed))) + speedUnit : "–";
@@ -152,31 +181,19 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
 
   // Draw outer box + border to contain set speed and speed limit
   const int sign_margin = 12;
-  const int us_sign_height = 186;
-  const int eu_sign_size = 176;
-
-  const QSize default_size = {172, 204};
-  QSize set_speed_size = default_size;
-  if (is_metric || has_eu_speed_limit) set_speed_size.rwidth() = 200;
-  if (has_us_speed_limit && speedLimitStr.size() >= 3) set_speed_size.rwidth() = 223;
-
-  if (has_us_speed_limit) set_speed_size.rheight() += us_sign_height + sign_margin;
-  else if (has_eu_speed_limit) set_speed_size.rheight() += eu_sign_size + sign_margin;
-
-  int top_radius = 32;
-  int bottom_radius = has_eu_speed_limit ? 100 : 32;
-
-  QRect set_speed_rect(QPoint(60 + (default_size.width() - set_speed_size.width()) / 2, 45), set_speed_size);
+  const QRect set_speed_rect = setSpeedRect();
+  const int top_radius = 32;
+  const int bottom_radius = has_eu_speed_limit ? 100 : 32;
   if (!hideMaxSpeed) {
     if (trafficMode) {
       p.setPen(QPen(redColor(), 10));
     } else {
-      p.setPen(QPen(whiteColor(75), 6));
+      p.setPen(QPen(QColor("#49758c"), 3));
     }
-    p.setBrush(blackColor(166));
+    p.setBrush(QColor(10, 28, 45, 232));
     drawRoundedRect(p, set_speed_rect, top_radius, top_radius, bottom_radius, bottom_radius);
 
-    QColor max_color = QColor(0x80, 0xd8, 0xa6, 0xff);
+    QColor max_color("#96e6dc");
     QColor set_speed_color = whiteColor();
 
     // Draw MAX
@@ -184,7 +201,7 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
       if (status == STATUS_DISENGAGED) {
         max_color = whiteColor();
       } else if (status == STATUS_OVERRIDE) {
-        max_color = QColor(0x91, 0x9b, 0x95, 0xff);
+        max_color = QColor("#c4d5ee");
       } else if (speedLimit > 0) {
         auto interp_color = [=](QColor c1, QColor c2, QColor c3) {
           return speedLimit > 0 ? interpColor(setSpeed, {speedLimit + 5, speedLimit + 15, speedLimit + 25}, {c1, c2, c3}) : c1;
@@ -193,12 +210,12 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
         set_speed_color = interp_color(set_speed_color, QColor(0xff, 0x95, 0x00), QColor(0xff, 0x00, 0x00));
       }
     } else {
-      max_color = QColor(0xa6, 0xa6, 0xa6, 0xff);
-      set_speed_color = QColor(0x72, 0x72, 0x72, 0xff);
+      max_color = QColor("#adcadb");
+      set_speed_color = QColor("#c5d8e4");
     }
-    p.setFont(InterFont(40, QFont::DemiBold));
+    p.setFont(InterFont(34, QFont::DemiBold));
     p.setPen(max_color);
-    p.drawText(set_speed_rect.adjusted(0, 27, 0, 0), Qt::AlignTop | Qt::AlignHCenter, tr("MAX"));
+    p.drawText(set_speed_rect.adjusted(0, 27, 0, 0), Qt::AlignTop | Qt::AlignHCenter, tr("MAX") + " " + speedUnit);
     p.setFont(InterFont(90, QFont::Bold));
     p.setPen(set_speed_color);
     p.drawText(set_speed_rect.adjusted(0, 77, 0, 0), Qt::AlignTop | Qt::AlignHCenter, setSpeedStr);
@@ -226,7 +243,7 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
       p.drawText(rect.adjusted(20, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, speedStr);
     };
 
-    QRect curveSpeedRect(QPoint(set_speed_rect.right() + 25, set_speed_rect.top()), QSize(default_size.width() * 1.25, default_size.width() * 1.25));
+    QRect curveSpeedRect(QPoint(set_speed_rect.right() + 25, set_speed_rect.top()), QSize(215, 215));
     QPixmap scaledCurveSpeedIcon = (leftCurve ? curveSpeedLeftIcon : curveSpeedRightIcon).scaled(curveSpeedRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
 
     p.setOpacity(1.0);
@@ -246,7 +263,8 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
     }
   }
 
-  const QRect sign_rect = set_speed_rect.adjusted(sign_margin, default_size.height(), -sign_margin, -sign_margin);
+  const QRect sign_rect = speed_limit_btn->geometry();
+  newSpeedLimitRect = {};
   p.save();
   // US/Canada (MUTCD style) sign
   if (has_us_speed_limit) {
@@ -258,7 +276,7 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
 
     p.save();
     p.setOpacity(slcOverridden ? 0.25 : 1.0);
-    if (showSLCOffset && !slcOverridden) {
+    if (showSLCOffset && speedLimit > 1 && !slcOverridden) {
       p.setFont(InterFont(28, QFont::DemiBold));
       p.drawText(sign_rect.adjusted(0, 22, 0, 0), Qt::AlignTop | Qt::AlignHCenter, tr("LIMIT"));
       p.setFont(InterFont(70, QFont::Bold));
@@ -279,8 +297,6 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
       new_sign_rect.setWidth(newSpeedLimitStr.size() >= 3 ? 200 : 175);
 
       newSpeedLimitRect = new_sign_rect;
-      newSpeedLimitRect.setWidth(new_sign_rect.width());
-      newSpeedLimitRect.setHeight(new_sign_rect.height());
 
       p.setPen(Qt::NoPen);
       p.setBrush(whiteColor());
@@ -306,7 +322,7 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
 
     p.setOpacity(slcOverridden ? 0.25 : 1.0);
     p.setPen(blackColor());
-    if (showSLCOffset) {
+    if (showSLCOffset && speedLimit > 1 && !slcOverridden) {
       p.setFont(InterFont((speedLimitStr.size() >= 3) ? 60 : 70, QFont::Bold));
       p.drawText(sign_rect.adjusted(0, -25, 0, 0), Qt::AlignCenter, speedLimitStr);
       p.setFont(InterFont(40, QFont::DemiBold));
@@ -318,6 +334,7 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
 
     if (speedLimitChanged) {
       QRect new_sign_rect(sign_rect.translated(sign_rect.width() + 25, 0));
+      newSpeedLimitRect = new_sign_rect;
       p.setPen(Qt::NoPen);
       p.setBrush(whiteColor());
       p.drawEllipse(new_sign_rect);
@@ -421,6 +438,18 @@ void AnnotatedCameraWidget::drawHud(QPainter &p) {
     }
   }
 
+  if (turnArrows && (turnSignalLeft || turnSignalRight) && !hideBottomIcons && !bigMapOpen && alertHeight == 0) {
+    const bool narrow = width() < 1200;
+    const int gap = narrow ? 122 : 222;
+    int y = narrow ? 272 : 125;
+    QPoint left(width() / 2 - gap, y), right(width() / 2 + gap, y);
+    const QRect leftBadge(left - QPoint(50, 34), QSize(100, 68));
+    if (narrow && (leftBadge.intersects(set_speed_rect) || leftBadge.intersects(newSpeedLimitRect))) {
+      y = std::max(set_speed_rect.bottom(), newSpeedLimitRect.bottom()) + 48;
+    }
+    if (turnSignalLeft) drawTurnArrow(p, QPoint(left.x(), y), true, blindSpotLeft);
+    if (turnSignalRight) drawTurnArrow(p, QPoint(right.x(), y), false, blindSpotRight);
+  }
   p.restore();
 }
 
@@ -671,9 +700,7 @@ void AnnotatedCameraWidget::drawDriverState(QPainter &painter, const UIState *s)
     offset += 30;
   }
   int x = rightHandDM ? width() - offset : offset;
-  if (rightHandDM && map_settings_btn->isEnabled() && !hideMapIcon) {
-    x -= 250;
-  } else if (onroadDistanceButton) {
+  if (!rightHandDM && onroadDistanceButton) {
     x += 250;
   }
   int y = height() - offset;
@@ -925,12 +952,13 @@ void AnnotatedCameraWidget::showEvent(QShowEvent *event) {
 
   // FrogPilot variables
   distance_btn->updateIcon();
-  experimental_btn->updateIcon();
   updateSignals();
 }
 
 // FrogPilot widgets
 void AnnotatedCameraWidget::updateSignals() {
+  animationTimer->stop();
+  animationFrameIndex = 0;
   blindspotImages.clear();
   signalImages.clear();
 
@@ -1016,10 +1044,11 @@ void AnnotatedCameraWidget::initializeFrogPilotWidgets() {
 
   QObject::connect(uiState(), &UIState::themeUpdated, this, &AnnotatedCameraWidget::updateSignals);
   QObject::connect(uiState(), &UIState::themeUpdated, distance_btn, &DistanceButton::updateIcon);
-  QObject::connect(uiState(), &UIState::themeUpdated, experimental_btn, &ExperimentalButton::updateIcon);
 }
 
 void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIScene &scene) {
+  mapOpen = scene.map_open;
+  useSI = scene.use_si_metrics;
   if (is_metric || useSI) {
     accelerationUnit = tr("m/s²");
     leadDistanceUnit = tr(mapOpen ? "m" : "meters");
@@ -1058,10 +1087,8 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
 
   experimentalMode = scene.experimental_mode;
 
-  hideMapIcon = scene.hide_map_icon;
   hideMaxSpeed = scene.hide_max_speed;
   hideSpeed = scene.hide_speed;
-  hideSpeedLimit = scene.hide_speed_limit;
 
   lateralPaused = scene.lateral_paused;
 
@@ -1073,7 +1100,6 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
 
   longitudinalPaused = scene.longitudinal_paused;
 
-  mapOpen = scene.map_open;
   bigMapOpen = mapOpen && scene.big_map;
 
   modelLength = scene.model_length;
@@ -1113,7 +1139,6 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
   speedLimitSources = scene.speed_limit_sources;
   unconfirmedSpeedLimit = scene.unconfirmed_speed_limit * speedConversion;
   upcomingSpeedLimit = scene.upcoming_speed_limit * speedConversion;
-  useVienna = scene.speed_limit_vienna;
 
   bool stoppedTimer = scene.stopped_timer && scene.standstill && scene.started_timer / UI_FREQ >= 10 && !mapOpen;
   static QElapsedTimer standstillTimer;
@@ -1131,8 +1156,6 @@ void AnnotatedCameraWidget::updateFrogPilotVariables(int alert_height, const UIS
 
   turnSignalLeft = scene.turn_signal_left;
   turnSignalRight = scene.turn_signal_right;
-
-  useSI = scene.use_si_metrics;
 
   useStockColors = scene.use_stock_colors;
 
@@ -1168,7 +1191,7 @@ void AnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &painter, bool draw_w
     drawRoadName(painter);
   }
 
-  if (turnSignalAnimation && (turnSignalLeft || turnSignalRight) && !bigMapOpen && ((!mapOpen && standstillDuration == 0) || signalStyle != "static")) {
+  if (!turnArrows && turnSignalAnimation && (turnSignalLeft || turnSignalRight) && !bigMapOpen && ((!mapOpen && standstillDuration == 0) || signalStyle != "static")) {
     if (!animationTimer->isActive()) {
       animationTimer->start(signalAnimationLength);
     }

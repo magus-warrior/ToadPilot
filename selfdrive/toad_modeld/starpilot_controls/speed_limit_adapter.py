@@ -15,19 +15,22 @@ class SpeedLimitController:
   def experimental_mode(self):
     return self.delegate.experimental_mode
 
-  def update(self, dashboard_limit, now, time_validated, v_cruise, v_cruise_diff,
+  def update(self, v_cruise, v_cruise_diff,
              v_ego, v_ego_diff, sm, *, active, display_only):
     toggles = self.starpilot_toggles
     self.confirmation_button_consumed = False
     if not (active or display_only):
+      self.delegate.accepted_limit = None
       self.target = self.offset = self.overridden_speed = 0.0
       self.confirmation_pending = False
       return
-    nav = sm['frogpilotNavigation']
-    self.delegate.update(dashboard_limit, sm['selfdriveState'].enabled,
-                         nav.navigationSpeedLimit, v_cruise + v_cruise_diff, v_ego, toggles)
     desired = self.delegate.desired_speed_limit
-    if self.delegate.speed_limit_changed:
+    old_target = self.target
+    if self.delegate.source == "None":
+      self.target = desired
+      self.confirmation_time = 0.
+      self.confirmation_pending = False
+    elif self.delegate.speed_limit_changed:
       self.confirmation_time += DT_MDL
       memory = self.starpilot_planner.params_memory
       accepted = bool((sm['starpilotCarState'].accelPressed and str(sm['selfdriveState'].state) == 'enabled') or
@@ -47,14 +50,18 @@ class SpeedLimitController:
       self.confirmation_pending = False
       if not self.target:
         self.target = desired
-    self.offset = self.delegate.get_offset(self.target, toggles)
+    self.target, self.offset = self.delegate.resolve_accepted_limit(self.target, toggles, active and sm['selfdriveState'].enabled)
+    if self.target != old_target:
+      self.overridden_speed = 0.
     override = (self.overridden_speed > self.target + self.offset or
                 sm['carState'].gasPressed and v_ego > self.target + self.offset)
     if override and active and sm['selfdriveState'].enabled:
       if toggles.speed_limit_controller_override_manual:
         if sm['carState'].gasPressed:
           self.overridden_speed = v_ego + v_ego_diff
-      else:
+      elif toggles.speed_limit_controller_override_set_speed:
         self.overridden_speed = v_cruise + v_cruise_diff
+      else:
+        self.overridden_speed = 0.
     else:
       self.overridden_speed = 0.0

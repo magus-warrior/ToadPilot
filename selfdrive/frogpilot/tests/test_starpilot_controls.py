@@ -237,9 +237,10 @@ def test_speed_limit_adapter_retains_confirmation_and_override_preferences(tmp_p
   toggles.speed_limit_controller=True; following=ctx.starpilot_vcruise.slc
   toggles.speed_limit_confirmation_lower=toggles.speed_limit_confirmation_higher=True
   toggles.speed_limit_controller_override_manual=manual_override
+  toggles.speed_limit_controller_override_set_speed=not manual_override
   following.target=30.
-  following.delegate=NS(experimental_mode=False,desired_speed_limit=20.,speed_limit_changed=True,
-                        update=lambda *args:None,get_offset=lambda *args:0.)
+  following.delegate=NS(experimental_mode=False,source="Dashboard",desired_speed_limit=20.,speed_limit_changed=True,
+                        update=lambda *args:None,resolve_accepted_limit=lambda target, *_: (target, 0.))
   sm['controlsState'].state='enabled'
   ctx.params_memory.legacy.put_bool('SpeedLimitAccepted',True)
   update(ctx,parent,sm,toggles,nav,15.,100.)
@@ -258,7 +259,7 @@ def test_speed_limit_toggle_releases_and_restores_active_cruise_cap(tmp_path, sh
   following=ctx.starpilot_vcruise.slc
   following.target=12.
   following.delegate=NS(experimental_mode=False,desired_speed_limit=12.,speed_limit_changed=False,
-                        update=lambda *args:None,get_offset=lambda *args:0.,source='Map Data')
+                        update=lambda *args:None,resolve_accepted_limit=lambda target, *_: (target, 0.),source='Map Data')
   sm['modelV2'].position.x=(np.asarray(ModelConstants.T_IDXS)*15.).tolist()
   assert update(ctx,parent,sm,toggles,nav,15.,100.).vCruise==pytest.approx(12.)
   toggles.speed_limit_controller=False

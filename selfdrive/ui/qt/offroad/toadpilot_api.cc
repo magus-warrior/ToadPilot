@@ -4,11 +4,11 @@
 #include <QNetworkReply>
 #include <QTimer>
 
-void ToadPilotApi::request(const QString &path, const QJsonObject &data, bool post, Callback done) {
+void ToadPilotApi::request(const QString &path, const QJsonObject &data, bool post, Callback done, int timeout_ms) {
   QNetworkRequest req{QUrl(qEnvironmentVariable("TOADPILOT_API", "http://127.0.0.1:8082") + path)};
   req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
   auto *reply = post ? network.post(req, QJsonDocument(data).toJson(QJsonDocument::Compact)) : network.get(req);
-  QTimer::singleShot(3000, reply, [reply] { if (!reply->isFinished()) reply->abort(); });
+  QTimer::singleShot(timeout_ms, reply, [reply] { if (!reply->isFinished()) reply->abort(); });
   connect(reply, &QNetworkReply::finished, this, [reply, done] {
     auto object = QJsonDocument::fromJson(reply->readAll()).object();
     QString error = object.value("error").toString();

@@ -221,7 +221,7 @@ class ConditionalExperimentalMode:
       # light / stop sign. Stop signs latch until pedal, while stop lights can
       # immediately release to CHILL when the model clears the stop.
       self.stop_sign_and_light(v_ego, sm, starpilot_toggles.conditional_model_stop_time)
-      standstill_stop_hold = self.get_standstill_stop_hold(sm)
+      standstill_stop_hold = self.get_standstill_stop_hold(sm, starpilot_toggles.conditional_model_stop_time > 0)
       current_standstill_stop_hold = standstill_stop_hold
 
       if current_standstill_stop_hold:
@@ -268,13 +268,14 @@ class ConditionalExperimentalMode:
     lead_distance = float(getattr(lead, "dRel", float("inf")))
     return lead_distance < max(40.0, float(v_ego) * self.SLOW_LEAD_CONTINUITY_MAX_DISTANCE_TIME)
 
-  def get_standstill_stop_hold(self, sm):
+  def get_standstill_stop_hold(self, sm, model_stop_enabled):
     dash_stop_sign = (
       bool(getattr(self.starpilot_planner.starpilot_vcruise, "stop_sign_confirmed", False)) or
       bool(getattr(sm["starpilotCarState"], "dashboardStopSign", 0) > 0)
     )
     force_stop_active = bool(getattr(self.starpilot_planner.starpilot_vcruise, "forcing_stop", False))
     model_stopped = bool(getattr(self.starpilot_planner, "model_stopped", False))
+    predicted_stop = model_stop_enabled and (self.stop_light_detected or model_stopped)
     pedal_override = bool(getattr(sm["carState"], "gasPressed", False) or getattr(sm["starpilotCarState"], "accelPressed", False))
 
     if pedal_override or not bool(sm["carState"].standstill):
@@ -283,7 +284,7 @@ class ConditionalExperimentalMode:
 
     if dash_stop_sign:
       self.standstill_stop_reason = "sign"
-    elif self.stop_light_detected or force_stop_active or model_stopped:
+    elif force_stop_active or predicted_stop:
       if self.standstill_stop_reason is None:
         self.standstill_stop_reason = "light"
     elif self.standstill_stop_reason == "light":
@@ -292,7 +293,7 @@ class ConditionalExperimentalMode:
     if self.standstill_stop_reason == "sign":
       return True
 
-    return bool(self.stop_light_detected or force_stop_active or model_stopped)
+    return bool(force_stop_active or predicted_stop)
 
   def check_conditions(self, v_ego, sm, starpilot_toggles, v_cruise=None):
     self.open_road_triggered = False

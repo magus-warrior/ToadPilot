@@ -136,7 +136,7 @@ frogpilot_default_params: list[tuple[str, str | bytes, int]] = [
   ("CustomDistanceIcons", "stock", 0),
   ("CustomIcons", "frog-animated", 0),
   ("CustomPersonalities", "0", 2),
-  ("CustomSignals", "frog", 0),
+  ("CustomSignals", "arrows", 0),
   ("CustomSounds", "frog", 0),
   ("CustomUI", "1", 1),
   ("DecelerationProfile", "1", 2),
@@ -363,7 +363,7 @@ frogpilot_default_params: list[tuple[str, str | bytes, int]] = [
   ("VoltSNG", "0", 2),
   ("WarningImmediateVolume", "101", 2),
   ("WarningSoftVolume", "101", 2),
-  ("WheelIcon", "frog", 0),
+  ("WheelIcon", "stock", 0),
   ("WheelSpeed", "0", 2)
 ]
 

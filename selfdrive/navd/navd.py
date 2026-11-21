@@ -2,8 +2,8 @@
 import hashlib
 import json
 import math
-import os
 import threading
+import uuid
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -11,11 +11,11 @@ import requests
 
 import cereal.messaging as messaging
 from cereal import log
-from openpilot.common.api import Api
+from openpilot.common.file_helpers import atomic_write_in_dir
 from openpilot.common.numpy_fast import interp
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
-from openpilot.selfdrive.navd.helpers import (Coordinate, coordinate_from_param,
+from openpilot.selfdrive.navd.helpers import (DIRECTIONS_DIR, Coordinate, coordinate_from_param, mapbox_token,
                                     distance_along_geometry, maxspeed_to_ms,
                                     minimum_distance,
                                     parse_banner_instructions)
@@ -262,19 +262,6 @@ class RouteEngine:
     self.reroute_counter = 0
 
 
-    self.api = None
-    self.mapbox_token = None
-    if "MAPBOX_TOKEN" in os.environ:
-      self.mapbox_token = os.environ["MAPBOX_TOKEN"]
-      self.mapbox_host = "https://api.mapbox.com"
-    else:
-      # A public token is sufficient for Mapbox Directions. Prefer an existing
-      # secret token for compatibility, but allow the Fleet Manager UI's single
-      # public-token setup as well.
-      self.mapbox_token = (self.params.get("MapboxSecretKey", encoding='utf8') or
-                           self.params.get("MapboxPublicKey", encoding='utf8'))
-      self.mapbox_host = "https://api.mapbox.com"
-
     # FrogPilot variables
     self.frogpilot_toggles = get_frogpilot_toggles()
 
@@ -309,7 +296,7 @@ class RouteEngine:
 
   def update_location(self):
     location = self.sm['liveLocationKalman']
-    self.gps_ok = location.gpsOK
+    self.gps_ok = self.sm.alive["liveLocationKalman"] and self.sm.valid["liveLocationKalman"] and location.gpsOK
 
     self.localizer_valid = (location.status == log.LiveLocationKalman.Status.valid) and location.positionGeodetic.valid
 
@@ -323,7 +310,9 @@ class RouteEngine:
 
     new_destination = coordinate_from_param("NavDestination", self.params)
     if new_destination is None:
-      self.clear_route()
+      if self.route is not None:
+        self.clear_route()
+        self.send_route()
       self.reset_recompute_limits()
       return
 
@@ -352,12 +341,12 @@ class RouteEngine:
     if lang is not None:
       lang = lang.replace('main_', '')
 
-    token = self.mapbox_token
-    if "MAPBOX_TOKEN" not in os.environ:
-      token = (self.params.get("MapboxSecretKey", encoding='utf8') or
-               self.params.get("MapboxPublicKey", encoding='utf8'))
-    if token is None:
-      token = self.api.get_token()
+    token = mapbox_token(self.params)
+    if not token:
+      cloudlog.warning("Navigation needs a configured Mapbox key")
+      self.clear_route()
+      self.send_route()
+      return
 
     params = {
       'access_token': token,
@@ -386,15 +375,14 @@ class RouteEngine:
       params['bearings'] = f"{(self.last_bearing + 360) % 360:.0f},90" + (';'*(len(coords)-1))
 
     coords_str = ';'.join([f'{lon},{lat}' for lon, lat in coords])
-    url = self.mapbox_host + '/directions/v5/mapbox/driving-traffic/' + coords_str
+    url = "https://api.mapbox.com/directions/v5/mapbox/driving-traffic/" + coords_str
     try:
       resp = requests.get(url, params=params, timeout=10)
       if resp.status_code != 200:
-        cloudlog.event("API request failed", status_code=resp.status_code, text=resp.text, error=True)
+        cloudlog.event("API request failed", status_code=resp.status_code, error=True)
       resp.raise_for_status()
 
       r = resp.json()
-      r1 = resp.json()
 
       # Function to remove specified keys recursively unnessary for display
       def remove_keys(obj, keys_to_remove):
@@ -406,29 +394,17 @@ class RouteEngine:
           return obj
 
       keys_to_remove = ['geometry', 'annotation', 'incidents', 'intersections', 'components', 'sub', 'waypoints']
-      self.r2 = remove_keys(r1, keys_to_remove)
+      self.r2 = remove_keys(r, keys_to_remove)
+      self.r2.setdefault("uuid", uuid.uuid4().hex)
       self.r3 = {}
 
       # Add items for display under "routes"
       if 'routes' in self.r2 and len(self.r2['routes']) > 0:
         first_route = self.r2['routes'][0]
-        nav_destination_json = self.params.get('NavDestination')
-
-        try:
-          nav_destination_data = json.loads(nav_destination_json)
-          place_name = nav_destination_data.get('place_name', 'Default Place Name')
-          first_route['Destination'] = place_name
-          first_route['Metric'] = self.params.get_bool("IsMetric")
-          self.r3['CurrentStep'] = 0
-          self.r3['uuid'] = self.r2['uuid']
-        except json.JSONDecodeError as e:
-          print(f"Error decoding JSON: {e}")
-
-      # Save slim json as file
-      with open('navdirections.json', 'w') as json_file:
-        json.dump(self.r2, json_file, indent=4)
-      with open('CurrentStep.json', 'w') as json_file:
-        json.dump(self.r3, json_file, indent=4)
+        nav_destination_data = json.loads(self.params.get("NavDestination") or "{}")
+        first_route["Destination"] = nav_destination_data.get("place_name", "")
+        first_route["Metric"] = self.params.get_bool("IsMetric")
+        self.r3 = {"CurrentStep": 0, "uuid": self.r2["uuid"]}
 
       if len(r['routes']):
         self.route = r['routes'][0]['legs'][0]['steps']
@@ -436,7 +412,7 @@ class RouteEngine:
         self.route_intersection_conditions = extract_route_intersection_conditions(self.route)
 
         maxspeed_idx = 0
-        maxspeeds = r['routes'][0]['legs'][0]['annotation']['maxspeed']
+        maxspeeds = r['routes'][0]['legs'][0].get('annotation', {}).get('maxspeed') or []
 
         # Convert coordinates
         for step in self.route:
@@ -448,7 +424,7 @@ class RouteEngine:
             # Last step does not have maxspeed
             if (maxspeed_idx < len(maxspeeds)):
               maxspeed = maxspeeds[maxspeed_idx]
-              if ('unknown' not in maxspeed) and ('none' not in maxspeed):
+              if isinstance(maxspeed, dict) and maxspeed.get('unit') in ('mph', 'km/h') and isinstance(maxspeed.get('speed'), (int, float)):
                 coord.annotations['maxspeed'] = maxspeed_to_ms(maxspeed)
 
             coords.append(coord)
@@ -458,6 +434,10 @@ class RouteEngine:
           maxspeed_idx -= 1  # Every segment ends with the same coordinate as the start of the next
 
         self.step_idx = 0
+        with atomic_write_in_dir(DIRECTIONS_DIR / "navdirections.json", overwrite=True) as f:
+          json.dump(self.r2, f)
+        with atomic_write_in_dir(DIRECTIONS_DIR / "CurrentStep.json", overwrite=True) as f:
+          json.dump(self.r3, f)
       else:
         cloudlog.warning("Got empty route response")
         self.clear_route()
@@ -466,8 +446,8 @@ class RouteEngine:
       # TODO: only clear once we're past a waypoint
       self.params.remove('NavDestinationWaypoints')
 
-    except requests.exceptions.RequestException:
-      cloudlog.exception("failed to get route")
+    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
+      cloudlog.warning(f"Route request failed ({type(error).__name__})")
       self.clear_route()
 
     self.send_route()
@@ -492,12 +472,12 @@ class RouteEngine:
 
     # Banner instructions are for the following maneuver step, don't use empty last step
     banner_step = step
-    if not len(banner_step['bannerInstructions']) and self.step_idx == len(self.route) - 1:
+    if not banner_step.get('bannerInstructions') and self.step_idx == len(self.route) - 1:
       banner_step = self.route[max(self.step_idx - 1, 0)]
 
     # Current instruction
     msg.navInstruction.maneuverDistance = distance_to_maneuver_along_geometry
-    instruction = parse_banner_instructions(banner_step['bannerInstructions'], distance_to_maneuver_along_geometry)
+    instruction = parse_banner_instructions(banner_step.get('bannerInstructions', []), distance_to_maneuver_along_geometry)
     if instruction is not None:
       for k,v in instruction.items():
         setattr(msg.navInstruction, k, v)
@@ -512,7 +492,7 @@ class RouteEngine:
       else:
         distance_to_maneuver = distance_to_maneuver_along_geometry + sum(self.route[j]['distance'] for j in range(self.step_idx+1, i+1))
 
-      instruction = parse_banner_instructions(step_i['bannerInstructions'], distance_to_maneuver)
+      instruction = parse_banner_instructions(step_i.get('bannerInstructions', []), distance_to_maneuver)
       if instruction is None:
         continue
       maneuver = {'distance': distance_to_maneuver}
@@ -529,7 +509,7 @@ class RouteEngine:
     total_distance = step['distance'] * remaining
     total_time = step['duration'] * remaining
 
-    if step['duration_typical'] is None:
+    if step.get('duration_typical') is None:
       total_time_typical = total_time
     else:
       total_time_typical = step['duration_typical'] * remaining
@@ -538,7 +518,7 @@ class RouteEngine:
     for i in range(self.step_idx + 1, len(self.route)):
       total_distance += self.route[i]['distance']
       total_time += self.route[i]['duration']
-      if self.route[i]['duration_typical'] is None:
+      if self.route[i].get('duration_typical') is None:
         total_time_typical += self.route[i]['duration']
       else:
         total_time_typical += self.route[i]['duration_typical']
@@ -554,11 +534,8 @@ class RouteEngine:
       if along_geometry < distance_along_geometry(geometry, geometry[closest_idx]):
         closest = geometry[closest_idx - 1]
 
-    if ('maxspeed' in closest.annotations) and self.localizer_valid:
-      msg.navInstruction.speedLimit = closest.annotations['maxspeed']
-      self.nav_speed_limit = closest.annotations['maxspeed']
-    if not self.localizer_valid or ('maxspeed' not in closest.annotations):
-      self.nav_speed_limit = 0
+    self.nav_speed_limit = closest.annotations.get("maxspeed", 0.) if self.localizer_valid and self.gps_ok else 0.
+    msg.navInstruction.speedLimit = self.nav_speed_limit
 
     # Speed limit sign type
     if 'speedLimitSign' in step:
@@ -579,7 +556,7 @@ class RouteEngine:
         if 'routes' in self.r2 and len(self.r2['routes']) > 0:
           self.r3['CurrentStep'] = self.step_idx
         # Write the modified JSON data back to the file
-        with open('CurrentStep.json', 'w') as json_file:
+        with atomic_write_in_dir(DIRECTIONS_DIR / "CurrentStep.json", overwrite=True) as json_file:
           json.dump(self.r3, json_file, indent=4)
       else:
         cloudlog.warning("Destination reached")
@@ -589,6 +566,9 @@ class RouteEngine:
         if dist > REROUTE_DISTANCE:
           self.params.remove("NavDestination")
           self.clear_route()
+          self.send_route()
+          self.pm.send("frogpilotNavigation", fp_msg)
+          return
 
     condition_along_geometry = projected_distance_along_geometry(geometry, self.last_position)
     next_condition = next_intersection_condition_on_route(self.route_intersection_conditions, instruction_step_index,
@@ -636,6 +616,8 @@ class RouteEngine:
     self.pm.send('navRoute', msg)
 
   def clear_route(self):
+    for filename in ("CurrentStep.json", "navdirections.json"):
+      (DIRECTIONS_DIR / filename).unlink(missing_ok=True)
     self.route = None
     self.route_geometry = None
     self.route_intersection_conditions = []

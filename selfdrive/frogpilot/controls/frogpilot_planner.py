@@ -80,7 +80,8 @@ class FrogPilotPlanner:
 
   def update(self, carState, controlsState, frogpilotCarState, frogpilotNavigation, liveLocationKalman, modelData,
              radarless_model, radarState, frogpilot_toggles, *, navigation_age_s=float("inf"), navigation_valid=False,
-             navigation_service_alive=False, navigation_service_valid=False, navigation_updated=False, carControl=None):
+             navigation_service_alive=False, navigation_service_valid=False, navigation_updated=False, carControl=None,
+             dashboard_limit_valid=False, location_valid=False):
     if radarless_model:
       model_leads = list(modelData.leadsV3)
       if len(model_leads) > 0:
@@ -169,7 +170,7 @@ class FrogPilotPlanner:
       self.frogpilot_following.update(carState.aEgo, controlsState, frogpilotCarState, self.lead_one.dRel, v_ego, frogpilot_toggles)
 
     localizer_valid = (liveLocationKalman.status == log.LiveLocationKalman.Status.valid) and liveLocationKalman.positionGeodetic.valid
-    if liveLocationKalman.gpsOK and localizer_valid:
+    if location_valid and liveLocationKalman.gpsOK and localizer_valid:
       gps_position = {
         "latitude": liveLocationKalman.positionGeodetic.value[0],
         "longitude": liveLocationKalman.positionGeodetic.value[1],
@@ -205,6 +206,7 @@ class FrogPilotPlanner:
     self.v_cruise = self.frogpilot_vcruise.update(
       carState, controlsState, frogpilotCarState, frogpilotNavigation, gps_position, v_cruise, v_ego,
       frogpilot_toggles, navigation_age_s=navigation_age_s, navigation_valid=navigation_valid, now=now,
+      dashboard_limit_valid=dashboard_limit_valid,
     )
     self.update_navigation_trial(carState, controlsState, frogpilotCarState, frogpilotNavigation, carControl,
                                  frogpilot_toggles, navigation_age_s, navigation_valid, navigation_service_alive,

@@ -13,7 +13,7 @@ from openpilot.selfdrive.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC, LEAD_ACCEL_TAU
-from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_UNSET, CONTROL_N, get_speed_error
+from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_UNSET, CONTROL_N, get_speed_error, toyota_sign_controls_max
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.frogpilot.controls.lib.auto_traffic_mode import blend_traffic_mode_value
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
@@ -57,6 +57,18 @@ def planner_required_services(experimental_mode: bool, radarless_model: bool) ->
     services.append('radarState')
   services += ['modelV2', 'frogpilotCarState', 'frogpilotPlan']
   return services
+
+
+def get_planned_cruise_speed(sm, CP, toggles):
+  speed = sm['frogpilotPlan'].vCruise
+  if not toyota_sign_controls_max(CP, toggles):
+    return speed
+  # A FrogPilot plan from the previous cycle can still carry the former factory MAX.
+  v_ego = sm['carState'].vEgo
+  road_speed = max(0., v_ego) if math.isfinite(v_ego) else 0.
+  max_kph = sm['controlsState'].vCruise
+  ceiling = max_kph * CV.KPH_TO_MS if 0. <= max_kph <= V_CRUISE_MAX else road_speed
+  return min(speed if math.isfinite(speed) else road_speed, ceiling)
 
 
 def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
@@ -241,7 +253,7 @@ class LongitudinalPlanner:
       accel_coast = ACCEL_MAX
 
     v_ego = sm['carState'].vEgo
-    v_cruise = sm['frogpilotPlan'].vCruise
+    v_cruise = get_planned_cruise_speed(sm, self.CP, frogpilot_toggles)
     v_cruise_initialized = sm['controlsState'].vCruise != V_CRUISE_UNSET
 
     long_control_off = sm['controlsState'].longControlState == LongCtrlState.off

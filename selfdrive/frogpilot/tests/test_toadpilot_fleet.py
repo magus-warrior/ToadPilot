@@ -681,65 +681,25 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.get_json(), state)
 
-  def test_tools_template_renders_toadpilot_panel(self):
+  def test_tools_contains_only_the_retained_driving_settings(self):
     response = self.client.get("/tools")
-
     self.assertEqual(response.status_code, 200)
-    self.assertIn(b"TOADPILOT", response.data)
-    self.assertIn(b"Lane centering assist", response.data)
-    self.assertIn(b'id="toadEnabled" checked', response.data)
-    self.assertIn(b'value="adaptive" selected', response.data)
-    self.assertIn(b'id="toadLaneCentering" checked', response.data)
-    self.assertIn(b'id="toadSmoothLaneTransitions" checked', response.data)
-    self.assertIn(b'id="toadStraightLineSmoothing" checked', response.data)
-    self.assertIn(b'straight_line_smoothing: toadStraightLineSmoothing.checked', response.data)
-    self.assertIn(b'role="tablist"', response.data)
-    self.assertIn(b'id="toadResponsiveTakeoff" checked', response.data)
-    self.assertIn(b'id="toadSmoothStopFinish" checked', response.data)
-    self.assertIn(b'responsive_takeoff: toadResponsiveTakeoff.checked', response.data)
-    self.assertIn(b'smooth_stop_finish: toadSmoothStopFinish.checked', response.data)
-    self.assertNotIn(b'toadImprovedStopAndGo', response.data)
-    self.assertNotIn(b'startRampSlider', response.data)
-    self.assertNotIn(b'loadStartAccelRamp', response.data)
-    self.assertNotIn(b'saved ramp', response.data)
-    self.assertNotIn(b'toadObserverStatus', response.data)
-    self.assertNotIn(b'renderToadObserver', response.data)
-    self.assertIn(b'Steering profile only', response.data)
-    self.assertNotIn(b'Observe keeps stock controller output unchanged', response.data)
-    self.assertIn(b'id="toadLongitudinalReadiness"', response.data)
-    self.assertIn(b'liveStopGo.responsive_takeoff_enabled === true', response.data)
-    self.assertIn(b'liveStopGo.smooth_stop_finish_enabled === true', response.data)
-    self.assertIn(b'Number(config.traffic_mode_max_speed_mph || 30)', response.data)
-    self.assertIn(b'id="toadAutomaticTrafficMode" checked', response.data)
-    self.assertIn(b'automatic_traffic_mode: toadAutomaticTrafficMode.checked', response.data)
-    self.assertIn(b'id="toadMapStopAssist" checked', response.data)
-    self.assertIn(b'map_stop_assist: toadMapStopAssist.checked', response.data)
-    self.assertIn(b'id="toadAutomaticTrafficState"', response.data)
-    self.assertIn(b'id="toadMapStopState"', response.data)
-    self.assertIn(b'id="toadStopAndGoState"', response.data)
-    self.assertIn(b'id="toadStopGoLiveState"', response.data)
-    self.assertIn(b'id="toadStopGoLastEvent"', response.data)
-    self.assertIn(b'id="toadSteeringLiveState"', response.data)
-    self.assertIn(b'id="toadPandaSafetyState"', response.data)
-    self.assertIn(b'20 Hz diagnostic samples above 1500', response.data)
-    self.assertIn(b'guarded planner-confirmed launch handoff enabled', response.data)
-    self.assertIn(b'Experimental Camry authority', response.data)
-    self.assertIn(b'id="toadExperimentalMaxTorque"', response.data)
-    self.assertIn(b'experimental_max_torque: Number(toadExperimentalMaxTorque.value)', response.data)
-    self.assertIn(b'id="toadAuthoritySummary"', response.data)
-    self.assertIn(b'id="toadAuthorityDetail"', response.data)
-    self.assertIn(b'1700 hard authority is active.', response.data)
-    self.assertNotIn(b'Existing authority by default.', response.data)
-    self.assertIn(b'id="toadExperimentalSteeringResponse"', response.data)
-    self.assertNotIn(b'id="toadExperimentalSteeringResponse" checked', response.data)
-    self.assertIn(b'requestPayload.experimental_steering_response_requested = steeringRequest', response.data)
-    self.assertIn(b'toadExperimentalSteeringResponse.disabled = busy || toadOnroad || !toadSteeringRequestAllowed', response.data)
-    self.assertIn(b'toadSteeringRequestAllowed = false', response.data)
     self.assertEqual(response.headers["Cache-Control"], "no-store")
-    self.assertIn(b'requestOptions.cache = "no-store"', response.data)
-    self.assertIn(b'renderToadPilot(state, populateConfig === true)', response.data)
-    self.assertIn(b'version: toadConfigVersion', response.data)
-    self.assertNotIn(b'Camry Start Acceleration Ramp', response.data)
+    self.assertEqual(response.data.count(b'role="switch"'), 8)
+    for key in helpers.TOOLS_DRIVING_SETTINGS:
+      self.assertIn(f'name="setting" value="{key}"'.encode(), response.data)
+    for retired in (b'toadExperimentalMaxTorque', b'toadTabResearch', b'Lane centering assist', b'Reset Toggle Values'):
+      self.assertNotIn(retired, response.data)
+    self.assertTrue(self.client.get("/tools/controller").location.endswith("/tools#driving-settings"))
+
+  def test_tools_changes_only_one_supported_preference(self):
+    with patch.object(helpers, "read_toadpilot_config", return_value=helpers.normalize_toadpilot_config(VALID_CONFIG)), \
+         patch.object(helpers, "_save_toadpilot_config") as save:
+      response = self.client.post("/tools", data={"action": "driving", "setting": "automatic_traffic_mode", "value": "off"})
+      self.assertEqual(response.status_code, 303)
+      save.assert_called_once_with(dict(VALID_CONFIG, automatic_traffic_mode=False))
+      with self.assertRaises(ValueError):
+        helpers.update_tools_driving_setting("experimental_max_torque", "on")
 
   def test_config_route_disables_caching_and_returns_saved_state(self):
     state = {"config": VALID_CONFIG, "effective_enabled": True}
@@ -778,17 +738,17 @@ class TestToadPilotResetRoute(unittest.TestCase):
     self.assertIn("offroad", response.get_json()["error"])
 
   def test_mapbox_token_route_rejects_blank_and_non_text_values(self):
-    with patch.object(self.fleet_manager.fleet, "set_public_token") as set_public, \
-         patch.object(self.fleet_manager.fleet, "set_secret_token") as set_secret:
+    with patch.object(helpers, "params") as persistent:
       blank_response = self.client.post("/mapbox_token", json={"public_token": "  ", "secret_token": ""})
       non_text_response = self.client.post("/mapbox_token", json={"public_token": 123})
+      invalid_pair = self.client.post("/mapbox_token", json={"public_token": "pk.unused", "secret_token": "wrong"})
 
     self.assertEqual(blank_response.status_code, 400)
     self.assertIn("Enter", blank_response.get_json()["error"])
     self.assertEqual(non_text_response.status_code, 400)
     self.assertIn("text", non_text_response.get_json()["error"])
-    set_public.assert_not_called()
-    set_secret.assert_not_called()
+    self.assertEqual(invalid_pair.status_code, 400)
+    persistent.put.assert_not_called()
 
 
 class TestStartAccelRampFleet(unittest.TestCase):

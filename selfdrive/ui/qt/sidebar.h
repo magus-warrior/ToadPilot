@@ -42,7 +42,7 @@ protected:
   void mouseReleaseEvent(QMouseEvent *event) override;
   void drawMetric(QPainter &p, const QPair<QString, QString> &label, QColor c, int y);
 
-  QPixmap home_img, flag_img, settings_img;
+  QPixmap home_img, settings_img, onroad_settings_img;
   bool onroad, flag_pressed, settings_pressed;
   const QMap<cereal::DeviceState::NetworkType, QString> network_type = {
     {cereal::DeviceState::NetworkType::NONE, tr("--")},
@@ -80,12 +80,12 @@ private:
   bool isCPU;
   bool isFahrenheit;
   bool isGPU;
-  bool isHomeGif;
+  bool isHomeGif = false;
   bool isIP;
   bool isMemoryUsage;
   bool isNumericalTemp;
   bool isRandomEvents;
-  bool isSettingsGif;
+  bool isSettingsGif = false;
   bool isSidebarMetrics;
   bool isStorageLeft;
   bool isStorageUsed;
@@ -97,10 +97,9 @@ private:
   QLabel *home_label;
   QLabel *settings_label;
 
-  QMovie *home_gif;
-  QMovie *settings_gif;
+  QMovie *home_gif = nullptr;
+  QMovie *settings_gif = nullptr;
 
-  QString flagPngPath;
   QString homeGifPath;
   QString homePngPath;
   QString max_temp;

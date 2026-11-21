@@ -2,11 +2,28 @@ from __future__ import annotations
 
 import json
 import math
+import os
+from pathlib import Path
 from typing import Any, cast
 
+from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions
 from openpilot.common.numpy_fast import clip
 from openpilot.common.params import Params
+
+DIRECTIONS_DIR = Path(BASEDIR) / "system" / "manager"
+
+
+def mapbox_token(params):
+  token = os.getenv("MAPBOX_TOKEN", "").strip()
+  if token:
+    return token
+  for key, prefix in (("MapboxPublicKey", "pk."), ("MapboxSecretKey", "sk.")):
+    token = (params.get(key, encoding="utf8") or "").strip()
+    if token.startswith(prefix):
+      return token
+  return None
+
 
 DIRECTIONS = ('left', 'right', 'straight')
 MODIFIABLE_DIRECTIONS = ('left', 'right')
@@ -114,11 +131,14 @@ def coordinate_from_param(param: str, params: Params = None) -> Coordinate | Non
   if json_str is None:
     return None
 
-  pos = json.loads(json_str)
-  if 'latitude' not in pos or 'longitude' not in pos:
-    return None
-
-  return Coordinate(pos['latitude'], pos['longitude'])
+  try:
+    pos = json.loads(json_str)
+    lat, lon = float(pos['latitude']), float(pos['longitude'])
+    if -90 <= lat <= 90 and -180 <= lon <= 180:
+      return Coordinate(lat, lon)
+  except (ValueError, KeyError, TypeError, OverflowError):
+    pass
+  return None
 
 
 def string_to_direction(direction: str) -> str:

@@ -43,7 +43,7 @@ class FrogPilotVCruise:
     self.vtsc_target = 0
 
   def update(self, carState, controlsState, frogpilotCarState, frogpilotNavigation, gps_position, v_cruise, v_ego,
-             frogpilot_toggles, *, navigation_age_s=float("inf"), navigation_valid=False, now=None):
+             frogpilot_toggles, *, navigation_age_s=float("inf"), navigation_valid=False, now=None, dashboard_limit_valid=False):
     map_stop_now = time.monotonic() if now is None else now
     map_stop_enabled = bool(getattr(frogpilot_toggles, "toadpilot_map_stop_assist", False) and controlsState.enabled)
     condition_valid = bool(navigation_valid and frogpilotNavigation.intersectionConditionValid)
@@ -83,6 +83,12 @@ class FrogPilotVCruise:
         now=map_stop_now,
       )
 
+    v_cruise_cluster = max(controlsState.vCruiseCluster * CV.KPH_TO_MS, v_cruise)
+    if frogpilot_toggles.show_speed_limits or frogpilot_toggles.speed_limit_controller:
+      self.slc.update(frogpilotCarState.dashboardSpeedLimit if dashboard_limit_valid else 0., controlsState.enabled,
+                      frogpilotNavigation.navigationSpeedLimit if navigation_sample_fresh else 0.,
+                      v_cruise_cluster, v_ego, frogpilot_toggles, gps_position)
+
     native = getattr(self.frogpilot_planner, 'starpilot_controls', None)
     if native is not None:
       result = native.update_cruise(v_cruise, v_ego, controlsState.enabled, map_stop_now)
@@ -121,7 +127,6 @@ class FrogPilotVCruise:
     elif self.override_force_stop_timer > 0:
       self.override_force_stop_timer -= DT_MDL
 
-    v_cruise_cluster = max(controlsState.vCruiseCluster * CV.KPH_TO_MS, v_cruise)
     v_cruise_diff = v_cruise_cluster - v_cruise
 
     v_ego_cluster = max(carState.vEgoCluster, v_ego)
@@ -157,10 +162,13 @@ class FrogPilotVCruise:
 
     # Pfeiferj's Speed Limit Controller
     if frogpilot_toggles.show_speed_limits or frogpilot_toggles.speed_limit_controller:
-      self.slc.update(frogpilotCarState.dashboardSpeedLimit, controlsState.enabled, frogpilotNavigation.navigationSpeedLimit, v_cruise_cluster, v_ego, frogpilot_toggles)
       desired_slc_target = self.slc.desired_speed_limit
 
-      if self.slc.speed_limit_changed:
+      old_target = self.slc_target
+      if self.slc.source == "None":
+        self.slc_target = desired_slc_target
+        self.speed_limit_timer = 0
+      elif self.slc.speed_limit_changed:
         speed_limit_accepted = frogpilotCarState.accelPressed and controlsState.state == State.enabled or params_memory.get_bool("SpeedLimitAccepted")
         speed_limit_denied = frogpilotCarState.decelPressed and controlsState.state == State.enabled or self.speed_limit_timer >= 30
 
@@ -180,6 +188,10 @@ class FrogPilotVCruise:
       else:
         self.speed_limit_timer = 0
 
+      self.slc_target, self.slc_offset = self.slc.resolve_accepted_limit(
+        self.slc_target, frogpilot_toggles, controlsState.enabled and frogpilot_toggles.speed_limit_controller)
+      if self.slc_target != old_target:
+        self.overridden_speed = 0.
       if frogpilot_toggles.speed_limit_controller:
         self.override_slc = self.overridden_speed > self.slc_target + self.slc_offset
         self.override_slc |= carState.gasPressed and v_ego > self.slc_target + self.slc_offset
@@ -198,8 +210,8 @@ class FrogPilotVCruise:
         self.override_slc = False
         self.overridden_speed = 0
 
-      self.slc_offset = self.slc.get_offset(self.slc_target, frogpilot_toggles)
     else:
+      self.slc.accepted_limit = None
       self.slc_offset = 0
       self.slc_target = 0
 

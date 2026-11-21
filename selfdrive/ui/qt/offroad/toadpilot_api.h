@@ -9,7 +9,7 @@ class ToadPilotApi : public QObject {
 public:
   using Callback = std::function<void(const QJsonObject &, const QString &)>;
   explicit ToadPilotApi(QObject *parent = nullptr) : QObject(parent), network(this) {}
-  void request(const QString &path, const QJsonObject &data, bool post, Callback done);
+  void request(const QString &path, const QJsonObject &data, bool post, Callback done, int timeout_ms = 3000);
   void setDrivingPreference(const QString &key, const QJsonValue &choice, Callback done);
 private:
   QNetworkAccessManager network;

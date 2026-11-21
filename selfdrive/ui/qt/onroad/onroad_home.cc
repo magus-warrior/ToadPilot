@@ -24,7 +24,8 @@ OnroadWindow::OnroadWindow(QWidget *parent) : QWidget(parent) {
   toadStatus = new QLabel(nvg);
   toadStatus->setTextFormat(Qt::PlainText);
   toadStatus->setAttribute(Qt::WA_TransparentForMouseEvents);
-  toadStatus->setStyleSheet("color: #f7f4ff; background: rgba(9,6,25,190); font-size: 27px; padding: 12px 20px; border-radius: 16px;");
+  toadStatus->setStyleSheet("color: #edf7fc; background: rgba(10,28,45,232); border: 2px solid #35566d;"
+                            "font-size: 29px; padding: 9px 18px; border-radius: 16px;");
 
   QWidget * split_wrapper = new QWidget;
   split = new QHBoxLayout(split_wrapper);
@@ -139,7 +140,7 @@ void OnroadWindow::mousePressEvent(QMouseEvent* e) {
   UIScene &scene = s->scene;
   QPoint pos = e->pos();
 
-  if (scene.speed_limit_changed && nvg->newSpeedLimitRect.contains(pos)) {
+  if (scene.speed_limit_changed && nvg->newSpeedLimitRect.contains(nvg->mapFrom(this, pos))) {
     params_memory.putBool("SpeedLimitAccepted", true);
     return;
   }
@@ -179,7 +180,7 @@ void OnroadWindow::createMapWidget() {
 void OnroadWindow::offroadTransition(bool offroad) {
 #ifdef ENABLE_MAPS
   if (!offroad) {
-    if (map == nullptr && !MAPBOX_TOKEN.isEmpty()) {
+    if (map == nullptr && (uiState()->hasPrime() || !configured_mapbox_token().isEmpty())) {
       createMapWidget();
     }
   }
@@ -189,12 +190,13 @@ void OnroadWindow::offroadTransition(bool offroad) {
 
 void OnroadWindow::primeChanged(bool prime) {
 #ifdef ENABLE_MAPS
-  if (map && (!prime && MAPBOX_TOKEN.isEmpty())) {
+  const bool available = prime || !configured_mapbox_token().isEmpty();
+  if (map && !available) {
     nvg->map_settings_btn->setEnabled(false);
     nvg->map_settings_btn->setVisible(false);
     map->deleteLater();
     map = nullptr;
-  } else if (!map && (prime || !MAPBOX_TOKEN.isEmpty())) {
+  } else if (!map && available) {
     createMapWidget();
   }
 #endif

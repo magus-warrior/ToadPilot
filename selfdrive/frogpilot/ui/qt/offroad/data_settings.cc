@@ -1,5 +1,8 @@
 #include "selfdrive/frogpilot/ui/qt/offroad/data_settings.h"
 
+#include <QProcess>
+#include <QTemporaryDir>
+
 FrogPilotDataPanel::FrogPilotDataPanel(FrogPilotSettingsWindow *parent) : FrogPilotListWidget(parent), parent(parent) {
   ButtonControl *deleteDrivingDataBtn = new ButtonControl(tr("Delete Driving Footage and Data"), tr("DELETE"), tr("Deletes all stored driving footage and data from your device. Ideal for maintaining privacy or for simply freeing up space."));
   QObject::connect(deleteDrivingDataBtn, &ButtonControl::clicked, [=]() {
@@ -313,36 +316,32 @@ FrogPilotDataPanel::FrogPilotDataPanel(FrogPilotSettingsWindow *parent) : FrogPi
             frogpilotBackupBtn->setVisibleButton(1, false);
             frogpilotBackupBtn->setVisibleButton(2, false);
 
-            QString extractDirectory = "/data/restore_temp";
-            QString sourcePath = backupDir.filePath(selection);
-            QString targetPath = "/data/safe_staging/finalized";
-
-            QDir().mkpath(extractDirectory);
-
-            std::system(qPrintable("tar --strip-components=1 -xzf " + sourcePath + " -C " + extractDirectory));
-
-            if (selection.endsWith(".tar.zst")) {
+            const QString sourcePath = backupDir.filePath(selection);
+            const QString targetPath = "/data/safe_staging/finalized";
+            QTemporaryDir extraction("/data/tmp/toad-restore-XXXXXX");
+            QString sourceDir = sourcePath;
+            bool ready = QFileInfo(sourcePath).isDir();
+            if (!ready && extraction.isValid()) {
               frogpilotBackupBtn->setValue(tr("Extracting..."));
-
-              QDir().mkpath(extractDirectory);
-
-              std::system(qPrintable("zstd -d " + sourcePath + " -o " + extractDirectory + "/backup.tar"));
-              std::system(qPrintable("tar --strip-components=1 -xf " + extractDirectory + "/backup.tar -C " + extractDirectory));
-
-              QFile::remove(extractDirectory + "/backup.tar");
+              sourceDir = extraction.path();
+              ready = QProcess::execute("tar", {"-xaf", sourcePath, "--strip-components=1", "-C", sourceDir}) == 0;
             }
-
-            QDir().mkpath(targetPath);
-
-            std::system(qPrintable("rsync -av --delete -l " + extractDirectory + "/ " + targetPath + "/"));
-
             QFile overlayFile(targetPath + "/.overlay_consistent");
-            overlayFile.open(QIODevice::WriteOnly);
-            overlayFile.close();
-
-            if (QFileInfo::exists(extractDirectory)) {
-              QDir(extractDirectory).removeRecursively();
+            ready = ready && QFileInfo::exists(sourceDir + "/launch_openpilot.sh") && QDir().mkpath(targetPath);
+            if (ready && overlayFile.exists()) ready = overlayFile.remove();
+            if (ready) {
+              ready = QProcess::execute("rsync", {"-a", "--delete", "--exclude=/.overlay_consistent", sourceDir + "/", targetPath + "/"}) == 0;
             }
+            if (!ready || !overlayFile.open(QIODevice::WriteOnly)) {
+              frogpilotBackupBtn->setValue(tr("Restore failed"));
+              frogpilotBackupBtn->setVisibleButton(0, true);
+              frogpilotBackupBtn->setVisibleButton(1, true);
+              frogpilotBackupBtn->setVisibleButton(2, true);
+              frogpilotBackupBtn->setEnabled(true);
+              parent->keepScreenOn = false;
+              return;
+            }
+            overlayFile.close();
 
             params.putBool("AutomaticUpdates", false);
 

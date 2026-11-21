@@ -37,7 +37,9 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List
-from urllib.parse import quote
+from urllib.parse import parse_qs, urlsplit
+
+from openpilot.selfdrive.navd.helpers import coordinate_from_param, mapbox_token
 
 from openpilot.common.params import ParamKeyType
 from openpilot.selfdrive.car.toyota.carcontroller import LOCK_CMD, UNLOCK_CMD
@@ -271,174 +273,172 @@ def get_gmap_key():
   return token.strip() if token else None
 
 def get_public_token():
-  token = params.get("MapboxPublicKey", encoding='utf8')
-  return token.strip() if token and token.startswith("pk") else None
-
-def set_public_token(token):
-  if not isinstance(token, str):
-    raise ValueError("Mapbox token must be text.")
-  token = token.strip()
-  if not token.startswith("pk."):
-    raise ValueError("Enter a Mapbox public token beginning with 'pk.'.")
-  params.put("MapboxPublicKey", token)
+  token = (params.get("MapboxPublicKey", encoding="utf8") or "").strip()
+  return token if token.startswith("pk.") else None
 
 def get_secret_token():
-  token = params.get("MapboxSecretKey", encoding='utf8')
-  return token.strip() if token and token.startswith("sk") else None
+  token = (params.get("MapboxSecretKey", encoding="utf8") or "").strip()
+  return token if token.startswith("sk.") else None
 
-def set_secret_token(token):
-  if not isinstance(token, str):
-    raise ValueError("Mapbox secret token must be text.")
-  token = token.strip()
-  if not token.startswith("sk."):
-    raise ValueError("Enter a Mapbox secret token beginning with 'sk.'.")
-  params.put("MapboxSecretKey", token)
+def mapbox_key_status():
+  return {"public_configured": bool(get_public_token()), "secret_configured": bool(get_secret_token()),
+          "from_environment": bool(os.getenv("MAPBOX_TOKEN", "").strip())}
+
+def save_mapbox_keys(public, secret):
+  changes = {}
+  for key, value, prefix, label in (("MapboxPublicKey", public, "pk.", "public"), ("MapboxSecretKey", secret, "sk.", "secret")):
+    if value is None:
+      continue
+    if not isinstance(value, str):
+      raise ValueError(f"The {label} key must be text.")
+    value = value.strip()
+    if value:
+      if not value.startswith(prefix) or len(value) <= len(prefix):
+        raise ValueError(f"Enter a {label} key beginning with '{prefix}'.")
+      changes[key] = value
+  if not changes:
+    raise ValueError("Enter a new public or secret key.")
+  for key, value in changes.items():
+    params.put(key, value)
+
+def check_mapbox_key():
+  token = mapbox_token(params)
+  if not token:
+    raise ValueError("Add a Mapbox key to test navigation.")
+  # Fixed public locations keep the check independent of the car's position and active route.
+  services = (
+    ("Address search", "https://api.mapbox.com/search/geocode/v6/forward", {"q": "100 Larkin St, San Francisco", "limit": 1}, "features"),
+    ("Driving directions", "https://api.mapbox.com/directions/v5/mapbox/driving-traffic/-122.416,37.779;-122.411,37.780",
+     {"overview": "false"}, "routes"),
+  )
+  results = []
+  for label, url, options, field in services:
+    try:
+      response = requests.get(url, params={**options, "access_token": token}, timeout=(3, 5))
+      if response.status_code in (401, 403):
+        result = "Key rejected"
+      elif response.status_code == 429:
+        result = "Request limit reached"
+      else:
+        response.raise_for_status()
+        result = "Working" if response.json().get(field) else "No result"
+    except (requests.RequestException, ValueError):
+      result = "Service unavailable"
+    results.append((label, result))
+  return results
 
 def get_search_input():
   return params.get_int("SearchInput")
 
 def get_last_lon_lat():
-  last_pos = params.get("LastGPSPosition")
-  if last_pos:
-    l = json.loads(last_pos)
-  else:
-    return 0.0, 0.0
-  return l["longitude"], l["latitude"]
+  last_pos = coordinate_from_param("LastGPSPosition", params_memory) or coordinate_from_param("LastGPSPosition", params)
+  return (last_pos.longitude, last_pos.latitude) if last_pos else (0.0, 0.0)
+
 
 def get_locations():
-  data = params.get("ApiCache_NavDestinations", encoding='utf-8')
-  return data
+  return params.get("ApiCache_NavDestinations", encoding="utf8")
+
+
+def saved_destinations():
+  try:
+    records = json.loads((get_locations() or "[]").rstrip("\x00"))
+  except ValueError:
+    return []
+  return [entry for entry in records if isinstance(entry, dict)] if isinstance(records, list) else []
+
 
 def preload_favs():
+  locations = {item.get("label"): item.get("place_name") for item in saved_destinations()}
+  return tuple(locations.get(label) for label in ("home", "work", "fav1", "fav2", "fav3"))
+
+
+def destination(lat, lon, name):
   try:
-    nav_destinations = json.loads(params.get("ApiCache_NavDestinations", encoding='utf8') or "{}")
-  except TypeError:
-    return (None, None, None, None, None)
+    lat, lon = float(lat), float(lon)
+  except (ValueError, TypeError, OverflowError):
+    raise ValueError("Enter numeric latitude and longitude.") from None
+  if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+    raise ValueError("Destination coordinates are outside the map.")
+  return {"latitude": lat, "longitude": lon, "place_name": str(name or f"{lat:g}, {lon:g}"), "save_type": "recent"}
 
-  locations = {"home": None, "work": None, "fav1": None, "fav2": None, "fav3": None}
 
-  for item in nav_destinations:
-    label = item.get("label")
-    if label in locations and locations[label] is None:
-      locations[label] = item.get("place_name")
-
-  return tuple(locations.values())
-
-def parse_addr(postvars, lon, lat, valid_addr, token):
-  addr = postvars.get("fav_val", [""])
-  real_addr = None
-  if addr != "favorites":
+def search_destinations(query):
+  if not isinstance(query, str) or not query.strip() or len(query) > 1024:
+    raise ValueError("Enter an address, coordinates, or a Waze pin.")
+  query = query.strip()
+  parsed = urlsplit(query)
+  is_link = bool(parsed.scheme and (parsed.netloc or parsed.scheme == "waze"))
+  if is_link:
+    if parsed.hostname not in ("waze.com", "www.waze.com") and parsed.scheme != "waze":
+      raise ValueError("Paste a Waze pin with coordinates, or enter the street address.")
+    fields = parse_qs(parsed.query)
+    query = fields.get("ll", [""])[0] or fields.get("to", [""])[0].removeprefix("ll.")
+  parts = query.split(",")
+  if len(parts) == 2:
     try:
-      dests = json.loads(params.get("ApiCache_NavDestinations", encoding='utf8') or "{}")
-    except TypeError:
-      dests = json.loads("[]")
-    for item in dests:
-      if "label" in item and item["label"] == addr:
-        lat, lon, real_addr = item["latitude"], item["longitude"], item["place_name"]
-        break
-  return (real_addr, lon, lat, real_addr is not None, token)
+      lat, lon = map(float, parts)
+    except ValueError:
+      pass  # A comma is also common in street addresses.
+    else:
+      return [destination(lat, lon, None)]
+  if is_link:
+    raise ValueError("This Waze link has no coordinates. Enter the address or paste latitude, longitude.")
+  token = mapbox_token(params)
+  if not token:
+    raise ValueError("Add a public Mapbox key in Navigation settings.")
+  args = {"q": query, "limit": 5, "autocomplete": "true", "access_token": token}
+  lon, lat = get_last_lon_lat()
+  if (lon, lat) != (0., 0.):
+    args["proximity"] = f"{lon},{lat}"
+  try:
+    response = requests.get("https://api.mapbox.com/search/geocode/v6/forward", params=args, timeout=(3, 7))
+    if response.status_code in (401, 403):
+      raise ValueError("Mapbox rejected the search key. Check the public key in Navigation settings.")
+    response.raise_for_status()
+    features = response.json().get("features", [])
+  except requests.RequestException:
+    raise ValueError("Address search is unavailable. Check the device connection and try again.") from None
+  results = []
+  for feature in features:
+    props = feature.get("properties", {})
+    coords = feature.get("geometry", {}).get("coordinates", [])
+    name = props.get("full_address") or props.get("name")
+    if name and len(coords) == 2:
+      results.append(destination(coords[1], coords[0], name))
+  if not results:
+    raise ValueError("No matching address found. Include the city or paste coordinates.")
+  return results
 
-def search_addr(postvars, lon, lat, valid_addr, token):
-  if "addr_val" in postvars:
-    addr = postvars.get("addr_val")
-    if addr != "":
-      # Properly encode the address to handle spaces
-      addr_encoded = quote(addr)
-      query = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{addr_encoded}.json?access_token={token}&limit=1"
-      # focus on place around last gps position
-      lngi, lati = get_last_lon_lat()
-      query += "&proximity=%s,%s" % (lngi, lati)
-      r = requests.get(query)
-      if r.status_code != 200:
-        return (addr, lon, lat, valid_addr, token)
-      j = json.loads(r.text)
-      if not j["features"]:
-        return (addr, lon, lat, valid_addr, token)
-      lon, lat = j["features"][0]["geometry"]["coordinates"]
-      valid_addr = True
-  return (addr, lon, lat, valid_addr, token)
 
-def set_destination(postvars, valid_addr):
-  if postvars.get("latitude") is not None and postvars.get("longitude") is not None:
-    postvars["lat"] = postvars.get("latitude")
-    postvars["lon"] = postvars.get("longitude")
-    postvars["save_type"] = "recent"
-    nav_confirmed(postvars)
-    valid_addr = True
+def set_destination(postvars):
+  if not isinstance(postvars, dict):
+    raise ValueError("A destination is required.")
+  if "latitude" in postvars or "longitude" in postvars:
+    place = destination(postvars.get("latitude"), postvars.get("longitude"), postvars.get("place_name"))
   else:
-    addr = postvars.get("place_name")
-    token = get_public_token()
-    data, lon, lat, valid_addr, token = search_addr(addr, lon, lat, valid_addr, token)
-    postvars["lat"] = lat
-    postvars["lon"] = lon
-    postvars["save_type"] = "recent"
-    nav_confirmed(postvars)
-    valid_addr= True
-  return postvars, valid_addr
+    place = search_destinations(postvars.get("place_name"))[0]
+  nav_confirmed({"lat": place["latitude"], "lon": place["longitude"], "name": place["place_name"], "save_type": "recent"})
 
-def nav_confirmed(postvars):
-  if postvars is not None:
-    lat = float(postvars.get("lat"))
-    lng = float(postvars.get("lon"))
-    save_type = postvars.get("save_type")
-    name = postvars.get("name") if postvars.get("name") is not None else ""
-    if params.get_int("SearchInput") == 1:
-      lng, lat = gcj02towgs84(lng, lat)
-    params.put("NavDestination", "{\"latitude\": %f, \"longitude\": %f, \"place_name\": \"%s\"}" % (lat, lng, name))
-    if name == "":
-      name =  str(lat) + "," + str(lng)
-    new_dest = {"latitude": float(lat), "longitude": float(lng), "place_name": name}
-    if save_type == "recent":
-      new_dest["save_type"] = "recent"
-    else:
-      new_dest["save_type"] = "favorite"
-      new_dest["label"] = save_type
-    val = params.get("ApiCache_NavDestinations", encoding='utf8')
-    if val is not None:
-      val = val.rstrip('\x00')
-    dests = [] if val is None else json.loads(val)
-    # type idx
-    type_label_ids = {"home": None, "work": None, "fav1": None, "fav2": None, "fav3": None, "recent": []}
-    idx = 0
-    for d in dests:
-      if d["save_type"] == "favorite":
-        type_label_ids[d["label"]] = idx
-      else:
-        type_label_ids["recent"].append(idx)
-      idx += 1
-    if save_type == "recent":
-      id = None
-      if len(type_label_ids["recent"]) > 10:
-        dests.pop(type_label_ids["recent"][-1])
-    else:
-      id = type_label_ids[save_type]
-    if id is None:
-      dests.insert(0, new_dest)
-    else:
-      dests[id] = new_dest
-    params.put("ApiCache_NavDestinations", json.dumps(dests).rstrip("\n\r"))
 
-def public_token_input(postvars):
-  if postvars is None or "pk_token_val" not in postvars or postvars.get("pk_token_val")[0] == "":
-    return postvars
+def nav_confirmed(postvars, *, amap=False):
+  place = destination(postvars.get("lat"), postvars.get("lon"), postvars.get("name"))
+  if amap:
+    lon, lat = gcj02towgs84(place["longitude"], place["latitude"])
+    place = destination(lat, lon, place["place_name"])
+  label = postvars.get("save_type", "recent")
+  dests = saved_destinations()
+  if label == "recent":
+    recents = [d for d in dests if d.get("save_type") != "favorite" and
+               (d.get("latitude"), d.get("longitude")) != (place["latitude"], place["longitude"])]
+    dests = [d for d in dests if d.get("save_type") == "favorite"] + recents[:9]
+  elif label in ("home", "work", "fav1", "fav2", "fav3"):
+    place.update(save_type="favorite", label=label)
+    dests = [d for d in dests if d.get("label") != label]
   else:
-    token = postvars.get("pk_token_val").strip()
-    if "pk." not in token:
-      return postvars
-    else:
-        params.put("MapboxPublicKey", token)
-  return token
+    raise ValueError("Choose a valid saved destination.")
+  params.put("NavDestination", json.dumps(place, allow_nan=False))
+  params.put("ApiCache_NavDestinations", json.dumps([place, *dests], allow_nan=False))
 
-def app_token_input(postvars):
-  if postvars is None or "sk_token_val" not in postvars or postvars.get("sk_token_val")[0] == "":
-    return postvars
-  else:
-    token = postvars.get("sk_token_val").strip()
-    if "sk." not in token:
-      return postvars
-    else:
-        params.put("MapboxSecretKey", token)
-  return token
 
 def gmap_key_input(postvars):
   if postvars is None or "gmap_key_val" not in postvars or postvars.get("gmap_key_val")[0] == "":
@@ -900,6 +900,29 @@ def set_toadpilot_model(data):
 
 _toadpilot_config_lock = Lock()
 
+
+TOOLS_DRIVING_SETTINGS = {
+  "enabled": "ToadPilot",
+  "starpilot_response": "StarPilot response",
+  "responsive_takeoff": "Responsive takeoff",
+  "automatic_traffic_mode": "Automatic traffic mode",
+  "matched_lead_prediction": "Matched lead prediction",
+  "live_steering_delay": "Live steering-delay learning",
+  "smart_saturation_warning": "Steering saturation warning",
+  "telemetry": "Controller diagnostics",
+}
+
+def tools_driving_settings():
+  config = read_toadpilot_config(params)
+  return [(key, label, getattr(config, key)) for key, label in TOOLS_DRIVING_SETTINGS.items()]
+
+def update_tools_driving_setting(key, value):
+  if key not in TOOLS_DRIVING_SETTINGS or value not in ("on", "off"):
+    raise ValueError("Choose an available driving setting.")
+  with _toadpilot_config_lock:
+    config = asdict(read_toadpilot_config(params))
+    config[key] = value == "on"
+    _save_toadpilot_config(config)
 
 def set_driving_preferences(preferences):
   if not preferences or set(preferences) - {"pickup", "matched_lead_prediction", "takeoff_style"}:

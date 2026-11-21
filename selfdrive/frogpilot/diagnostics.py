@@ -12,6 +12,8 @@ MAX_SEGMENT_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_SEGMENTS = 24
 HEALTH_KEY = 'ToadPilotHealth'
+VEHICLE_FAULT_ALERTS = frozenset(('canError', 'canBusMissing', 'accFaulted', 'lowSpeedLockout',
+                                  'controlsMismatch', 'relayMalfunction', 'usbError'))
 
 
 def finite(value):
@@ -39,6 +41,30 @@ def driving_sample(sm, now):
     forced_stop=bool(sm['frogpilotPlan'].forcingStop) if sm.alive['frogpilotPlan'] and sm.valid['frogpilotPlan'] else None,
     traffic_mode=bool(sm['frogpilotCarState'].trafficMode) if sm.alive['frogpilotCarState'] and sm.valid['frogpilotCarState'] else None,
     model_ms=finite(model.modelExecutionTime * 1000), frame_drop_percent=finite(model.frameDropPerc))
+
+
+def vehicle_fault_sample(sm, now):
+  controls = sm['controlsState']
+  car = None
+  if sm.alive['carState']:
+    cs = sm['carState']
+    car = dict(can_valid=cs.canValid, can_timeout=cs.canTimeout, can_error_counter=cs.canErrorCounter,
+               acc_faulted=cs.accFaulted, temporary_acc_fault=cs.carFaultedNonCritical)
+
+  pandas = None
+  if sm.alive['pandaStates'] and sm.valid['pandaStates']:
+    pandas = []
+    for p in sm['pandaStates']:
+      buses = [dict(bus_off=bus.busOff, bus_off_count=bus.busOffCnt, errors=bus.totalErrorCnt,
+                    last_error=str(bus.lastStoredError), rx_lost=bus.totalRxLostCnt, tx_lost=bus.totalTxLostCnt)
+               for bus in (p.canState0, p.canState1, p.canState2)]
+      pandas.append(dict(faults=[str(fault) for fault in p.faults], heartbeat_lost=p.heartbeatLost,
+                         safety_rx_invalid=p.safetyRxInvalid, safety_rx_checks_invalid=p.safetyRxChecksInvalid,
+                         safety_tx_blocked=p.safetyTxBlocked, rx_overflow=p.rxBufferOverflow, voltage_mv=p.voltage,
+                         can_buses=buses))
+
+  return dict(t=round(time.time(), 3), mono=round(now, 3), alert_type=controls.alertType,
+              alert_text_1=controls.alertText1, alert_text_2=controls.alertText2, car=car, pandas=pandas)
 
 
 class Recorder:
@@ -93,10 +119,18 @@ class Recorder:
     self.file.write(data)
     self.bytes += len(data)
 
-  def sample(self, value):
+  def _rotate_if_full(self):
     if self.bytes >= self.segment_limit:
       self.close('segment_limit')
       self._open()
+
+  def fault(self, value):
+    self._rotate_if_full()
+    self._write({'type': 'vehicle_fault', **value})
+    self.file.flush()
+
+  def sample(self, value):
+    self._rotate_if_full()
     self._write({'type': 'sample', **value})
     s = self.summary
     s['samples'] += 1
@@ -162,7 +196,7 @@ def main():
   from openpilot.selfdrive.frogpilot.frogpilot_variables import params_memory
   from openpilot.selfdrive.frogpilot.toadpilot import read_toadpilot_config
   sm = messaging.SubMaster(['deviceState', 'carState', 'carControl', 'carOutput', 'controlsState',
-                            'modelV2', 'longitudinalPlan', 'frogpilotPlan', 'frogpilotCarState'], frequency=5)
+                            'modelV2', 'longitudinalPlan', 'frogpilotPlan', 'frogpilotCarState', 'pandaStates'], frequency=5)
   params = Params()
   recorder = Recorder()
   stopped = False
@@ -175,6 +209,7 @@ def main():
   signal.signal(signal.SIGINT, stop)
   tick = 0
   recording_enabled = True
+  previous_fault = ''
   try:
     while not stopped:
       start = time.monotonic()
@@ -192,6 +227,15 @@ def main():
           recorder.close('offroad' if not onroad else 'disabled')
         if onroad and recording_enabled and healthy:
           recorder.sample(driving_sample(sm, start))
+        if recorder.file and sm.alive['controlsState']:
+          # A CAN error also invalidates ordinary control telemetry. The alert
+          # still arrives and can be recorded during that invalid interval.
+          fault = sm['controlsState'].alertType.partition('/')[0]
+          if fault in VEHICLE_FAULT_ALERTS and fault != previous_fault:
+            recorder.fault(vehicle_fault_sample(sm, start))
+          previous_fault = fault
+        else:
+          previous_fault = ''
       except OSError as exc:
         error = str(exc)
         try:

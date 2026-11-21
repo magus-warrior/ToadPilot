@@ -14,10 +14,10 @@
 #include "common/transformations/orientation.hpp"
 #include "cereal/messaging/messaging.h"
 
-const QString MAPBOX_TOKEN = QString::fromStdString(Params().get("MapboxSecretKey"));
 const QString MAPS_HOST = QStringLiteral("https://api.mapbox.com");
 const QString MAPS_CACHE_PATH = "/data/mbgl-cache-navd.db";
 
+QString configured_mapbox_token();
 QString get_mapbox_token();
 QMapLibre::Settings get_mapbox_settings();
 QGeoCoordinate to_QGeoCoordinate(const QMapLibre::Coordinate &in);

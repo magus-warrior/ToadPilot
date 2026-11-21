@@ -87,3 +87,7 @@ Pipfile
 # Local native UI builds and previews
 .native-build/
 .native-preview/
+
+# Navigation state written while the manager is running
+/system/manager/CurrentStep.json
+/system/manager/navdirections.json

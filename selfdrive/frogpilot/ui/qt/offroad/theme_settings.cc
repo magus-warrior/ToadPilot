@@ -342,6 +342,7 @@ FrogPilotThemesPanel::FrogPilotThemesPanel(FrogPilotSettingsWindow *parent) : Fr
             }
           }
         } else if (id == 2) {
+          signalAnimations.append("Arrows");
           signalAnimations.append("None");
           signalAnimations.sort();
 

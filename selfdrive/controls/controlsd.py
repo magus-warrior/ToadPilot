@@ -22,7 +22,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.car.car_helpers import get_car_interface, get_startup_event
 from openpilot.selfdrive.car.gm.values import CC_ONLY_CAR, GMFlags
 from openpilot.selfdrive.controls.lib.alertmanager import AlertManager, set_offroad_alert
-from openpilot.selfdrive.controls.lib.drive_helpers import VCruiseHelper, clip_curvature
+from openpilot.selfdrive.controls.lib.drive_helpers import VCruiseHelper, clip_curvature, posted_cruise_target
 from openpilot.selfdrive.controls.lib.events import ET, EVENTS, Events
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
@@ -586,7 +586,12 @@ class Controls:
   def state_transition(self, CS):
     """Compute conditional state transitions and execute actions on state transitions"""
 
-    self.v_cruise_helper.update_v_cruise(CS, self.enabled, self.is_metric, self.sm['frogpilotPlan'].speedLimitChanged, self.frogpilot_toggles)
+    plan = self.sm['frogpilotPlan']
+    plan_age = (time.monotonic_ns() - self.sm.logMonoTime['frogpilotPlan']) * 1e-9
+    fresh_plan = self.sm.valid['frogpilotPlan'] and self.sm.alive['frogpilotPlan'] and 0 <= plan_age <= 0.5
+    posted_target = posted_cruise_target(plan, self.is_metric) if fresh_plan else None
+    self.v_cruise_helper.update_v_cruise(CS, self.enabled, self.is_metric, fresh_plan and plan.speedLimitChanged,
+                                         self.frogpilot_toggles, posted_target)
 
     # decrement the soft disable timer at every step, as it's reset on
     # entrance in SOFT_DISABLING state
@@ -661,7 +666,8 @@ class Controls:
           else:
             self.state = State.enabled
           self.current_alert_types.append(ET.ENABLE)
-          self.v_cruise_helper.initialize_v_cruise(CS, self.experimental_mode, self.sm['frogpilotPlan'].slcSpeedLimit + self.sm['frogpilotPlan'].slcSpeedLimitOffset, self.frogpilot_toggles)
+          engage_limit = posted_target[1] * CV.KPH_TO_MS if posted_target is not None else 0.
+          self.v_cruise_helper.initialize_v_cruise(CS, self.experimental_mode, engage_limit, self.frogpilot_toggles)
 
     # Check if openpilot is engaged and actuators are enabled
     self.enabled = self.state in ENABLED_STATES

@@ -9,10 +9,11 @@
 class SpeedLimitButton : public QPushButton {
 public:
   explicit SpeedLimitButton(QWidget *parent = nullptr);
-  void updateState(bool available, bool active);
+  void updateState(bool available, bool active, bool vienna);
 
 private:
   void paintEvent(QPaintEvent *event) override;
+  bool circular = false;
   Params params;
   Params params_memory{"/dev/shm/params"};
   QElapsedTimer pending_change;
@@ -20,7 +21,7 @@ private:
 
 inline SpeedLimitButton::SpeedLimitButton(QWidget *parent) : QPushButton(parent) {
   setObjectName("speedLimitControllerButton");
-  setFixedSize(192, 202);
+  setFocusPolicy(Qt::NoFocus);
   setCheckable(true);
   setChecked(params.getBool("SpeedLimitController"));
   setAccessibleName(tr("Speed limit controller"));
@@ -35,7 +36,8 @@ inline SpeedLimitButton::SpeedLimitButton(QWidget *parent) : QPushButton(parent)
   });
 }
 
-inline void SpeedLimitButton::updateState(bool available, bool active) {
+inline void SpeedLimitButton::updateState(bool available, bool active, bool vienna) {
+  circular = vienna;
   setEnabled(available);
   if (active == isChecked()) pending_change.invalidate();
   if (!pending_change.isValid() || pending_change.elapsed() > 2000) setChecked(active);
@@ -44,21 +46,16 @@ inline void SpeedLimitButton::updateState(bool available, bool active) {
 }
 
 inline void SpeedLimitButton::paintEvent(QPaintEvent *event) {
+  if (!isChecked() || !isEnabled()) return;
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
-  p.setOpacity(isDown() || !isEnabled() ? 0.6 : 1.0);
-  const QRect box(6, 14, width() - 12, height() - 28);
-  p.setPen(QPen(isChecked() ? QColor(80, 220, 130) : QColor(180, 180, 180), 4));
-  p.setBrush(isChecked() ? QColor(23, 134, 68, 220) : QColor(0, 0, 0, 166));
-  p.drawRoundedRect(box, 24, 24);
-  p.setPen(Qt::white);
-  QFont font("Inter");
-  font.setPixelSize(25);
-  font.setWeight(QFont::DemiBold);
-  p.setFont(font);
-  p.drawText(box.adjusted(4, 16, -4, -70), Qt::AlignCenter, tr("SPEED\nLIMIT"));
-  font.setPixelSize(42);
-  font.setBold(true);
-  p.setFont(font);
-  p.drawText(box.adjusted(4, 95, -4, -6), Qt::AlignCenter, isChecked() ? tr("ON") : tr("OFF"));
+  p.setBrush(Qt::NoBrush);
+  auto outline = [&](int inset, int width, QColor color) {
+    p.setPen(QPen(color, width));
+    const QRect box = rect().adjusted(inset, inset, -inset, -inset);
+    if (circular) p.drawEllipse(box);
+    else p.drawRoundedRect(box, 24 - inset, 24 - inset);
+  };
+  outline(6, 12, QColor(20, 224, 126, 100));
+  outline(3, 5, QColor(62, 245, 155));
 }

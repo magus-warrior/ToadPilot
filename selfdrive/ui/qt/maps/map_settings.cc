@@ -4,8 +4,12 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QListWidget>
+#include <QTimer>
 
 #include "common/util.h"
+#include "selfdrive/ui/qt/offroad/toadpilot_api.h"
+#include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/request_repeater.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
@@ -19,6 +23,110 @@ static qint64 convertTimestampToEpoch(const QString &timestamp) {
   QDateTime dt = QDateTime::fromString(timestamp, Qt::ISODate);
   return dt.isValid() ? dt.toSecsSinceEpoch() : 0;
 }
+
+namespace {
+class DestinationSearchDialog : public DialogBase {
+public:
+  explicit DestinationSearchDialog(QWidget *parent) : DialogBase(parent) {
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(40, 24, 40, 16);
+    auto *row = new QHBoxLayout;
+    auto *entry = new QLineEdit(this);
+    entry->setObjectName("destinationInput");
+    entry->setPlaceholderText(tr("Address, coordinates, or Waze pin"));
+    entry->setAccessibleName(tr("Destination"));
+    entry->setMaxLength(1024);
+    entry->setStyleSheet("font-size: 64px; padding: 10px 18px; background: #24292e; color: white;");
+    row->addWidget(entry, 1);
+    auto *cancel = new QPushButton(tr("Cancel"), this);
+    cancel->setFixedSize(260, 90);
+    connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+    row->addWidget(cancel);
+    layout->addLayout(row);
+
+    auto *status = new QLabel(this);
+    status->setStyleSheet("font-size: 44px; color: #eeeeee;");
+    status->hide();
+    layout->addWidget(status);
+    auto *matches = new QListWidget(this);
+    matches->setObjectName("addressSuggestions");
+    matches->setStyleSheet("QListWidget { background: #181c20; border: 0; } QListWidget::item { border-bottom: 1px solid #666; } QListWidget::item:selected { background: #35495b; }");
+    matches->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    matches->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    layout->addWidget(matches, 1);
+
+    auto *keyboard = new Keyboard(this);
+    layout->addWidget(keyboard);
+    connect(keyboard, &Keyboard::emitBackspace, entry, &QLineEdit::backspace);
+    connect(keyboard, &Keyboard::emitKey, entry, [entry](const QString &key) { entry->insert(key.left(1)); });
+
+    auto *api = new ToadPilotApi(this);
+    auto *timer = new QTimer(this);
+    timer->setSingleShot(true);
+    timer->setInterval(350);
+    auto search = [=] {
+      timer->stop();
+      const QString query = entry->text().trimmed();
+      if (query.size() < 3) return;
+      const int request = ++revision;
+      status->setText(tr("Searching…"));
+      status->show();
+      api->request("/navigation/search", {{"query", query}}, true, [=](const QJsonObject &data, const QString &error) {
+        if (request != revision) return;
+        matches->clear();
+        for (const auto &value : data.value("results").toArray()) {
+          const auto place = value.toObject();
+          const QString address = place.value("place_name").toString();
+          auto *item = new QListWidgetItem(matches);
+          item->setData(Qt::AccessibleTextRole, address);
+          item->setData(Qt::UserRole, place);
+          auto *result = new QWidget(matches);
+          result->setAttribute(Qt::WA_TransparentForMouseEvents);
+          auto *lines = new QVBoxLayout(result);
+          lines->setContentsMargins(18, 5, 12, 5);
+          lines->setSpacing(0);
+          const int comma = address.indexOf(',');
+          auto addLine = [&](const QString &text, int pixels, bool bold) {
+            auto *label = new QLabel(text, result);
+            label->setTextFormat(Qt::PlainText);
+            label->setStyleSheet(QString("font-size: %1px; font-weight: %2; color: %3; background: transparent;")
+                                 .arg(pixels).arg(bold ? 600 : 400).arg(bold ? "#ffffff" : "#dde6ef"));
+            lines->addWidget(label);
+          };
+          addLine(comma < 0 ? address : address.left(comma), 60, true);
+          if (comma >= 0) addLine(address.mid(comma + 1).trimmed(), 44, false);
+          item->setSizeHint(QSize(0, comma < 0 ? 108 : 154));
+          matches->setItemWidget(item, result);
+        }
+        status->setText(error.isEmpty() ? tr("No matching addresses") : error);
+        status->setVisible(matches->count() == 0);
+      }, 15000);
+    };
+    connect(entry, &QLineEdit::textChanged, this, [=](const QString &text) {
+      ++revision;
+      timer->stop();
+      matches->clear();
+      status->hide();
+      if (text.trimmed().size() >= 3) timer->start();
+    });
+    connect(timer, &QTimer::timeout, this, search);
+    connect(entry, &QLineEdit::returnPressed, this, search);
+    connect(keyboard, &Keyboard::emitEnter, this, search);
+    auto select = [this](QListWidgetItem *item) {
+      selected = item->data(Qt::UserRole).toJsonObject();
+      accept();
+    };
+    connect(matches, &QListWidget::itemClicked, this, select);
+    connect(matches, &QListWidget::itemActivated, this, select);
+    entry->setFocus();
+  }
+
+  QJsonObject selected;
+
+private:
+  int revision = 0;
+};
+}  // namespace
 
 MapSettings::MapSettings(bool closeable, QWidget *parent) : QFrame(parent) {
   setContentsMargins(0, 0, 0, 0);
@@ -62,7 +170,7 @@ MapSettings::MapSettings(bool closeable, QWidget *parent) : QFrame(parent) {
       title->setStyleSheet("color: #FFFFFF; font-size: 54px; font-weight: 600;");
       heading->addWidget(title);
 
-      subtitle = new QLabel(tr("Manage at connect.comma.ai"), this);
+      subtitle = new QLabel(this);
       subtitle->setStyleSheet("color: #A0A0A0; font-size: 40px; font-weight: 300;");
       heading->addWidget(subtitle);
     }
@@ -70,6 +178,19 @@ MapSettings::MapSettings(bool closeable, QWidget *parent) : QFrame(parent) {
   }
   frame->addLayout(heading_frame);
   frame->addSpacing(32);
+
+  auto *search = new QPushButton(tr("Find destination"), this);
+  search->setObjectName("navigationSearch");
+  search->setMinimumHeight(96);
+  frame->addWidget(search);
+  frame->addSpacing(16);
+  connect(search, &QPushButton::clicked, this, [this] {
+    DestinationSearchDialog dialog(this);
+    if (!dialog.exec() || dialog.selected.isEmpty()) return;
+    const auto place = dialog.selected;
+    if (ConfirmationDialog::confirm(tr("Navigate to %1?").arg(place.value("place_name").toString()), tr("Start route"), this))
+      navigateTo(place);
+  });
 
   current_widget = new DestinationWidget(this);
   QObject::connect(current_widget, &DestinationWidget::actionClicked,
@@ -142,8 +263,9 @@ void MapSettings::refresh() {
   setUpdatesEnabled(true);
 
   // Use IP for NOO
-  QString ipAddress = QString("%1:8082").arg(wifi->getIp4Address());
-  subtitle->setText(tr("Manage at %1").arg(ipAddress));
+  const QString ip = wifi->getIp4Address();
+  subtitle->setText(ip.isEmpty() ? QString() : tr("Open %1:8082/addr_input on your phone").arg(ip));
+  subtitle->setVisible(!ip.isEmpty());
 }
 
 void MapSettings::navigateTo(const QJsonObject &place) {
@@ -282,6 +404,7 @@ NavManager *NavManager::instance() {
 
 NavManager::NavManager(QObject *parent) : QObject(parent) {
   locations = QJsonDocument::fromJson(params.get("NavPastDestinations").c_str()).array();
+  if (locations.isEmpty()) locations = QJsonDocument::fromJson(params.get("ApiCache_NavDestinations").c_str()).array();
   current_dest = QJsonDocument::fromJson(params.get("NavDestination").c_str()).object();
   if (auto dongle_id = getDongleId()) {
     {

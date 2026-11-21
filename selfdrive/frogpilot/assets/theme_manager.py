@@ -424,7 +424,8 @@ class ThemeManager:
       if not downloadable_list:
         continue
 
-      if theme_name.lower() in {"none", "stock"} or (theme_component == "colors" and theme_name == "toad_neon"):
+      if (theme_name.lower() in {"none", "stock"} or (theme_component == "colors" and theme_name == "toad_neon")
+          or (theme_component == "signals" and theme_name == "arrows")):
         continue
 
       if theme_component == "steering_wheels":

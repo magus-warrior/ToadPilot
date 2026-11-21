@@ -1,5 +1,11 @@
 {% block main %}
-  <!-- Your form markup -->
+  {% if search_error %}<p role="alert">{{search_error}}</p>{% endif %}
+  {% if results %}
+  <h2>Choose a destination</h2>
+  <ul>{% for place in results %}
+    <li><a href="{{url_for('nav_confirmation', addr=place.place_name, lat=place.latitude, lon=place.longitude)}}">{{place.place_name}}</a></li>
+  {% endfor %}</ul>
+  {% endif %}
   <form name="searchForm" method="post">
     <fieldset class="uk-fieldset">
       <div class="uk-margin">
@@ -13,52 +19,88 @@
           {% if fav3 %} <option value="fav3">Favorite 3: {{fav3}}</option> {% endif %}
         </select>
         {% endif %}
-        <input class="uk-input" type="text" name="addr_val" id="pac-input" placeholder="Search a place">
+        <input class="uk-input" type="text" name="addr_val" id="pac-input" aria-label="Destination" autocomplete="off" maxlength="1024" aria-controls="address-matches" placeholder="Address, coordinates, or Waze pin">
+        <ul id="address-matches" aria-label="Matching addresses"></ul>
+        <p id="address-status" role="status"></p>
         <input class="uk-button uk-button-primary uk-width-1-1 uk-margin-small-bottom" type="submit" value="Search">
       </div>
     </fieldset>
   </form>
-<!-- Include the Google Maps Places API script conditionally with JavaScript -->
+<style>
+  form[name="searchForm"], #address-matches { max-width: 46rem; margin: 1rem auto; }
+  #address-matches { list-style: none; padding: 0; text-align: left; }
+  #address-matches:empty, #address-status:empty { display: none; }
+  #address-matches a { display: block; padding: .85rem 1rem; border-bottom: 1px solid #858585; }
+</style>
+{% if gmap_key %}
 <script>
-  // attach gmap_key to variable
-  let gmap = "{{gmap_key}}";
-
-  // Check if gmap_key is defined
-  if (gmap && gmap !== "None") {
-    var script = document.createElement('script');
-    script.src = 'https://maps.googleapis.com/maps/api/js?key={{gmap_key}}&libraries=places&callback=initAutocomplete';
-    script.async = true;
-    script.defer = true;
-    document.head.appendChild(script);
-
-    // Define the callback function for place_changed
-    function onPlaceChanged() {
-      var place = autocomplete.getPlace();
-
-      // Check if the place has a formatted address
-      if (place.formatted_address) {
-        // Set the value of the input field to the formatted address
-        document.getElementById('pac-input').value = place.formatted_address;
+  window.initAutocomplete = () => {
+    const input = document.getElementById('pac-input');
+    const autocomplete = new google.maps.places.Autocomplete(input, {fields: ['formatted_address', 'geometry']});
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+      if (place.formatted_address && place.geometry) {
+        location.assign('/nav_confirmation?' + new URLSearchParams({
+          addr: place.formatted_address, lat: place.geometry.location.lat(), lon: place.geometry.location.lng()
+        }));
       }
-    }
-
-    // Define the autocomplete variable
-    var autocomplete;
-
-    // Define the initAutocomplete function with initial bounds
-    function initAutocomplete() {
-      var center = new google.maps.LatLng({{lat}}, {{lon}});
-      var bounds = new google.maps.Circle({ center: center, radius: 5000 }).getBounds();
-
-      autocomplete = new google.maps.places.Autocomplete(
-        document.getElementById('pac-input'),
-        {
-          bounds: bounds // Set initial bounds here
-        }
-      );
-
-      autocomplete.addListener('place_changed', onPlaceChanged);
-    }
-  }
+    });
+  };
 </script>
+<script async src="https://maps.googleapis.com/maps/api/js?key={{gmap_key|urlencode}}&amp;libraries=places&amp;callback=initAutocomplete"></script>
+{% else %}
+<script>
+(() => {
+  const input = document.getElementById('pac-input');
+  const list = document.getElementById('address-matches');
+  const status = document.getElementById('address-status');
+  let timer, pending;
+  let revision = 0;
+  function clear() {
+    ++revision;
+    clearTimeout(timer);
+    if (pending) pending.abort();
+    list.replaceChildren();
+    status.textContent = '';
+  }
+  input.addEventListener('input', () => {
+    clear();
+    const query = input.value.trim();
+    if (query.length < 3) return;
+    const current = revision;
+    timer = setTimeout(async () => {
+      pending = new AbortController();
+      status.textContent = 'Searching…';
+      try {
+        const response = await fetch('/navigation/search', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({query}), signal: pending.signal
+        });
+        const data = await response.json();
+        if (current !== revision) return;
+        if (!response.ok) throw new Error(data.error || 'Address search is unavailable.');
+        for (const place of data.results) {
+          const link = document.createElement('a');
+          link.textContent = place.place_name;
+          link.href = '/nav_confirmation?' + new URLSearchParams({addr: place.place_name, lat: place.latitude, lon: place.longitude});
+          const item = document.createElement('li');
+          item.append(link);
+          list.append(item);
+        }
+        status.textContent = data.results.length ? '' : 'No matching addresses.';
+      } catch (error) {
+        if (current === revision) status.textContent = error.message;
+      }
+    }, 350);
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') clear();
+    if (event.key === 'ArrowDown' && list.firstChild) {
+      event.preventDefault();
+      list.querySelector('a').focus();
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

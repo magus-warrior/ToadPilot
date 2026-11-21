@@ -4,16 +4,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openpilot.selfdrive.frogpilot.diagnostics import Recorder, list_trips, read_trip, finite, driving_sample
+from openpilot.selfdrive.frogpilot.diagnostics import Recorder, list_trips, read_trip, finite, driving_sample, vehicle_fault_sample
 from openpilot.selfdrive.frogpilot.fleetmanager import helpers
 from openpilot.selfdrive.frogpilot.fleetmanager.fleet_manager import app
+
+
+class Snapshot(dict):
+  pass
 
 
 class DiagnosticsTests(unittest.TestCase):
   def test_driving_sample_uses_current_cereal_schema_and_stale_optional_inputs(self):
     from cereal import messaging
-    class Snapshot(dict):
-      pass
     services = ['carState', 'carControl', 'carOutput', 'controlsState', 'modelV2',
                 'longitudinalPlan', 'frogpilotPlan', 'frogpilotCarState']
     snapshot = Snapshot({s: getattr(messaging.new_message(s), s) for s in services})
@@ -28,6 +30,32 @@ class DiagnosticsTests(unittest.TestCase):
     self.assertTrue(sample['traffic_mode'])
     snapshot.alive['frogpilotCarState'] = False
     self.assertIsNone(driving_sample(snapshot, 11.)['traffic_mode'])
+
+  def test_vehicle_fault_records_invalid_can_and_panda_health(self):
+    from cereal import messaging
+    controls = messaging.new_message('controlsState').controlsState
+    controls.alertType = 'canBusMissing/immediateDisable'
+    car = messaging.new_message('carState').carState
+    car.canTimeout = True
+    car.canErrorCounter = 3
+    pandas = messaging.new_message('pandaStates', 1).pandaStates
+    pandas[0].canState0.totalErrorCnt = 14
+    snapshot = Snapshot(controlsState=controls, carState=car, pandaStates=pandas)
+    snapshot.alive = dict.fromkeys(snapshot, True)
+    snapshot.valid = dict(controlsState=False, carState=False, pandaStates=True)
+
+    with tempfile.TemporaryDirectory() as directory:
+      recorder = Recorder(directory)
+      recorder.start('test-model')
+      recorder.fault(vehicle_fault_sample(snapshot, 1.))
+      fault = json.loads(recorder.path.read_text().splitlines()[-1])
+      recorder.close()
+    self.assertEqual(fault['type'], 'vehicle_fault')
+    self.assertEqual(fault['alert_type'], 'canBusMissing/immediateDisable')
+    self.assertFalse(fault['car']['can_valid'])
+    self.assertTrue(fault['car']['can_timeout'])
+    self.assertEqual(fault['car']['can_error_counter'], 3)
+    self.assertEqual(fault['pandas'][0]['can_buses'][0]['errors'], 14)
 
   def test_rotation_pruning_and_complete_summaries(self):
     with tempfile.TemporaryDirectory() as directory:

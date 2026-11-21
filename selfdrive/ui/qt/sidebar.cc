@@ -1,43 +1,30 @@
 #include "selfdrive/ui/qt/sidebar.h"
 
+#include <algorithm>
 #include <QMouseEvent>
+#include <QPainterPath>
 
 #include "selfdrive/ui/qt/util.h"
 
 void Sidebar::drawMetric(QPainter &p, const QPair<QString, QString> &label, QColor c, int y) {
   const QRect rect = {30, y, 240, 126};
 
-  if (!onroad) {
-    p.setPen(QPen(QColor("#463958"), 2));
-    p.setBrush(QColor("#211b32"));
-    p.drawRoundedRect(rect, 18, 18);
-    p.setPen(Qt::NoPen);
-    p.setBrush(c);
-    p.drawEllipse(QPoint(rect.right() - 24, rect.top() + 26), 7, 7);
-    p.setPen(QColor("#c8bcdc"));
-    p.setFont(InterFont(24, QFont::DemiBold));
-    p.drawText(rect.adjusted(19, 10, -27, -68), Qt::AlignLeft | Qt::AlignVCenter, label.first);
-    p.setPen(Qt::white);
-    p.setFont(InterFont(34, QFont::DemiBold));
-    p.drawText(rect.adjusted(19, 48, -10, -8), Qt::AlignLeft | Qt::AlignVCenter, label.second);
-    return;
-  }
-
+  p.setPen(QPen(onroad ? QColor("#35566d") : QColor("#463958"), 2));
+  p.setBrush(onroad ? QColor("#122c40") : QColor("#211b32"));
+  p.drawRoundedRect(rect, 18, 18);
   p.setPen(Qt::NoPen);
-  p.setBrush(QBrush(c));
-  p.setClipRect(rect.x() + 4, rect.y(), 18, rect.height(), Qt::ClipOperation::ReplaceClip);
-  p.drawRoundedRect(QRect(rect.x() + 4, rect.y() + 4, 100, 118), 18, 18);
-  p.setClipping(false);
-
-  QPen pen = QPen(QColor(0xff, 0xff, 0xff, 0x55));
-  pen.setWidth(2);
-  p.setPen(pen);
-  p.setBrush(Qt::NoBrush);
-  p.drawRoundedRect(rect, 20, 20);
-
-  p.setPen(QColor(0xff, 0xff, 0xff));
-  p.setFont(InterFont(35, QFont::DemiBold));
-  p.drawText(rect.adjusted(22, 0, 0, 0), Qt::AlignCenter, label.first + "\n" + label.second);
+  p.setBrush(c);
+  p.drawEllipse(QPoint(rect.right() - 24, rect.top() + 26), onroad ? 10 : 7, onroad ? 10 : 7);
+  p.setPen(onroad ? QColor("#b6d5e5") : QColor("#c8bcdc"));
+  p.setFont(InterFont(onroad ? 28 : 24, QFont::DemiBold));
+  p.drawText(rect.adjusted(19, 10, onroad ? -40 : -27, -68), Qt::AlignLeft | Qt::AlignVCenter, label.first);
+  p.setPen(Qt::white);
+  const QRect valueRect = rect.adjusted(19, 48, -10, -8);
+  p.setFont(InterFont(onroad ? 41 : 34, QFont::DemiBold));
+  if (onroad && p.fontMetrics().horizontalAdvance(label.second) > valueRect.width()) {
+    p.setFont(InterFont(std::max(24, 41 * valueRect.width() / p.fontMetrics().horizontalAdvance(label.second)), QFont::DemiBold));
+  }
+  p.drawText(valueRect, Qt::AlignLeft | Qt::AlignVCenter, label.second);
 }
 
 Sidebar::Sidebar(QWidget *parent) : QFrame(parent), onroad(false), flag_pressed(false), settings_pressed(false) {
@@ -55,7 +42,7 @@ Sidebar::Sidebar(QWidget *parent) : QFrame(parent), onroad(false), flag_pressed(
   home_label = new QLabel(this);
   settings_label = new QLabel(this);
 
-  flagPngPath = "../frogpilot/assets/active_theme/icons/button_flag.png";
+  onroad_settings_img = loadPixmap("../assets/navigation/icon_settings.svg", {80, 80});
   homeGifPath = "../frogpilot/assets/active_theme/icons/button_home.gif";
   homePngPath = "../frogpilot/assets/active_theme/icons/button_home.png";
   settingsGifPath = "../frogpilot/assets/active_theme/icons/button_settings.gif";
@@ -99,7 +86,7 @@ void Sidebar::updateIcon(QLabel *&label, QMovie *&gif, const QString &gifPath, c
       if (label) {
         label->setGeometry(btnRect);
         label->setMovie(gif);
-        label->show();
+        label->setVisible(!onroad);
       }
 
       gif->start();
@@ -120,7 +107,6 @@ void Sidebar::updateIcon(QLabel *&label, QMovie *&gif, const QString &gifPath, c
       logoPainter.drawRoundedRect(home_img.rect().adjusted(0, 40, 0, -40), 12, 12);
       auto logo = loadPixmap(pngPath, QSize(160, 80));
       logoPainter.drawPixmap((180 - logo.width()) / 2, (180 - logo.height()) / 2, logo);
-      flag_img = loadPixmap(flagPngPath, btnRect.size());
     } else {
       settings_img = loadPixmap(pngPath, btnRect.size(), Qt::IgnoreAspectRatio);
     }
@@ -222,6 +208,7 @@ void Sidebar::mouseReleaseEvent(QMouseEvent *event) {
 
 void Sidebar::offroadTransition(bool offroad) {
   onroad = !offroad;
+  settings_label->setVisible(offroad && isSettingsGif);
   update();
 }
 
@@ -246,6 +233,30 @@ void Sidebar::updateState(const UIState &s) {
   auto &sm = *(s.sm);
 
   auto deviceState = sm["deviceState"].getDeviceState();
+  // FrogPilot variables
+  const UIScene &scene = s.scene;
+
+  isCPU = scene.cpu_metrics;
+  isFahrenheit = scene.fahrenheit;
+  isGPU = scene.gpu_metrics;
+  isIP = scene.ip_metrics;
+  isMemoryUsage = scene.memory_metrics;
+  isNumericalTemp = scene.numerical_temp;
+  isRandomEvents = scene.random_events;
+  isSidebarMetrics = scene.sidebar_metrics;
+  isStorageLeft = scene.storage_left_metrics;
+  isStorageUsed = scene.storage_used_metrics;
+
+  bool useStockColors = scene.use_stock_colors;
+  sidebar_color1 = useStockColors ? good_color : scene.sidebar_color1;
+  sidebar_color2 = useStockColors ? good_color : scene.sidebar_color2;
+  sidebar_color3 = useStockColors ? good_color : scene.sidebar_color3;
+
+  const cereal::FrogPilotDeviceState::Reader &frogpilotDeviceState = sm["frogpilotDeviceState"].getFrogpilotDeviceState();
+
+  int maxTempC = deviceState.getMaxTempC();
+  max_temp = isFahrenheit ? QString::number(maxTempC * 9 / 5 + 32) + "°F" : QString::number(maxTempC) + "°C";
+
   setProperty("netType", network_type[deviceState.getNetworkType()]);
   int strength = (int)deviceState.getNetworkStrength();
   setProperty("netStrength", strength > 0 ? strength + 1 : 0);
@@ -277,30 +288,6 @@ void Sidebar::updateState(const UIState &s) {
     pandaStatus = {{tr("GPS"), tr("SEARCH")}, warning_color};
   }
   setProperty("pandaStatus", QVariant::fromValue(pandaStatus));
-
-  // FrogPilot variables
-  const UIScene &scene = s.scene;
-
-  isCPU = scene.cpu_metrics;
-  isFahrenheit = scene.fahrenheit;
-  isGPU = scene.gpu_metrics;
-  isIP = scene.ip_metrics;
-  isMemoryUsage = scene.memory_metrics;
-  isNumericalTemp = scene.numerical_temp;
-  isRandomEvents = scene.random_events;
-  isSidebarMetrics = scene.sidebar_metrics;
-  isStorageLeft = scene.storage_left_metrics;
-  isStorageUsed = scene.storage_used_metrics;
-
-  bool useStockColors = scene.use_stock_colors;
-  sidebar_color1 = useStockColors ? good_color : scene.sidebar_color1;
-  sidebar_color2 = useStockColors ? good_color : scene.sidebar_color2;
-  sidebar_color3 = useStockColors ? good_color : scene.sidebar_color3;
-
-  const cereal::FrogPilotDeviceState::Reader &frogpilotDeviceState = sm["frogpilotDeviceState"].getFrogpilotDeviceState();
-
-  int maxTempC = deviceState.getMaxTempC();
-  max_temp = isFahrenheit ? QString::number(maxTempC * 9 / 5 + 32) + "°F" : QString::number(maxTempC) + "°C";
 
   if (isCPU || isGPU) {
     capnp::List<int8_t>::Reader cpu_loads = deviceState.getCpuUsagePercent();
@@ -352,22 +339,46 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   p.setPen(Qt::NoPen);
   p.setRenderHint(QPainter::Antialiasing);
 
-  p.fillRect(rect(), onroad ? QColor(57, 57, 57) : QColor("#151123"));
+  p.fillRect(rect(), onroad ? QColor("#0a1b2b") : QColor("#151123"));
 
   // buttons
-  if (!isSettingsGif) {
+  if (onroad) {
+    p.setPen(QPen(QColor("#35566d"), 2));
+    p.setBrush(settings_pressed ? QColor("#1e455a") : QColor("#122c40"));
+    p.drawRoundedRect(settings_btn, 22, 22);
+    p.drawPixmap(settings_btn.center() - QPoint(onroad_settings_img.width() / 2, onroad_settings_img.height() / 2), onroad_settings_img);
+
+    p.setBrush(flag_pressed ? QColor("#215467") : QColor("#103446"));
+    p.setPen(QPen(QColor("#408497"), 3));
+    p.drawRoundedRect(home_btn, 26, 26);
+    const QPoint center = home_btn.center();
+    QPainterPath bookmark;
+    bookmark.moveTo(center.x() - 25, center.y() - 52);
+    bookmark.lineTo(center.x() + 25, center.y() - 52);
+    bookmark.lineTo(center.x() + 25, center.y() + 12);
+    bookmark.lineTo(center.x(), center.y() - 4);
+    bookmark.lineTo(center.x() - 25, center.y() + 12);
+    bookmark.closeSubpath();
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor("#86eedc"));
+    p.drawPath(bookmark);
+    p.setPen(Qt::white);
+    p.setFont(InterFont(27, QFont::DemiBold));
+    p.drawText(home_btn.adjusted(3, 105, -3, -8), Qt::AlignCenter, tr("Mark event"));
+  } else if (!isSettingsGif) {
     p.setOpacity(settings_pressed ? 0.65 : 1.0);
     p.drawPixmap(settings_btn.x(), settings_btn.y(), settings_img);
   }
-  if (!isHomeGif) {
-    p.setOpacity(onroad && flag_pressed ? 0.65 : 1.0);
-    p.drawPixmap(home_btn.x(), home_btn.y(), onroad ? flag_img : home_img);
+  if (!onroad && !isHomeGif) {
+    p.setOpacity(1.);
+    p.drawPixmap(home_btn.x(), home_btn.y(), home_img);
   }
   p.setOpacity(1.0);
 
   // network
   int x = 58;
-  const QColor gray(0x54, 0x54, 0x54);
+  const QColor inactiveBar = onroad ? QColor("#335269") : QColor("#545454");
+  p.setPen(Qt::NoPen);
   p.setFont(InterFont(35));
 
   if (isIP) {
@@ -379,7 +390,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
     p.restore();
   } else {
     for (int i = 0; i < 5; ++i) {
-      p.setBrush(i < net_strength ? Qt::white : gray);
+      p.setBrush(i < net_strength ? Qt::white : inactiveBar);
       p.drawEllipse(x, 196, 27, 27);
       x += 37;
     }

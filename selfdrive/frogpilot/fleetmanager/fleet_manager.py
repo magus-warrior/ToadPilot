@@ -35,6 +35,7 @@ from requests.exceptions import ConnectionError
 from openpilot.common.realtime import set_core_affinity
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.hw import Paths
+from openpilot.selfdrive.navd.helpers import DIRECTIONS_DIR
 
 app = Flask(__name__)
 from openpilot.selfdrive.frogpilot.window_control.web import register as register_vehicle_controls
@@ -172,27 +173,20 @@ def open_error_log(file_name):
 def addr_input():
   preload = fleet.preload_favs()
   search_input = fleet.get_search_input()
-  token = fleet.get_public_token()
-
-  lon = 0.0
-  lat = 0.0
-
   if request.method == 'POST':
-    postvars = request.form.to_dict()
-    valid_addr = False
-    addr, lon, lat, valid_addr, token = fleet.parse_addr(postvars, lon, lat, valid_addr, token)
-
-    if not valid_addr:
-      addr = request.form.get('addr_val')
-      addr, lon, lat, valid_addr, token = fleet.search_addr(postvars, lon, lat, valid_addr, token)
-
-    if valid_addr:
-      return redirect(url_for('nav_confirmation', addr=addr, lon=lon, lat=lat))
-    return render_template("error.html")
-
-  if search_input == 0:
-    if fleet.get_public_token() is None:
-      return redirect(url_for('public_token_input'))
+    try:
+      label = request.form.get("fav_val")
+      favorite = next((d for d in fleet.saved_destinations() if label and d.get("label") == label), None)
+      if favorite:
+        results = [fleet.destination(favorite.get("latitude"), favorite.get("longitude"), favorite.get("place_name"))]
+      else:
+        results = fleet.search_destinations(request.form.get("addr_val"))
+      if len(results) == 1:
+        place = results[0]
+        return redirect(url_for('nav_confirmation', addr=place["place_name"], lon=place["longitude"], lat=place["latitude"]))
+      return render_template("addr.html", results=results, home=preload[0], work=preload[1], fav1=preload[2], fav2=preload[3], fav3=preload[4])
+    except ValueError as e:
+      return render_template("addr.html", search_error=str(e), home=preload[0], work=preload[1], fav1=preload[2], fav2=preload[3], fav3=preload[4]), 400
 
   if search_input == 1:
     amap_key, amap_key_2 = fleet.get_amap_key()
@@ -213,6 +207,15 @@ def addr_input():
 
   return render_template("addr.html", gmap_key=None, lon=None, lat=None, home=preload[0], work=preload[1], fav1=preload[2], fav2=preload[3], fav3=preload[4])
 
+@app.post("/navigation/search")
+def navigation_search():
+  payload = request.get_json(silent=True)
+  try:
+    results = fleet.search_destinations(payload.get("query") if isinstance(payload, dict) else None)
+  except ValueError as e:
+    return jsonify(error=str(e)), 400
+  return jsonify(results=results)
+
 @app.route("/nav_confirmation", methods=['GET', 'POST'])
 def nav_confirmation():
   token = fleet.get_public_token()
@@ -221,28 +224,24 @@ def nav_confirmation():
   addr = request.args.get('addr')
   if request.method == 'POST':
     postvars = request.form.to_dict()
-    fleet.nav_confirmed(postvars)
+    try:
+      fleet.nav_confirmed(postvars)
+    except ValueError as e:
+      return render_template("addr.html", search_error=str(e)), 400
     return redirect(url_for('addr_input'))
   else:
     return render_template("nav_confirmation.html", addr=addr, lon=lon, lat=lat, token=token)
 
 @app.route("/public_token_input", methods=['GET', 'POST'])
-def public_token_input():
-  if request.method == 'POST':
-    postvars = request.form.to_dict()
-    fleet.public_token_input(postvars)
-    return redirect(url_for('addr_input'))
-  else:
-    return render_template("public_token_input.html")
-
 @app.route("/app_token_input", methods=['GET', 'POST'])
-def app_token_input():
+def legacy_mapbox_key():
   if request.method == 'POST':
-    postvars = request.form.to_dict()
-    fleet.app_token_input(postvars)
-    return redirect(url_for('addr_input'))
-  else:
-    return render_template("app_token_input.html")
+    try:
+      fleet.save_mapbox_keys(request.form.get("pk_token_val"), request.form.get("sk_token_val"))
+    except ValueError as e:
+      return render_tools(message=str(e), error=True, edit_keys=True), 400
+    return redirect(url_for('addr_input'), code=303)
+  return redirect(url_for("tools_route", edit="keys", _anchor="edit-keys"))
 
 @app.route("/gmap_key_input", methods=['GET', 'POST'])
 def gmap_key_input():
@@ -266,7 +265,10 @@ def amap_key_input():
 def amap_addr_input():
   if request.method == 'POST':
     postvars = request.form.to_dict()
-    fleet.nav_confirmed(postvars)
+    try:
+      fleet.nav_confirmed(postvars, amap=True)
+    except ValueError as e:
+      return render_template("addr.html", search_error=str(e)), 400
     return redirect(url_for('amap_addr_input'))
   else:
     lon, lat = fleet.get_last_lon_lat()
@@ -275,15 +277,11 @@ def amap_addr_input():
 
 @app.route("/CurrentStep.json", methods=['GET'])
 def find_CurrentStep():
-  directory = "/data/openpilot/selfdrive/manager/"
-  filename = "CurrentStep.json"
-  return send_from_directory(directory, filename, as_attachment=True)
+  return send_from_directory(DIRECTIONS_DIR, "CurrentStep.json", max_age=0)
 
 @app.route("/navdirections.json", methods=['GET'])
 def find_nav_directions():
-  directory = "/data/openpilot/selfdrive/manager/"
-  filename = "navdirections.json"
-  return send_from_directory(directory, filename, as_attachment=True)
+  return send_from_directory(DIRECTIONS_DIR, "navdirections.json", max_age=0)
 
 @app.route("/locations", methods=['GET'])
 def get_locations():
@@ -292,13 +290,11 @@ def get_locations():
 
 @app.route("/set_destination", methods=['POST'])
 def set_destination():
-  valid_addr = False
-  postvars = request.get_json()
-  data, valid_addr = fleet.set_destination(postvars, valid_addr)
-  if valid_addr:
-    return Response('{"success": true}', content_type='application/json')
-  else:
-    return Response('{"success": false}', content_type='application/json')
+  try:
+    fleet.set_destination(request.get_json(silent=True))
+  except ValueError as e:
+    return jsonify(success=False, error=str(e)), 400
+  return jsonify(success=True)
 
 @app.route("/navigation/<file_name>", methods=['GET'])
 def find_navicon(file_name):
@@ -310,19 +306,39 @@ def find_previewgif(file_path):
   directory = "/data/media/0/realdata/"
   return send_from_directory(directory, file_path, as_attachment=True)
 
-@app.route("/tools", methods=['GET'])
-def tools_route():
-  response = Response(render_template("tools.html"))
+def render_tools(**context):
+  response = Response(render_template("tools.html", keys=fleet.mapbox_key_status(), driving_settings=fleet.tools_driving_settings(),
+                                      writable=fleet._get_toadpilot_road_state()["settings_writable"], **context))
   response.headers["Cache-Control"] = "no-store"
   return response
+
+@app.route("/tools", methods=['GET', 'POST'])
+def tools_route():
+  if request.method == "POST":
+    action = request.form.get("action")
+    try:
+      if action == "check":
+        return render_tools(checks=fleet.check_mapbox_key())
+      if action == "driving":
+        fleet.update_tools_driving_setting(request.form.get("setting"), request.form.get("value"))
+        return redirect(url_for("tools_route", _anchor="driving-settings"), code=303)
+      if action != "save":
+        raise ValueError("Choose a navigation key action.")
+      fleet.save_mapbox_keys(request.form.get("public_token"), request.form.get("secret_token"))
+    except ValueError as e:
+      return render_tools(message=str(e), error=True, edit_keys=True), 400
+    return redirect(url_for("tools_route", updated="1"), code=303)
+  return render_tools(message="Keys updated." if request.args.get("updated") == "1" else "",
+                      edit_keys=request.args.get("edit") == "keys")
+
+@app.get("/tools/controller")
+def controller_settings():
+  return redirect(url_for("tools_route", _anchor="driving-settings"))
 
 @app.route("/mapbox_token", methods=['GET', 'POST'])
 def mapbox_token_route():
   if request.method == 'GET':
-    response = jsonify({
-      "public_configured": fleet.get_public_token() is not None,
-      "secret_configured": fleet.get_secret_token() is not None,
-    })
+    response = jsonify(fleet.mapbox_key_status())
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -330,25 +346,12 @@ def mapbox_token_route():
   if not isinstance(request_data, dict):
     return jsonify({"error": "Mapbox token request must be a JSON object."}), 400
   try:
-    public_token = request_data.get("public_token")
-    secret_token = request_data.get("secret_token")
-    if public_token is not None and not isinstance(public_token, str):
-      raise ValueError("Mapbox public token must be text.")
-    if secret_token is not None and not isinstance(secret_token, str):
-      raise ValueError("Mapbox secret token must be text.")
-    if not any(token is not None and token.strip() for token in (public_token, secret_token)):
-      raise ValueError("Enter a Mapbox public or secret token.")
-    if public_token is not None and public_token.strip():
-      fleet.set_public_token(public_token)
-    if secret_token is not None and secret_token.strip():
-      fleet.set_secret_token(secret_token)
+    fleet.save_mapbox_keys(request_data.get("public_token"), request_data.get("secret_token"))
   except ValueError as error:
     return jsonify({"error": str(error)}), 400
-  return jsonify({
-    "public_configured": fleet.get_public_token() is not None,
-    "secret_configured": fleet.get_secret_token() is not None,
-    "message": "Mapbox token settings saved.",
-  })
+  response = jsonify(**fleet.mapbox_key_status(), message="Mapbox token settings saved.")
+  response.headers["Cache-Control"] = "no-store"
+  return response
 
 @app.route("/get_toggle_values", methods=['GET'])
 def get_toggle_values_route():

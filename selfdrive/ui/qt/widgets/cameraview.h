@@ -50,7 +50,7 @@ signals:
 
 protected:
   void paintGL() override;
-  bool drawFrame(std::optional<uint32_t> frame_id);
+  bool drawFrame(std::optional<uint32_t> model_frame_id);
   void initializeGL() override;
   void resizeGL(int w, int h) override { updateFrameMat(); }
   void showEvent(QShowEvent *event) override;
@@ -92,7 +92,7 @@ protected:
 
   std::recursive_mutex frame_lock;
   std::deque<std::pair<uint32_t, VisionBuf*>> frames;
-  decltype(frames)::const_reverse_iterator selectFrame(std::optional<uint32_t> frame_id) const;
+  std::pair<decltype(frames)::const_reverse_iterator, bool> selectFrame(std::optional<uint32_t> model_frame_id) const;
   uint32_t prev_frame_id = 0;
 
 protected slots:

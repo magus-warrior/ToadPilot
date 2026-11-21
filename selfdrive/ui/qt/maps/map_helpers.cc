@@ -11,9 +11,19 @@
 #include "system/hardware/hw.h"
 #include "selfdrive/ui/qt/api.h"
 
+QString configured_mapbox_token() {
+  const auto env = qEnvironmentVariable("MAPBOX_TOKEN").trimmed();
+  if (!env.isEmpty()) return env;
+  Params params;
+  const auto pub = QString::fromStdString(params.get("MapboxPublicKey")).trimmed();
+  if (pub.startsWith("pk.")) return pub;
+  const auto secret = QString::fromStdString(params.get("MapboxSecretKey")).trimmed();
+  return secret.startsWith("sk.") ? secret : QString();
+}
+
 QString get_mapbox_token() {
-  // Valid for 4 weeks since we can't swap tokens on the fly
-  return MAPBOX_TOKEN.isEmpty() ? CommaApi::create_jwt({}, 4 * 7 * 24 * 3600) : MAPBOX_TOKEN;
+  const auto token = configured_mapbox_token();
+  return token.isEmpty() ? CommaApi::create_jwt({}, 4 * 7 * 24 * 3600) : token;
 }
 
 QMapLibre::Settings get_mapbox_settings() {

@@ -285,17 +285,21 @@ void CameraWidget::paintGL() {
   drawFrame(std::nullopt);
 }
 
-decltype(CameraWidget::frames)::const_reverse_iterator CameraWidget::selectFrame(std::optional<uint32_t> frame_id) const {
-  if (frame_id) {
-    auto match = std::find_if(frames.crbegin(), frames.crend(), [frame_id](const auto &frame) {
-      return frame.first == *frame_id;
-    });
-    if (match != frames.crend()) return match;
-  }
-  return frames.crbegin();
+std::pair<decltype(CameraWidget::frames)::const_reverse_iterator, bool> CameraWidget::selectFrame(std::optional<uint32_t> model_frame_id) const {
+  const auto latest = frames.crbegin();
+  if (latest == frames.crend() || !model_frame_id) return {latest, false};
+
+  // At 20 Hz, allow up to 100 ms for inference and UI polling. The camera
+  // advances with VisionIPC even when the model skips a frame or arrives late.
+  constexpr uint32_t max_overlay_frame_gap = 2;
+  const bool recent_model_frame = latest->first - *model_frame_id <= max_overlay_frame_gap &&
+      std::any_of(frames.crbegin(), frames.crend(), [model_frame_id](const auto &frame) {
+        return frame.first == *model_frame_id;
+      });
+  return {latest, recent_model_frame};
 }
 
-bool CameraWidget::drawFrame(std::optional<uint32_t> frame_id) {
+bool CameraWidget::drawFrame(std::optional<uint32_t> model_frame_id) {
   // QPainter shares this context and can leave errors from its native-painting
   // transition. Check only errors produced by our camera rendering below.
   while (glGetError() != GL_NO_ERROR) {}
@@ -303,7 +307,7 @@ bool CameraWidget::drawFrame(std::optional<uint32_t> frame_id) {
   glClear(GL_STENCIL_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
   std::lock_guard lk(frame_lock);
-  auto selected = selectFrame(frame_id);
+  auto [selected, draw_overlay] = selectFrame(model_frame_id);
   if (selected == frames.crend()) return false;
   auto [selected_id, frame] = *selected;
 
@@ -361,7 +365,7 @@ bool CameraWidget::drawFrame(std::optional<uint32_t> frame_id) {
   glActiveTexture(GL_TEXTURE0);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-  return frame_id && selected_id == *frame_id;
+  return draw_overlay;
 }
 
 void CameraWidget::vipcConnected(VisionIpcClient *vipc_client) {

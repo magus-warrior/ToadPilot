@@ -1,4 +1,5 @@
 #include "selfdrive/frogpilot/navigation/ui/navigation_settings.h"
+#include "selfdrive/ui/qt/maps/map_settings.h"
 
 void FrogPilotNavigationPanel::createMapboxKeyControl(ButtonControl *&control, const QString &label, const std::string &paramKey, const QString &prefix, FrogPilotListWidget *list) {
   control = new ButtonControl(label, "", tr("Manage your %1.").arg(label));
@@ -34,6 +35,9 @@ FrogPilotNavigationPanel::FrogPilotNavigationPanel(FrogPilotSettingsWindow *pare
   addItem(primelessLayout);
 
   FrogPilotListWidget *settingsList = new FrogPilotListWidget(this);
+  auto *destinations = new ButtonControl(tr("Destination"), tr("OPEN"), tr("Find an address or Waze pin, or choose a saved destination."), this);
+  settingsList->addItem(destinations);
+
   ipLabel = new LabelControl(tr("Manage Your Settings At"), tr("Device Offline"));
   settingsList->addItem(ipLabel);
 
@@ -141,6 +145,11 @@ FrogPilotNavigationPanel::FrogPilotNavigationPanel(FrogPilotSettingsWindow *pare
   ScrollView *instructionsPanel = new ScrollView(imageLabel, this);
   primelessLayout->addWidget(instructionsPanel);
 
+  auto *places = new MapSettings(true, this);
+  primelessLayout->addWidget(places);
+  connect(destinations, &ButtonControl::clicked, this, [this, places] { primelessLayout->setCurrentWidget(places); });
+  connect(places, &MapSettings::closeSettings, this, [this] { primelessLayout->setCurrentIndex(0); });
+
   QObject::connect(parent, &FrogPilotSettingsWindow::closeMapBoxInstructions, [this] {primelessLayout->setCurrentIndex(0);});
   QObject::connect(uiState(), &UIState::uiUpdate, this, &FrogPilotNavigationPanel::updateState);
 }
@@ -192,7 +201,7 @@ void FrogPilotNavigationPanel::updateState(const UIState &s) {
   }
 
   updateButtons();
-  updateStep();
+  if (primelessLayout->currentIndex() == 1) updateStep();
 
   parent->keepScreenOn = primelessLayout->currentIndex() == 1;
 }

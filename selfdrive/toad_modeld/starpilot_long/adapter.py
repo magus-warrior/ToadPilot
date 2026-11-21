@@ -4,7 +4,7 @@ import numpy as np
 from cereal import messaging
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
-from openpilot.selfdrive.controls.lib.longitudinal_planner import planner_required_services
+from openpilot.selfdrive.controls.lib.longitudinal_planner import get_planned_cruise_speed, planner_required_services
 from openpilot.selfdrive.frogpilot.frogpilot_variables import THRESHOLD
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 from openpilot.selfdrive.toad_modeld.starpilot_long.compat import StateView, View, vehicle_view
@@ -45,7 +45,8 @@ class StarPilotPlanner:
       disable_throttle = should_disable_far_lead_throttle(
         speed, lead.dRel, gap, max(0., speed - lead.vLead), following,
         get_far_lead_coast_headway_floor(self.core.CP))
-    plan = View(sm['frogpilotPlan'], trackingLead=tracking, dangerFactor=LEAD_DANGER_FACTOR,
+    plan = View(sm['frogpilotPlan'], vCruise=get_planned_cruise_speed(sm, self.core.CP, toggles),
+                trackingLead=tracking, dangerFactor=LEAD_DANGER_FACTOR,
                 disableThrottle=disable_throttle)
     self.state = StateView(sm, plan=plan)
     # The legacy selector labels only v7 as tinygrad. Registered on-device
@@ -76,8 +77,8 @@ class StarPilotPlanner:
     output.longitudinalPlanSource = core.mpc.source
     output.fcw = core.fcw
     output.aTarget = float(core.output_a_target)
-    force_handoff = (sm['frogpilotPlan'].forcingStop and
-                     (sm['frogpilotPlan'].forcingStopLength < 1. or sm['frogpilotPlan'].vCruise <= FORCE_STOP_HANDOFF_MAX_VCRUISE))
+    plan = self.state['starpilotPlan']
+    force_handoff = plan.forcingStop and (plan.forcingStopLength < 1. or plan.vCruise <= FORCE_STOP_HANDOFF_MAX_VCRUISE)
     output.shouldStop = bool(core.output_should_stop or force_handoff)
     output.allowBrake = True
     output.allowThrottle = core.allow_throttle
