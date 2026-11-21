@@ -6,6 +6,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.longitudinal_planner import get_planned_cruise_speed, planner_required_services
 from openpilot.selfdrive.frogpilot.frogpilot_variables import THRESHOLD
+from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.toad_modeld.artifact import is_modern_model
 from openpilot.selfdrive.toad_modeld.starpilot_long.compat import StateView, View, vehicle_view
 from openpilot.selfdrive.toad_modeld.starpilot_long.lead_behavior import should_disable_far_lead_throttle
@@ -53,8 +54,35 @@ class StarPilotPlanner:
     # models also publish action commands, which the pinned planner requires
     # this flag to consume. Keep the override local to this adapter.
     planner_toggles = View(toggles, tinygrad_model=True) if is_modern_model(toggles) else toggles
+    previous_target = self.core.output_a_target
     self.core.update(self.state, planner_toggles)
+    if experimental and sm['frogpilotPlan'].redLight and sm['carControl'].longActive:
+      self.core.output_a_target = self.stop_approach_target(sm, previous_target)
     self.a_desired_trajectory_full = self.core.a_desired_trajectory.copy()
+
+  def stop_approach_target(self, sm, previous_target):
+    target = self.core.output_a_target
+    cs, model, radar = sm['carState'], sm['modelV2'], sm['radarState']
+    if (not cs.canValid or cs.gearShifter != 'drive' or cs.gasPressed or cs.brakePressed or
+        cs.leftBlinker or cs.rightBlinker or not abs(cs.steeringAngleDeg) < 30. or
+        radar.leadOne.status or radar.leadTwo.status or not model.action.longitudinalValid or
+        not model.action.desiredAcceleration < -.15 or not 1.5 < cs.vEgo <= 12. or
+        not sm.all_checks(service_list=planner_required_services(True, False))):
+      return target
+
+    x, v = model.position.x, model.velocity.x
+    if len(x) != ModelConstants.IDX_N or len(v) != ModelConstants.IDX_N or not 0. < x[-1] <= 40.:
+      return target
+    if not all(-.3 <= v[i] <= .3 for i in range(len(v) - 3, len(v))):
+      return target
+
+    # The endpoint is the model's predicted stop. Aim to have shed most speed
+    # before the final 9 m, where a near-side marking may first become visible.
+    # The normal stopping and hold logic still owns the last 1.5 m/s.
+    decel = (cs.vEgo ** 2 - 1.5 ** 2) / (2. * max(.5, x[-1] - 9.))
+    approach_target = max(-decel, -1.8, sm['frogpilotPlan'].minAcceleration,
+                          previous_target - 1.5 * DT_MDL)
+    return min(target, approach_target)
 
   def publish(self, classic_model, radarless_model, sm, pm, toggles):
     if classic_model or radarless_model:

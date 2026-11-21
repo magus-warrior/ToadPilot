@@ -7,6 +7,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_UNSET
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 from openpilot.selfdrive.toad_modeld.starpilot_controls.compat import (
   CEStatus,
@@ -22,6 +23,21 @@ def interp(x, xp, fp):
 def scale_threshold(v_ego):
   # Speed-based lead threshold behavior (v_ego in m/s)
   return interp(v_ego, [0.0, 17.9, 26.8, 35.8, 44.7], [0.58, 0.60, 0.62, 0.75, 0.90])
+
+
+def predicts_rolling_recovery(model):
+  if model.action.shouldStop or not model.action.longitudinalValid:
+    return False
+  velocities = model.velocity.x
+  if len(velocities) != ModelConstants.IDX_N:
+    return False
+  speeds = np.asarray(velocities)
+  if not np.isfinite(speeds).all():
+    return False
+  slowest = float(speeds.min())
+  # A slowdown followed by sustained acceleration can shorten a ten-second
+  # path substantially even while the car is predicted to keep moving.
+  return slowest >= 2. and speeds[0] >= slowest + 1.5 and min(speeds[-3:]) >= slowest + 1.5
 
 
 class ConditionalExperimentalMode:
@@ -556,7 +572,6 @@ class ConditionalExperimentalMode:
         model_stopping = self.starpilot_planner.model_length < stop_threshold + self.STOP_LIGHT_OFF_MARGIN
       else:
         model_stopping = self.starpilot_planner.model_length < max(stop_threshold - self.STOP_LIGHT_ON_MARGIN, 0.0)
-      self.stop_light_model_detected = model_stopping
 
       # `model_stopped` is a coarse horizon-length check (< 50 m with current constants)
       # used elsewhere for force-stop/green-light behavior. Reusing it here causes
@@ -573,6 +588,10 @@ class ConditionalExperimentalMode:
       lead_prob = float(getattr(lead, "modelProb", 1.0 if lead_radar else 0.0))
       tracking_lead = bool(self.starpilot_planner.tracking_lead)
       lead_relevant = bool(getattr(lead, "status", False)) and lead_distance < stop_threshold + self.STOP_LIGHT_LEAD_BLOCK_MARGIN
+      if (model_stopping and not self.stop_light_detected and not lead_relevant and
+          not sm["carState"].standstill and predicts_rolling_recovery(sm["modelV2"])):
+        model_stopping = False
+      self.stop_light_model_detected = model_stopping
       try:
         model_accel = float(sm["modelV2"].action.desiredAcceleration)
       except (KeyError, AttributeError, TypeError):

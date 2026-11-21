@@ -266,3 +266,28 @@ def test_speed_limit_toggle_releases_and_restores_active_cruise_cap(tmp_path, sh
   assert update(ctx,parent,sm,toggles,nav,15.,100.05).vCruise==pytest.approx(30.)
   toggles.speed_limit_controller=True
   assert update(ctx,parent,sm,toggles,nav,15.,100.10).vCruise==pytest.approx(12.)
+
+
+def test_confirmed_stop_approach_respects_brake_limits_and_releases(tmp_path):
+  _, _, planner, sm, _, _ = controls_setup(tmp_path, speed=7., force=False)
+  cs, model, plan = sm['carState'], sm['modelV2'], sm['frogpilotPlan']
+  cs.gearShifter, cs.canValid = 'drive', True
+  times = np.asarray(ModelConstants.T_IDXS)
+  elapsed = np.minimum(times, 6.)
+  model.position.x = (7.*elapsed - 7./12.*elapsed**2).tolist()
+  model.velocity.x = np.maximum(0., 7. - 7./6.*times).tolist()
+  model.action.desiredAcceleration = -.5
+  plan.minAcceleration = -1.2
+  planner.core.output_a_target = -.2
+  assert planner.stop_approach_target(sm, -.2) == pytest.approx(-.275)
+  assert planner.stop_approach_target(sm, -1.8) == pytest.approx(-1.2)
+  planner.core.output_a_target = -2.5
+  assert planner.stop_approach_target(sm, -.2) == -2.5
+  planner.core.output_a_target = -.2
+  for signal, field in ((cs, 'brakePressed'), (cs, 'gasPressed'), (cs, 'leftBlinker'), (cs, 'rightBlinker'),
+                        (sm['radarState'].leadOne, 'status'), (sm['radarState'].leadTwo, 'status')):
+    setattr(signal, field, True)
+    assert planner.stop_approach_target(sm, -1.8) == -.2
+    setattr(signal, field, False)
+  model.velocity.x = [7.] * 33
+  assert planner.stop_approach_target(sm, -1.8) == -.2
