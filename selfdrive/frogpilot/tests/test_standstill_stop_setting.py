@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from openpilot.selfdrive.frogpilot.tests.test_starpilot_controls import controls_setup, update
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.toad_modeld.artifact import MODELS
 
 @pytest.mark.parametrize("seconds,sign,expected", [(0,False,False),(9,False,True),(0,True,True)])
 def test_standstill_obeys_predicted_stop_setting(tmp_path, seconds, sign, expected):
@@ -27,5 +28,23 @@ def test_moving_short_path_distinguishes_recovery_from_stop(tmp_path, forecast, 
   model.action.desiredAcceleration = -.8
   for frame in range(80):
     update(ctx, parent, sm, toggles, nav, 8., 100. + frame * .05)
+  assert ctx.starpilot_cem.stop_light_detected is expected
+  assert ctx.starpilot_cem.experimental_mode is expected
+
+
+@pytest.mark.parametrize("explicit_stop,expected", [(False, False), (True, True)])
+def test_highway_slowdown_that_levels_off(tmp_path, explicit_stop, expected):
+  ctx, parent, _, sm, toggles, nav = controls_setup(tmp_path, speed=21.6, force=False)
+  toggles.model = "toad-south-carolina"
+  toggles.model_version = MODELS[toggles.model]["version"]
+  t = np.asarray(ModelConstants.T_IDXS)
+  v = np.interp(t, [0., 5., 10.], [21.6, 16.7, 16.7])
+  model = sm["modelV2"]
+  model.velocity.x = v.tolist()
+  model.position.x = np.r_[0., np.cumsum(np.diff(t) * (v[1:] + v[:-1]) / 2.)].tolist()
+  model.action.desiredAcceleration = -.7
+  model.action.shouldStop = explicit_stop
+  for frame in range(80):
+    update(ctx, parent, sm, toggles, nav, 21.6, 100. + frame * .05)
   assert ctx.starpilot_cem.stop_light_detected is expected
   assert ctx.starpilot_cem.experimental_mode is expected

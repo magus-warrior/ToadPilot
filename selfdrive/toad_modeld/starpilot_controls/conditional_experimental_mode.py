@@ -25,7 +25,7 @@ def scale_threshold(v_ego):
   return interp(v_ego, [0.0, 17.9, 26.8, 35.8, 44.7], [0.58, 0.60, 0.62, 0.75, 0.90])
 
 
-def predicts_rolling_recovery(model):
+def predicts_continued_motion(model):
   if model.action.shouldStop or not model.action.longitudinalValid:
     return False
   velocities = model.velocity.x
@@ -37,7 +37,22 @@ def predicts_rolling_recovery(model):
   slowest = float(speeds.min())
   # A slowdown followed by sustained acceleration can shorten a ten-second
   # path substantially even while the car is predicted to keep moving.
-  return slowest >= 2. and speeds[0] >= slowest + 1.5 and min(speeds[-3:]) >= slowest + 1.5
+  if slowest < 2.:
+    return False
+  if speeds[0] >= slowest + 1.5 and min(speeds[-3:]) >= slowest + 1.5:
+    return True
+
+  # A slowdown can also settle at a lower cruising speed. Require both heads
+  # to predict continued travel over the final two seconds of the horizon.
+  tail = slice(-5, None)  # 7.66 to 10 seconds.
+  positions = model.position.x
+  if len(positions) != ModelConstants.IDX_N:
+    return False
+  tail_speeds = speeds[tail]
+  if min(tail_speeds) < max(4., .5 * speeds[0]) or np.ptp(tail_speeds) > .5:
+    return False
+  interval_speeds = np.diff(np.asarray(positions)[tail]) / np.diff(ModelConstants.T_IDXS[tail])
+  return bool(np.all(np.isfinite(interval_speeds)) and np.all(interval_speeds >= 4.))
 
 
 class ConditionalExperimentalMode:
@@ -589,7 +604,7 @@ class ConditionalExperimentalMode:
       tracking_lead = bool(self.starpilot_planner.tracking_lead)
       lead_relevant = bool(getattr(lead, "status", False)) and lead_distance < stop_threshold + self.STOP_LIGHT_LEAD_BLOCK_MARGIN
       if (model_stopping and not self.stop_light_detected and not lead_relevant and
-          not sm["carState"].standstill and predicts_rolling_recovery(sm["modelV2"])):
+          not sm["carState"].standstill and predicts_continued_motion(sm["modelV2"])):
         model_stopping = False
       self.stop_light_model_detected = model_stopping
       try:
